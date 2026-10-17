@@ -10,7 +10,8 @@
 |------|------|
 | `src/` | 完整源码，基线为 larryli/PuTTY master（commit `7ddf3ae`，版本 0.85），含本项目的界面改造 |
 | `dist/` | 编译产物 `putty.exe` |
-| `docs/` | 汉化过程、功能测试与各轮改造记录 |
+| `docs/` | 汉化过程、功能测试与各轮改造记录；`docs/screenshots/` 为报告引用的界面截图 |
+| `backup/` | 改造前的原版/旧版 exe 与注册表默认设置备份 |
 | `tests/` | 本机回环 SSH 测试脚本（Node.js ssh2） |
 
 源码基线不含上游 git 历史（初始导入为快照）。需要比对上游更新时，clone [larryli/PuTTY](https://github.com/larryli/PuTTY) 后用 `diff -r` 对照。
