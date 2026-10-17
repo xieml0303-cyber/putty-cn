@@ -4,6 +4,29 @@
 
 > 这不是 PuTTY 官方构建，与 Simon Tatham 及 PuTTY 官方项目无关。官方 PuTTY 从未提供中文界面。
 
+## 仓库结构
+
+| 目录 | 内容 |
+|------|------|
+| `src/` | 完整源码，基线为 larryli/PuTTY master（commit `7ddf3ae`，版本 0.85），含本项目的界面改造 |
+| `dist/` | 编译产物 `putty.exe` |
+| `docs/` | 汉化过程、功能测试与各轮改造记录 |
+| `tests/` | 本机回环 SSH 测试脚本（Node.js ssh2） |
+
+源码基线不含上游 git 历史（初始导入为快照）。需要比对上游更新时，clone [larryli/PuTTY](https://github.com/larryli/PuTTY) 后用 `diff -r` 对照。
+
+### 相对上游的改动
+
+| 文件 | 改动 |
+|------|------|
+| `config.c` | 会话页改版：历史连接记录列表、「打开(L)」按钮、保存提示弹窗、串口下拉框、会话列表高度与滚动条、「退出时关闭窗口」固定显示「从不」 |
+| `windows/config.c` | 删除「关于/帮助」按钮，调整底部按钮布局 |
+| `windows/controls.c` | 新增 `dlg_info_msg()` 信息弹窗接口 |
+| `windows/storage.c` | 历史连接记录读写（注册表 `RecentHosts`）、本机串口枚举 |
+| `unix/storage.c`、`unix/dialog.c` | 对应接口的非 Windows 实现 |
+| `storage.h`、`dialog.h` | 新增接口声明 |
+| `conf.h`、`be_list.c` | 默认连接方式与串口默认参数（华为/华三 Console 标准） |
+
 ## 下载
 
 直接使用仓库中的 [`dist/putty.exe`](dist/putty.exe)（1,836,539 字节，64 位，免安装）。
@@ -61,13 +84,12 @@ PuTTY 不会自动保存设置。改完参数后需要点窗口右下角的「�
 ```bash
 # MSYS2（MinGW-w64 环境）中
 pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-make perl
-git clone https://github.com/larryli/PuTTY.git
-cd PuTTY
+cd src
 cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -B build
 cmake --build build --target putty -j
 ```
 
-本仓库中的二进制即由上述流程产出（gcc 16.2.0 / cmake 4.4.4 / ninja，288 个目标全部成功）。
+产物为 `src/build/putty.exe`，复制到 `dist/` 即可发布。本仓库中的二进制即由上述流程产出（gcc 16.2.0 / cmake 4.4.4 / ninja，288 个目标全部成功）。
 
 ## 复现测试
 

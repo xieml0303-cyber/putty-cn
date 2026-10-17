@@ -16,3 +16,6 @@ tests/.mimosa/
 # 构建产物（dist/putty.exe 例外，见下）
 *.o
 build/
+
+# Mimosa 扫描器会话状态
+.mimosa/
