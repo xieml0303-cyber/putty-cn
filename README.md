@@ -29,7 +29,7 @@
 
 ## 下载
 
-直接使用仓库中的 [`dist/putty.exe`](dist/putty.exe)（1,836,539 字节，64 位，免安装）。
+直接使用仓库中的 [`dist/putty.exe`](dist/putty.exe)（1,840,077 字节，64 位，免安装）。
 
 - 仅依赖系统 DLL（ADVAPI32、GDI32、IMM32、KERNEL32、SHELL32、USER32、comdlg32、msvcrt、ole32），无需 MinGW 运行库。
 - 启动后窗口标题为「PuTTY 配置」（英文版为 "PuTTY Configuration"）。
