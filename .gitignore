@@ -1,0 +1,18 @@
+# 测试运行产生的敏感/临时文件
+tests/node_modules/
+tests/package-lock.json
+tests/fingerprint.txt
+tests/host_ed25519.pem
+tests/host_ed25519.pub
+tests/id_ed25519
+tests/id_ed25519.ppk
+tests/id_rsa
+tests/id_rsa_pem
+tests/authorized_keys
+tests/log-*.txt
+tests/cmd.txt
+tests/.mimosa/
+
+# 构建产物（dist/putty.exe 例外，见下）
+*.o
+build/
