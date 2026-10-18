@@ -345,6 +345,23 @@ void dlg_editbox_set(dlgcontrol *ctrl, dlgparam *dp, char const *text)
     dlg_editbox_set_utf8(ctrl, dp, text);
 }
 
+void dlg_editbox_set_readonly(dlgcontrol *ctrl, dlgparam *dp, bool readonly)
+{
+    struct uctrl *uc = dlg_find_byctrl(dp, ctrl);
+    GtkWidget *entry;
+    assert(uc->ctrl->type == CTRL_EDITBOX);
+
+#if GTK_CHECK_VERSION(2,4,0)
+    if (uc->combo)
+        entry = gtk_bin_get_child(GTK_BIN(uc->combo));
+    else
+#endif
+        entry = uc->entry;
+
+    assert(entry != NULL);
+    gtk_editable_set_editable(GTK_EDITABLE(entry), !readonly);
+}
+
 char *dlg_editbox_get_utf8(dlgcontrol *ctrl, dlgparam *dp)
 {
     struct uctrl *uc = dlg_find_byctrl(dp, ctrl);

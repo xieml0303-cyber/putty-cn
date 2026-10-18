@@ -482,7 +482,7 @@ struct dlgparam {
     char *errtitle;                    /* title of error sub-messageboxes */
     void *data;                        /* data to pass in refresh events */
     dlgcontrol *focused, *lastfocused; /* which ctrl has focus now/before */
-    bool shortcuts[128];               /* track which shortcuts in use */
+    unsigned char shortcuts[128];      /* how many controls claim each shortcut */
     bool coloursel_wanted;             /* has an event handler asked for
                                         * a colour selector? */
     struct {

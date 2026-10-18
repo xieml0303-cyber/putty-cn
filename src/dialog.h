@@ -566,6 +566,12 @@ char *dlg_editbox_get(dlgcontrol *ctrl, dlgparam *dp);   /* result must be freed
 char *dlg_editbox_get_utf8(dlgcontrol *ctrl, dlgparam *dp);   /* result must be freed by caller */
 void dlg_editbox_select_range(dlgcontrol *ctrl, dlgparam *dp,
                               size_t start, size_t len);
+/*
+ * Make an edit box read-only, or restore it. For a combo box this
+ * only affects the typing area: the drop-down list can still be used
+ * to pick a value.
+ */
+void dlg_editbox_set_readonly(dlgcontrol *ctrl, dlgparam *dp, bool readonly);
 /* The `listbox' functions can also apply to combo boxes. */
 void dlg_listbox_clear(dlgcontrol *ctrl, dlgparam *dp);
 void dlg_listbox_del(dlgcontrol *ctrl, dlgparam *dp, int index);

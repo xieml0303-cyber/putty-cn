@@ -144,14 +144,14 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
                       I(CONF_beep_ind),
                       "禁用", I(B_IND_DISABLED),
                       "闪烁", I(B_IND_FLASH),
-                      "反显", I(B_IND_STEADY));
+                      "常亮", I(B_IND_STEADY));
 
     /*
      * The sunken-edge border is a Windows GUI feature.
      */
     s = ctrl_getset(b, "窗口/外观", "border",
                     "调整窗口边框");
-    ctrl_checkbox(s, "下沉边框(细瘦外观)(S)", 's',
+    ctrl_checkbox(s, "下沉边框（略厚）(S)", 's',
                   HELPCTX(appearance_border),
                   conf_checkbox_handler, I(CONF_sunken_edge));
 
@@ -197,7 +197,7 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
      * additional options when working with line-drawing
      * characters.
      */
-    str = dupprintf("调整 %s 重绘文本字符行", appname);
+    str = dupprintf("调整 %s 绘制线条字符", appname);
     s = ctrl_getset(b, "窗口/转换", "linedraw", str);
     sfree(str);
     {
@@ -242,8 +242,8 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
      * RTF paste is Windows-specific.
      */
     s = ctrl_getset(b, "窗口/选择/复制", "format",
-                    "格式化要传送的字符");
-    ctrl_checkbox(s, "粘贴 RTF 文本到剪贴板", 'f',
+                    "复制字符的格式");
+    ctrl_checkbox(s, "以 RTF 和纯文本格式复制到剪贴板(F)", 'f',
                   HELPCTX(copy_rtf),
                   conf_checkbox_handler, I(CONF_rtf_paste));
 

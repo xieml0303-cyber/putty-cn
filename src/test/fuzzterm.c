@@ -138,6 +138,8 @@ int dlg_radiobutton_get(dlgcontrol *ctrl, dlgparam *dp) { return 0; }
 void dlg_checkbox_set(dlgcontrol *ctrl, dlgparam *dp, bool checked) { }
 bool dlg_checkbox_get(dlgcontrol *ctrl, dlgparam *dp) { return false; }
 void dlg_editbox_set(dlgcontrol *ctrl, dlgparam *dp, char const *text) { }
+void dlg_editbox_set_readonly(dlgcontrol *ctrl, dlgparam *dp,
+                              bool readonly) { }
 char *dlg_editbox_get(dlgcontrol *ctrl, dlgparam *dp)
 { return dupstr("moo"); }
 void dlg_listbox_clear(dlgcontrol *ctrl, dlgparam *dp) { }

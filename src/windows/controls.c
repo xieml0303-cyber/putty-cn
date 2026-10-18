@@ -1233,8 +1233,16 @@ void winctrl_add_shortcuts(struct dlgparam *dp, struct winctrl *c)
     for (i = 0; i < lenof(c->shortcuts); i++)
         if (c->shortcuts[i] != NO_SHORTCUT) {
             unsigned char s = tolower((unsigned char)c->shortcuts[i]);
-            assert(!dp->shortcuts[s]);
-            dp->shortcuts[s] = true;
+            /*
+             * The dialog holds the controls of every panel at once,
+             * even though only one panel is visible, and the Chinese
+             * labels reuse letters across panels. Count the claims
+             * instead of requiring uniqueness, so a duplicate is
+             * harmless and removing one panel's control does not
+             * clear the letter for another panel's.
+             */
+            if (dp->shortcuts[s] < 255)
+                dp->shortcuts[s]++;
         }
 }
 
@@ -1244,8 +1252,8 @@ void winctrl_rem_shortcuts(struct dlgparam *dp, struct winctrl *c)
     for (i = 0; i < lenof(c->shortcuts); i++)
         if (c->shortcuts[i] != NO_SHORTCUT) {
             unsigned char s = tolower((unsigned char)c->shortcuts[i]);
-            assert(dp->shortcuts[s]);
-            dp->shortcuts[s] = false;
+            if (dp->shortcuts[s])
+                dp->shortcuts[s]--;
         }
 }
 
@@ -1871,9 +1879,28 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
         HDC hdc = di->hDC;
         RECT r = di->rcItem;
         SIZE s;
+        HBRUSH bg;
+        HFONT oldfont, boldfont = NULL;
+        LOGFONT lf;
 
         SetMapMode(hdc, MM_TEXT);      /* ensure logical units == pixels */
 
+        /* 灰底标题条 */
+        bg = CreateSolidBrush(RGB(96, 96, 96));
+        FillRect(hdc, &r, bg);
+        DeleteObject(bg);
+
+        /* 由当前字体派生加粗版本，避免硬编码字号 */
+        oldfont = (HFONT)GetCurrentObject(hdc, OBJ_FONT);
+        if (oldfont && GetObject(oldfont, sizeof(lf), &lf)) {
+            lf.lfWeight = FW_BOLD;
+            boldfont = CreateFontIndirect(&lf);
+            if (boldfont)
+                SelectObject(hdc, boldfont);
+        }
+
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, RGB(255, 255, 255));
         GetTextExtentPoint32(hdc, (char *)c->data,
                              strlen((char *)c->data), &s);
         DrawEdge(hdc, &r, EDGE_ETCHED, BF_ADJUST | BF_RECT);
@@ -1881,6 +1908,11 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
                 r.left + (r.right-r.left-s.cx)/2,
                 r.top + (r.bottom-r.top-s.cy)/2,
                 (char *)c->data, strlen((char *)c->data));
+
+        if (boldfont) {
+            SelectObject(hdc, oldfont);
+            DeleteObject(boldfont);
+        }
 
         return true;
     }
@@ -2261,6 +2293,52 @@ void dlg_editbox_select_range(dlgcontrol *ctrl, dlgparam *dp,
     SendDlgItemMessage(dp->hwnd, c->base_id+1, EM_SETSEL, start, start+len);
 }
 
+/*
+ * Subclass for the EDIT child of a combo box. When the EDIT is
+ * read-only, a click on the typing area would otherwise just place
+ * the caret and do nothing, which makes the control feel dead
+ * everywhere except the drop-down arrow. Forwarding the click to the
+ * combo box as a request to open the list makes the whole control
+ * behave like the arrow.
+ */
+static LRESULT CALLBACK readonly_combo_edit_subclass(
+    HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+    UINT_PTR subclass_id, DWORD_PTR ref_data)
+{
+    LRESULT ret = DefSubclassProc(hwnd, msg, wParam, lParam);
+
+    if (msg == WM_LBUTTONDOWN &&
+        (GetWindowLongPtrW(hwnd, GWL_STYLE) & ES_READONLY))
+        SendMessageW(GetParent(hwnd), CB_SHOWDROPDOWN, TRUE, 0);
+
+    return ret;
+}
+
+void dlg_editbox_set_readonly(dlgcontrol *ctrl, dlgparam *dp, bool readonly)
+{
+    struct winctrl *c = dlg_findbyctrl(dp, ctrl);
+    assert(c && c->ctrl->type == CTRL_EDITBOX);
+
+    HWND wnd = GetDlgItem(dp->hwnd, c->base_id+1);
+    HWND target = wnd;
+
+    if (c->ctrl->editbox.has_list) {
+        /*
+         * A combo box is not itself an EDIT control; the typing area
+         * is a child EDIT window, and EM_SETREADONLY sent to the
+         * combo box does nothing. A non-editable combo box
+         * (CBS_DROPDOWNLIST) has no such child, in which case there
+         * is nothing to do.
+         */
+        target = FindWindowEx(wnd, NULL, "EDIT", NULL);
+    }
+    if (target) {
+        SendMessage(target, EM_SETREADONLY, readonly ? TRUE : FALSE, 0);
+        if (readonly && c->ctrl->editbox.has_list)
+            SetWindowSubclass(target, readonly_combo_edit_subclass, 1, 0);
+    }
+}
+
 /* The `listbox' functions can also apply to combo boxes. */
 void dlg_listbox_clear(dlgcontrol *ctrl, dlgparam *dp)
 {
@@ -2369,9 +2447,13 @@ void dlg_listbox_select(dlgcontrol *ctrl, dlgparam *dp, int index)
 {
     struct winctrl *c = dlg_findbyctrl(dp, ctrl);
     int msg;
-    assert(c && c->ctrl->type == CTRL_LISTBOX &&
-           !c->ctrl->listbox.multisel);
-    msg = (c->ctrl->listbox.height != 0 ? LB_SETCURSEL : CB_SETCURSEL);
+    assert(c &&
+           (c->ctrl->type == CTRL_LISTBOX ||
+            (c->ctrl->type == CTRL_EDITBOX &&
+             c->ctrl->editbox.has_list)) &&
+           !(c->ctrl->type == CTRL_LISTBOX && c->ctrl->listbox.multisel));
+    msg = (c->ctrl->type == CTRL_LISTBOX && c->ctrl->listbox.height != 0 ?
+           LB_SETCURSEL : CB_SETCURSEL);
     SendDlgItemMessage(dp->hwnd, c->base_id+1, msg, index, 0);
 }
 

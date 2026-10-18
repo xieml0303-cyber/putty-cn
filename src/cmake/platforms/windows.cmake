@@ -174,7 +174,7 @@ if(CMAKE_C_COMPILER_FRONTEND_VARIANT MATCHES "MSVC")
 endif()
 
 set(platform_libraries
-  advapi32.lib comdlg32.lib gdi32.lib imm32.lib
+  advapi32.lib comctl32.lib comdlg32.lib gdi32.lib imm32.lib
   ole32.lib shell32.lib user32.lib ws2_32.lib kernel32.lib)
 
 # Generate link maps

@@ -11,9 +11,9 @@
 #include "storage.h"
 #include "tree234.h"
 
-#define PRINTER_DISABLED_STRING "无 (禁止打印)"
+#define PRINTER_DISABLED_STRING "无（禁止打印）"
 
-#define HOST_BOX_TITLE "主机名称 (或 IP 地址)(N)"
+#define HOST_BOX_TITLE "主机名称（或 IP 地址）(N)"
 #define PORT_BOX_TITLE "端口(P)"
 
 void conf_radiobutton_handler(dlgcontrol *ctrl, dlgparam *dlg,
@@ -201,7 +201,7 @@ static void fill_serial_port_list(dlgcontrol *ctrl, dlgparam *dlg,
 {
     char *saved = current ? dupstr(current) : NULL;
     char **ports;
-    int nports, i;
+    int nports, i, selected = -1;
     bool present = false;
 
     dlg_update_start(ctrl, dlg);
@@ -209,33 +209,28 @@ static void fill_serial_port_list(dlgcontrol *ctrl, dlgparam *dlg,
     ports = get_serial_ports(&nports);
     for (i = 0; i < nports; i++) {
         dlg_listbox_add(ctrl, dlg, ports[i]);
-        if (saved && !strcmp(saved, ports[i]))
+        if (saved && !strcmp(saved, ports[i])) {
             present = true;
+            selected = i;
+        }
     }
     if (!present && nports > 0) {
         sfree(saved);
         saved = dupstr(ports[0]);
         conf_set_str(conf, CONF_serline, saved);
+        selected = 0;
     }
     free_serial_ports(ports, nports);
+    /*
+     * Highlight the port we're actually using, so that opening the
+     * drop-down shows which entry is selected. This also puts the
+     * text in the typing area, which is why it comes first.
+     */
+    if (selected >= 0)
+        dlg_listbox_select(ctrl, dlg, selected);
     dlg_editbox_set(ctrl, dlg, saved ? saved : "");
     dlg_update_done(ctrl, dlg);
     sfree(saved);
-}
-
-static void serial_line_handler(dlgcontrol *ctrl, dlgparam *dlg,
-                                void *data, int event)
-{
-    Conf *conf = (Conf *)data;
-
-    if (event == EVENT_REFRESH) {
-        fill_serial_port_list(ctrl, dlg, conf,
-                              conf_get_str(conf, CONF_serline));
-    } else if (event == EVENT_VALCHANGE) {
-        char *s = dlg_editbox_get(ctrl, dlg);
-        conf_set_str(conf, CONF_serline, s);
-        sfree(s);
-    }
 }
 
 static void config_host_handler(dlgcontrol *ctrl, dlgparam *dlg,
@@ -249,12 +244,23 @@ static void config_host_handler(dlgcontrol *ctrl, dlgparam *dlg,
      * different places depending on the protocol.
      */
     if (event == EVENT_REFRESH) {
-        if (conf_get_int(conf, CONF_protocol) == PROT_SERIAL) {
+        bool serial = (conf_get_int(conf, CONF_protocol) == PROT_SERIAL);
+
+        /*
+         * In serial mode this control is a port picker, not a text
+         * field, so forbid typing into it; the drop-down list is the
+         * only way to choose a port. The same control doubles as the
+         * host name box for the network protocols, where typing must
+         * of course still work.
+         */
+        dlg_editbox_set_readonly(ctrl, dlg, serial);
+
+        if (serial) {
             /*
              * This label text is carefully chosen to contain an n,
              * since that's the shortcut for the host name control.
              */
-            dlg_label_change(ctrl, dlg, "串行口(N)");
+            dlg_label_change(ctrl, dlg, "串口(N)");
             fill_serial_port_list(ctrl, dlg, conf,
                                   conf_get_str(conf, CONF_serline));
         } else {
@@ -291,7 +297,7 @@ static void config_port_handler(dlgcontrol *ctrl, dlgparam *dlg,
              * This label text is carefully chosen to contain a p,
              * since that's the shortcut for the port control.
              */
-            dlg_label_change(ctrl, dlg, "速度(P)");
+            dlg_label_change(ctrl, dlg, "波特率(P)");
             sprintf(buf, "%d", conf_get_int(conf, CONF_serspeed));
         } else {
             dlg_label_change(ctrl, dlg, PORT_BOX_TITLE);
@@ -977,7 +983,7 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                 add_recent_host(conf_get_str(conf, CONF_host));
                 dlg_end(dlg, 1);
             } else
-                dlg_info_msg(dlg, "请先输入主机名称（或IP地址），"
+                dlg_info_msg(dlg, "请先输入主机名称（或 IP 地址），"
                              "或从历史连接记录中选择一项。");
         } else if (ctrl == ssd->cancelbutton) {
             dlg_end(dlg, 0);
@@ -1382,7 +1388,7 @@ static void portfwd_handler(dlgcontrol *ctrl, dlgparam *dlg,
 
             src = dlg_editbox_get(pfd->sourcebox, dlg);
             if (!*src) {
-                dlg_error_msg(dlg, "需要指定一个来源端口数字");
+                dlg_error_msg(dlg, "必须指定源端口号");
                 sfree(src);
                 return;
             }
@@ -1390,8 +1396,7 @@ static void portfwd_handler(dlgcontrol *ctrl, dlgparam *dlg,
                 val = dlg_editbox_get(pfd->destbox, dlg);
                 if (!*val || !host_strchr(val, ':')) {
                     dlg_error_msg(dlg,
-                                  "需要在表单指定一个目标地址\n"
-                                  "如 \"host.name:port\"");
+                                  "目标地址需按 host.name:port 格式填写");
                     sfree(src);
                     sfree(val);
                     return;
@@ -1499,14 +1504,13 @@ static void manual_hostkey_handler(dlgcontrol *ctrl, dlgparam *dlg,
 
             key = dlg_editbox_get(mh->keybox, dlg);
             if (!*key) {
-                dlg_error_msg(dlg, "需要指定一个主机密钥或"
-                              "指纹");
+                dlg_error_msg(dlg, "必须指定主机密钥或指纹");
                 sfree(key);
                 return;
             }
 
             if (!validate_manual_hostkey(key)) {
-                dlg_error_msg(dlg, "主机密钥不是一个有效的格式");
+                dlg_error_msg(dlg, "主机密钥格式无效");
             } else if (conf_get_str_str_opt(conf, CONF_ssh_manual_hostkeys,
                                             key)) {
                 dlg_error_msg(dlg, "指定的主机密钥已存在");
@@ -1744,6 +1748,147 @@ static void serial_flow_handler(dlgcontrol *ctrl, dlgparam *dlg,
     }
 }
 
+/*
+ * 常见厂商的控制台串口参数。企业网络设备（华为、华三、思科、锐捷、
+ * 中兴、Juniper、Aruba）基本清一色 9600-8-N-1 且无流控；MikroTik、
+ * Ubiquiti 和服务器 BMC 走 115200-8-N-1；老式设备还有 7-E-1 的组合。
+ * 选一个标准就把下面五项参数一次性填好，省得逐项手改。
+ *
+ * CONF_serstopbits 以半个位为单位，所以 1 个停止位记作 2。
+ */
+struct serial_standard {
+    const char *name;
+    int speed, databits, stopbits, parity, flow;
+};
+
+static const struct serial_standard serial_standards[] = {
+    {"华为/华三",     9600, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
+    {"思科",          9600, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
+    {"锐捷",          9600, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
+    {"中兴",          9600, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
+    {"Juniper",       9600, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
+    {"Aruba/HPE",     9600, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
+    {"MikroTik",    115200, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
+    {"Ubiquiti",    115200, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
+    {"服务器BMC",   115200, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
+    {"工业设备",     19200, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
+    {"老式设备",      9600, 7, 2, SER_PAR_EVEN, SER_FLOW_NONE},
+};
+
+#define NSERIAL_STANDARDS lenof(serial_standards)
+
+/* 串口页上需要联动的控件，构建面板时填入。 */
+static struct {
+    dlgcontrol *standard, *speed, *databits, *stopbits, *parity, *flow;
+} serial_ui;
+
+/* 用户上一次选中的标准，用来区分参数完全相同的厂商条目。 */
+static int serial_standard_last = -1;
+
+static bool serial_standard_equals(int idx, Conf *conf)
+{
+    const struct serial_standard *std = &serial_standards[idx];
+
+    return std->speed == conf_get_int(conf, CONF_serspeed) &&
+        std->databits == conf_get_int(conf, CONF_serdatabits) &&
+        std->stopbits == conf_get_int(conf, CONF_serstopbits) &&
+        std->parity == conf_get_int(conf, CONF_serparity) &&
+        std->flow == conf_get_int(conf, CONF_serflow);
+}
+
+static int serial_standard_match(Conf *conf)
+{
+    int i;
+
+    for (i = 0; i < NSERIAL_STANDARDS; i++)
+        if (serial_standard_equals(i, conf))
+            return i;
+    return -1;
+}
+
+/* 参数被手工改动后，让标准下拉重新对上号（对不上就显示“自定义”）。 */
+static void serial_standard_sync(dlgparam *dlg)
+{
+    if (serial_ui.standard)
+        dlg_refresh(serial_ui.standard, dlg);
+}
+
+static void serial_standard_handler(dlgcontrol *ctrl, dlgparam *dlg,
+                                    void *data, int event)
+{
+    Conf *conf = (Conf *)data;
+    int i;
+
+    if (event == EVENT_REFRESH) {
+        int selected;
+
+        if (serial_standard_last >= 0 &&
+            serial_standard_last < NSERIAL_STANDARDS &&
+            serial_standard_equals(serial_standard_last, conf)) {
+            selected = serial_standard_last;
+        } else {
+            int match = serial_standard_match(conf);
+            selected = (match >= 0) ? match : NSERIAL_STANDARDS;
+        }
+
+        dlg_update_start(ctrl, dlg);
+        dlg_listbox_clear(ctrl, dlg);
+        for (i = 0; i < NSERIAL_STANDARDS; i++)
+            dlg_listbox_add(ctrl, dlg, serial_standards[i].name);
+        dlg_listbox_add(ctrl, dlg, "自定义");
+        dlg_listbox_select(ctrl, dlg, selected);
+        dlg_update_done(ctrl, dlg);
+    } else if (event == EVENT_SELCHANGE) {
+        int idx = dlg_listbox_index(ctrl, dlg);
+
+        if (idx < 0)
+            return;
+        if (idx >= NSERIAL_STANDARDS) {
+            serial_standard_last = NSERIAL_STANDARDS;
+            return;
+        }
+
+        const struct serial_standard *std = &serial_standards[idx];
+        conf_set_int(conf, CONF_serspeed, std->speed);
+        conf_set_int(conf, CONF_serdatabits, std->databits);
+        conf_set_int(conf, CONF_serstopbits, std->stopbits);
+        conf_set_int(conf, CONF_serparity, std->parity);
+        conf_set_int(conf, CONF_serflow, std->flow);
+        serial_standard_last = idx;
+
+        dlg_refresh(serial_ui.speed, dlg);
+        dlg_refresh(serial_ui.databits, dlg);
+        dlg_refresh(serial_ui.stopbits, dlg);
+        dlg_refresh(serial_ui.parity, dlg);
+        dlg_refresh(serial_ui.flow, dlg);
+    }
+}
+
+/* 包一层通用处理函数，手工改参数时把标准下拉同步过去。 */
+static void serial_editbox_handler(dlgcontrol *ctrl, dlgparam *dlg,
+                                   void *data, int event)
+{
+    conf_editbox_handler(ctrl, dlg, data, event);
+    if (event == EVENT_VALCHANGE)
+        serial_standard_sync(dlg);
+}
+
+static void serial_parity_std_handler(dlgcontrol *ctrl, dlgparam *dlg,
+                                      void *data, int event)
+{
+    serial_parity_handler(ctrl, dlg, data, event);
+    if (event == EVENT_SELCHANGE)
+        serial_standard_sync(dlg);
+}
+
+static void serial_flow_std_handler(dlgcontrol *ctrl, dlgparam *dlg,
+                                    void *data, int event)
+{
+    serial_flow_handler(ctrl, dlg, data, event);
+    if (event == EVENT_SELCHANGE)
+        serial_standard_sync(dlg);
+}
+
 void proxy_type_handler(dlgcontrol *ctrl, dlgparam *dlg,
                         void *data, int event)
 {
@@ -1774,14 +1919,14 @@ void proxy_type_handler(dlgcontrol *ctrl, dlgparam *dlg,
         ADD(PROXY_SOCKS4, "SOCKS 4");
         ADD(PROXY_HTTP, "HTTP 连接");
         if (ssh_proxy_supported) {
-            ADD(PROXY_SSH_TCPIP, "SSH 代理并使用端口转发");
-            ADD(PROXY_SSH_EXEC, "SSH 代理并执行命令");
-            ADD(PROXY_SSH_SUBSYSTEM, "SSH 代理并调用子系统");
+            ADD(PROXY_SSH_TCPIP, "通过 SSH 代理使用端口转发");
+            ADD(PROXY_SSH_EXEC, "通过 SSH 代理执行命令");
+            ADD(PROXY_SSH_SUBSYSTEM, "通过 SSH 代理调用子系统");
         }
         if (ctrl->context.i & PROXY_UI_FLAG_LOCAL) {
-            ADD(PROXY_CMD, "本地 (运行子程序进行连接)");
+            ADD(PROXY_CMD, "本地（运行外部程序连接）");
         }
-        ADD(PROXY_TELNET, "'Telnet' (发送 ad-hoc 临时命令)");
+        ADD(PROXY_TELNET, "Telnet（发送临时命令）");
 
 #undef ADD
 
@@ -1864,7 +2009,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
         memset(hp, 0, sizeof(*hp));
 
         s = ctrl_getset(b, "会话", "hostport",
-                        "指定要连接的目的地址");
+                        "填写要连接的目标地址");
         ctrl_columns(s, 2, 75, 25);
         c = ctrl_combobox(s, HOST_BOX_TITLE, 'n', 100,
                           HELPCTX(session_hostname),
@@ -2207,7 +2352,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
     ctrl_checkbox(s, "禁用双向文本显示(D)",
                   'd', HELPCTX(features_bidi), conf_checkbox_handler,
                   I(CONF_no_bidi));
-    ctrl_checkbox(s, "Disable bracketed paste mode",
+    ctrl_checkbox(s, "禁用括号粘贴模式(P)",
                   'p', HELPCTX(features_bracketed_paste), conf_checkbox_handler,
                   I(CONF_no_bracketed_paste));
 
@@ -2306,7 +2451,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
     ctrl_editbox(s, "窗口标题(T)：", 't', 100,
                  HELPCTX(appearance_title),
                  conf_editbox_handler, I(CONF_wintitle), ED_STR);
-    ctrl_checkbox(s, "使用单独的客户区窗口(I)", 'i',
+    ctrl_checkbox(s, "窗口标题与图标标题分开显示(I)", 'i',
                   HELPCTX(appearance_title),
                   conf_checkbox_handler,
                   I(CHECKBOX_INVERT | CONF_win_name_always));
@@ -2329,23 +2474,23 @@ void setup_config_box(struct controlbox *b, bool midsession,
                   codepage_handler, P(NULL), P(NULL));
 
     s = ctrl_getset(b, "窗口/转换", "tweaks", NULL);
-    ctrl_checkbox(s, "将不确定字符处理为 CJK 字符(W)", 'w',
+    ctrl_checkbox(s, "将 CJK 歧义字符按宽字符处理(W)", 'w',
                   HELPCTX(translation_cjk_ambig_wide),
                   conf_checkbox_handler, I(CONF_cjk_ambig_wide));
 
-    str = dupprintf("调整 %s 如何重绘字符行", appname);
+    str = dupprintf("调整 %s 如何绘制线条字符", appname);
     s = ctrl_getset(b, "窗口/转换", "linedraw", str);
     sfree(str);
     ctrl_radiobuttons(
-        s, "重绘字符行处理：", NO_SHORTCUT,1,
+        s, "线条绘制字符处理：", NO_SHORTCUT,1,
         HELPCTX(translation_linedraw),
         conf_radiobutton_handler, I(CONF_vtmode),
-        "使用 Unicode 统一码重绘代码",'u',I(VT_UNICODE),
-        "简单重绘行(+、- 和 |)(P)",'p',I(VT_POORMAN));
-    ctrl_checkbox(s, "重绘字符类似 lqqqk 复制粘贴行(D)",'d',
+        "使用 Unicode 线条绘制码位(U)",'u',I(VT_UNICODE),
+        "简单线条绘制（+、- 和 |）(P)",'p',I(VT_POORMAN));
+    ctrl_checkbox(s, "复制粘贴线条绘制字符为 lqqqk(D)",'d',
                   HELPCTX(selection_linedraw),
                   conf_checkbox_handler, I(CONF_rawcnp));
-    ctrl_checkbox(s, "即使在 UTF-8 模式下也启用 VT100 线绘制",'8',
+    ctrl_checkbox(s, "即使在 UTF-8 模式下也启用 VT100 线条绘制",'8',
                   HELPCTX(translation_utf8linedraw),
                   conf_checkbox_handler, I(CONF_utf8linedraw));
 
@@ -2437,7 +2582,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
     ctrl_checkbox(s, "启用终端使用 24 位色", '4',
                   HELPCTX(colours_truecolour), conf_checkbox_handler,
                   I(CONF_true_colour));
-    ctrl_radiobuttons(s, "粗体文字表现(B)：", 'b', 3,
+    ctrl_radiobuttons(s, "粗体文字的表示方式(B)：", 'b', 3,
                       HELPCTX(colours_bold),
                       conf_radiobutton_handler, I(CONF_bold_style),
                       "字体", I(BOLD_STYLE_FONT),
@@ -2448,7 +2593,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
     s = ctrl_getset(b, "窗口/颜色", "adjust", str);
     sfree(str);
     ctrl_text(s, "选择列表中的颜色，然后点击"
-              "“修改”按钮改变\n其具体数值。",
+              "“修改”按钮改变其具体数值。",
               HELPCTX(colours_config));
     ctrl_columns(s, 2, 67, 33);
     cd = (struct colour_data *)ctrl_alloc(b, sizeof(struct colour_data));
@@ -2511,10 +2656,10 @@ void setup_config_box(struct controlbox *b, bool midsession,
 
             {
                 const char *label = backend_vt_from_proto(PROT_SSH) ?
-                    "远程主机的注册名字（比如用 ssh 密钥寻找）(M)：" :
-                    "远程主机的注册名字(M)：";
+                    "远程主机的逻辑名称（例如用于查找 SSH 主机密钥）(M)：" :
+                    "远程主机的逻辑名称(M)：";
                 s = ctrl_getset(b, "连接", "identity",
-                                "远程主机的注册名字");
+                                "远程主机的逻辑名称");
                 ctrl_editbox(s, label, 'm', 100,
                              HELPCTX(connection_loghost),
                              conf_editbox_handler, I(CONF_loghost), ED_STR);
@@ -2535,7 +2680,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
             ctrl_settitle(b, "连接/数据", "传送到服务器的数据");
 
             s = ctrl_getset(b, "连接/数据", "login",
-                            "登录详细资料");
+                            "登录信息");
             ctrl_editbox(s, "自动登录用户名(U)：", 'u', 50,
                          HELPCTX(connection_username),
                          conf_editbox_handler, I(CONF_username), ED_STR);
@@ -2556,7 +2701,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
             }
 
             s = ctrl_getset(b, "连接/数据", "term",
-                            "终端详细资料");
+                            "终端信息");
             ctrl_editbox(s, "终端类型字符串(T)：", 't', 50,
                          HELPCTX(connection_termtype),
                          conf_editbox_handler, I(CONF_termtype), ED_STR);
@@ -2625,7 +2770,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                      HELPCTX(proxy_exclude),
                      conf_editbox_handler,
                      I(CONF_proxy_exclude_list), ED_STR);
-        ctrl_checkbox(s, "对于本地地址不使用代理(X)", 'x',
+        ctrl_checkbox(s, "本地连接也考虑使用代理(X)", 'x',
                       HELPCTX(proxy_exclude),
                       conf_checkbox_handler,
                       I(CONF_even_proxy_localhost));
@@ -2657,7 +2802,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                           I(CONF_proxy_log_to_term),
                           "否", I(FORCE_OFF),
                           "是", I(FORCE_ON),
-                          "只在会话开始时", I(AUTO));
+                          "仅限会话开始前", I(AUTO));
     }
 
     /*
@@ -2688,8 +2833,8 @@ void setup_config_box(struct controlbox *b, bool midsession,
         if (midsession && (protcfginfo == 1 || protcfginfo == -1)) {
             s = ctrl_getset(b, "连接/SSH", "disclaimer", NULL);
             ctrl_text(s, "此面板上的任何内容都不能在会话中重新配置；"
-                      "显示此面板只能为了方便展示其子面板"
-                      " ^_^", HELPCTX(no_help));
+                      "显示此面板只能为了方便展示其子面板",
+                      HELPCTX(no_help));
         }
 
         if (!midsession) {
@@ -2759,12 +2904,12 @@ void setup_config_box(struct controlbox *b, bool midsession,
 
             s = ctrl_getset(b, "连接/SSH/密钥", "main",
                             "密钥交换算法选项");
-            c = ctrl_draglist(s, "算法选择顺序(S)：", 's',
+            c = ctrl_draglist(s, "算法优先级(S)：", 's',
                               HELPCTX(ssh_kexlist),
                               kexlist_handler, P(NULL));
             c->listbox.height = 10;
 #ifndef NO_GSSAPI
-            ctrl_checkbox(s, "尝试 GSSAPI 密钥交换",
+            ctrl_checkbox(s, "尝试 GSSAPI 密钥交换(K)",
                           'k', HELPCTX(ssh_gssapi),
                           conf_checkbox_handler,
                           I(CONF_try_gssapi_kex));
@@ -2803,7 +2948,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
 
             s = ctrl_getset(b, "连接/SSH/主机密钥", "main",
                             "主机密钥算法偏好");
-            c = ctrl_draglist(s, "算法选择优先级(S)：", 's',
+            c = ctrl_draglist(s, "算法优先级(S)：", 's',
                               HELPCTX(ssh_hklist),
                               hklist_handler, P(NULL));
             c->listbox.height = 5;
@@ -2876,7 +3021,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
 
             s = ctrl_getset(b, "连接/SSH/加密",
                             "encryption", "加密选项");
-            c = ctrl_draglist(s, "加密方法选择顺序(S)：", 's',
+            c = ctrl_draglist(s, "加密算法优先级(S)：", 's',
                               HELPCTX(ssh_ciphers),
                               cipherlist_handler, P(NULL));
             c->listbox.height = 6;
@@ -2919,7 +3064,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                           HELPCTX(ssh_auth_tis),
                           conf_checkbox_handler,
                           I(CONF_try_tis_auth));
-            ctrl_checkbox(s, "尝试“智能键盘”认证 (SSH-2) (I)",
+            ctrl_checkbox(s, "尝试 keyboard-interactive 认证 (SSH-2) (I)",
                           'i', HELPCTX(ssh_auth_ki),
                           conf_checkbox_handler,
                           I(CONF_try_ki_auth));
@@ -2943,7 +3088,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                          FILTER_KEY_FILES, false, "选择私钥文件",
                          HELPCTX(ssh_auth_privkey),
                          conf_filesel_handler, I(CONF_keyfile));
-            ctrl_filesel(s, "与私钥一起使用的证书(可选) (E):", 'e',
+            ctrl_filesel(s, "与私钥一起使用的证书（可选）(E)：", 'e',
                          FILTER_ALL_FILES, false, "选择证书文件",
                          HELPCTX(ssh_auth_cert),
                          conf_filesel_handler, I(CONF_detached_cert));
@@ -3021,7 +3166,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
             ctrl_settitle(b, "连接/SSH/TTY", "远程终端设置");
 
             s = ctrl_getset(b, "连接/SSH/TTY", "sshtty", NULL);
-            ctrl_checkbox(s, "不分配假终端(P)", 'p',
+            ctrl_checkbox(s, "不分配伪终端(P)", 'p',
                           HELPCTX(ssh_nopty),
                           conf_checkbox_handler,
                           I(CONF_nopty));
@@ -3091,16 +3236,16 @@ void setup_config_box(struct controlbox *b, bool midsession,
         /*
          * The Tunnels panel _is_ still available in mid-session.
          */
-        ctrl_settitle(b, "连接/SSH/通道",
+        ctrl_settitle(b, "连接/SSH/隧道",
                       "SSH 端口转发设置");
 
-        s = ctrl_getset(b, "连接/SSH/通道", "portfwd",
+        s = ctrl_getset(b, "连接/SSH/隧道", "portfwd",
                         "端口转发");
         ctrl_checkbox(s, "本地端口接受其他主机的连接(T)",'t',
                       HELPCTX(ssh_tunnels_portfwd_localhost),
                       conf_checkbox_handler,
                       I(CONF_lport_acceptall));
-        ctrl_checkbox(s, "远程端口接受连接(仅限 SSH-2)(P)", 'p',
+        ctrl_checkbox(s, "远程端口同样接受连接（仅 SSH-2）(P)", 'p',
                       HELPCTX(ssh_tunnels_portfwd_localhost),
                       conf_checkbox_handler,
                       I(CONF_rport_acceptall));
@@ -3162,18 +3307,18 @@ void setup_config_box(struct controlbox *b, bool midsession,
             /*
              * The Connection/SSH/Bugs panels.
              */
-            ctrl_settitle(b, "连接/SSH/查错",
+            ctrl_settitle(b, "连接/SSH/错误兼容",
                           "处理 SSH 服务器错误设置");
 
-            s = ctrl_getset(b, "连接/SSH/查错", "main",
+            s = ctrl_getset(b, "连接/SSH/错误兼容", "main",
                             "检测已知的 SSH 服务器错误");
-            ctrl_droplist(s, "阻塞 SSH-2 忽略信息", '2', 20,
+            ctrl_droplist(s, "无法处理 SSH-2 ignore 消息", '2', 20,
                           HELPCTX(ssh_bugs_ignore2),
                           sshbug_handler, I(CONF_sshbug_ignore2));
-            ctrl_droplist(s, "严格 SSH-2 密钥再次验证操作(K)", 'k', 20,
+            ctrl_droplist(s, "无法正确处理 SSH-2 密钥重新交换(K)", 'k', 20,
                           HELPCTX(ssh_bugs_rekey2),
                           sshbug_handler, I(CONF_sshbug_rekey2));
-            ctrl_droplist(s, "阻塞 PuTTY 的 SSH-2 'winadj' 请求", 'j',
+            ctrl_droplist(s, "无法处理 PuTTY 的 SSH-2 'winadj' 请求", 'j',
                           20, HELPCTX(ssh_bugs_winadj),
                           sshbug_handler, I(CONF_sshbug_winadj));
             ctrl_droplist(s, "回复已关闭通道的请求(Q)", 'q', 20,
@@ -3183,7 +3328,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                           HELPCTX(ssh_bugs_maxpkt2),
                           sshbug_handler, I(CONF_sshbug_maxpkt2));
 
-            s = ctrl_getset(b, "连接/SSH/查错", "manual",
+            s = ctrl_getset(b, "连接/SSH/错误兼容", "manual",
                             "手动启用的解决方法");
             ctrl_droplist(s, "丢弃在握手前发送的数据(D)", 'd', 20,
                           HELPCTX(ssh_bugs_dropstart),
@@ -3194,10 +3339,10 @@ void setup_config_box(struct controlbox *b, bool midsession,
                           sshbug_handler_manual_only,
                           I(CONF_sshbug_filter_kexinit));
 
-            ctrl_settitle(b, "连接/SSH/更多查错",
+            ctrl_settitle(b, "连接/SSH/更多错误兼容",
                           "处理 SSH 服务器更多错误设置");
 
-            s = ctrl_getset(b, "连接/SSH/更多查错", "main",
+            s = ctrl_getset(b, "连接/SSH/更多错误兼容", "main",
                             "检测已知的 SSH 服务器错误");
             ctrl_droplist(s, "旧的 RSA/SHA2 证书算法命名(L)", 'l', 20,
                           HELPCTX(ssh_bugs_rsa_sha2_cert_userauth),
@@ -3209,19 +3354,19 @@ void setup_config_box(struct controlbox *b, bool midsession,
             ctrl_droplist(s, "只支持 pre-RFC4419 SSH-2 DH GEX", 'd', 20,
                           HELPCTX(ssh_bugs_oldgex2),
                           sshbug_handler, I(CONF_sshbug_oldgex2));
-            ctrl_droplist(s, "混算 SSH-2 HMAC 密钥", 'm', 20,
+            ctrl_droplist(s, "SSH-2 HMAC 密钥计算有误(M)", 'm', 20,
                           HELPCTX(ssh_bugs_hmac2),
                           sshbug_handler, I(CONF_sshbug_hmac2));
-            ctrl_droplist(s, "错误 SSH-2 PK 认证会话 ID(N)", 'n', 20,
+            ctrl_droplist(s, "SSH-2 公钥认证中误用会话 ID(N)", 'n', 20,
                           HELPCTX(ssh_bugs_pksessid2),
                           sshbug_handler, I(CONF_sshbug_pksessid2));
-            ctrl_droplist(s, "混算 SSH-2 加密密钥(E)", 'e', 20,
+            ctrl_droplist(s, "SSH-2 加密密钥计算有误(E)", 'e', 20,
                           HELPCTX(ssh_bugs_derivekey2),
                           sshbug_handler, I(CONF_sshbug_derivekey2));
-            ctrl_droplist(s, "阻塞 SSH-1 忽略信息(I)", 'i', 20,
+            ctrl_droplist(s, "无法处理 SSH-1 ignore 消息(I)", 'i', 20,
                           HELPCTX(ssh_bugs_ignore1),
                           sshbug_handler, I(CONF_sshbug_ignore1));
-            ctrl_droplist(s, "拒绝所有 SSH-1 密码伪装", 's', 20,
+            ctrl_droplist(s, "拒绝所有 SSH-1 明文密码认证(S)", 's', 20,
                           HELPCTX(ssh_bugs_plainpw1),
                           sshbug_handler, I(CONF_sshbug_plainpw1));
             ctrl_droplist(s, "阻塞 SSH-1 RSA 认证", 'r', 20,
@@ -3237,44 +3382,45 @@ void setup_config_box(struct controlbox *b, bool midsession,
          * The Connection/Serial panel.
          */
         ctrl_settitle(b, "连接/串口",
-                      "设置本地串行线路的选项");
+                      "设置本地串口的选项");
 
-        if (!midsession) {
-            /*
-             * We don't permit switching to a different serial port in
-             * midflight, although we do allow all other
-             * reconfiguration.
-             */
-            s = ctrl_getset(b, "连接/串口", "serline",
-                            "选择串行线路");
-            ctrl_combobox(s, "连接到串行线路(L)", 'l', 40,
+        /*
+         * 串口页顶部：选一个厂商标准，下面的五项参数自动填好。
+         */
+        s = ctrl_getset(b, "连接/串口", "serstd", "选择串口标准");
+        serial_ui.standard =
+            ctrl_droplist(s, "厂商标准(A)", 'a', 40,
                           HELPCTX(serial_line),
-                          serial_line_handler, I(CONF_serline), ED_STR);
-        }
+                          serial_standard_handler, I(0));
 
-        s = ctrl_getset(b, "连接/串口", "sercfg", "配置串行线路");
-        ctrl_editbox(s, "速度 (波特) (S)", 's', 40,
-                     HELPCTX(serial_speed),
-                     conf_editbox_handler, I(CONF_serspeed), ED_INT);
-        ctrl_editbox(s, "数据位(B)", 'b', 40,
-                     HELPCTX(serial_databits),
-                     conf_editbox_handler, I(CONF_serdatabits), ED_INT);
+        s = ctrl_getset(b, "连接/串口", "sercfg", "配置串口");
+        serial_ui.speed = ctrl_editbox(s, "波特率(S)", 's', 40,
+                                       HELPCTX(serial_speed),
+                                       serial_editbox_handler,
+                                       I(CONF_serspeed), ED_INT);
+        serial_ui.databits = ctrl_editbox(s, "数据位(B)", 'b', 40,
+                                          HELPCTX(serial_databits),
+                                          serial_editbox_handler,
+                                          I(CONF_serdatabits), ED_INT);
         /*
          * Stop bits come in units of one half.
          */
         static const struct conf_editbox_handler_type conf_editbox_stopbits = {
             .type = EDIT_FIXEDPOINT, .denominator = 2};
 
-        ctrl_editbox(s, "停止位(T)", 't', 40,
-                     HELPCTX(serial_stopbits),
-                     conf_editbox_handler, I(CONF_serstopbits),
-                     CP(&conf_editbox_stopbits));
-        ctrl_droplist(s, "奇偶校验位(P)", 'p', 40,
-                      HELPCTX(serial_parity), serial_parity_handler,
-                      I(ser_vt->serial_parity_mask));
-        ctrl_droplist(s, "流控制(F)", 'f', 40,
-                      HELPCTX(serial_flow), serial_flow_handler,
-                      I(ser_vt->serial_flow_mask));
+        serial_ui.stopbits = ctrl_editbox(s, "停止位(T)", 't', 40,
+                                          HELPCTX(serial_stopbits),
+                                          serial_editbox_handler,
+                                          I(CONF_serstopbits),
+                                          CP(&conf_editbox_stopbits));
+        serial_ui.parity = ctrl_droplist(s, "奇偶校验位(P)", 'p', 40,
+                                         HELPCTX(serial_parity),
+                                         serial_parity_std_handler,
+                                         I(ser_vt->serial_parity_mask));
+        serial_ui.flow = ctrl_droplist(s, "流控制(F)", 'f', 40,
+                                       HELPCTX(serial_flow),
+                                       serial_flow_std_handler,
+                                       I(ser_vt->serial_flow_mask));
     }
 
     if (DISPLAY_RECONFIGURABLE_PROTOCOL(PROT_TELNET)) {
@@ -3288,7 +3434,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                         "Telnet 协议调整");
 
         if (!midsession) {
-            ctrl_radiobuttons(s, "处理含糊的 OLD_ENVIRON 参数：",
+            ctrl_radiobuttons(s, "OLD_ENVIRON 歧义处理：",
                               NO_SHORTCUT, 2,
                               HELPCTX(telnet_oldenviron),
                               conf_radiobutton_bool_handler,
@@ -3348,7 +3494,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                           "ITS", I(SUPDUP_CHARSET_ITS),
                           "WAITS", I(SUPDUP_CHARSET_WAITS));
 
-        ctrl_checkbox(s, "**更多**处理(M)", 'm',
+        ctrl_checkbox(s, "**MORE** 提示处理(M)", 'm',
                       HELPCTX(supdup_more),
                       conf_checkbox_handler,
                       I(CONF_supdup_more));
