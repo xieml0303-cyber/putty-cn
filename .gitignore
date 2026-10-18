@@ -15,6 +15,7 @@ tests/cmd.txt
 # 构建产物（dist/putty.exe 例外，见下）
 *.o
 build/
+installer/output/
 
 # 本地安全扫描器会话状态
 **/.mimosa/

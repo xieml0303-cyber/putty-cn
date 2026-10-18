@@ -35,7 +35,17 @@
 | `windows/putty.c`、`windows/window.c`、`windows/console.c`、`windows/dialog.c`、`windows/network.c`、`windows/pageant.c`、`ssh/common.c`、`ssh/ca-config.c` | 界面与协议提示的翻译修正：术语统一、标点规范、语义反转与错别字修复 |
 | `cmake/platforms/windows.cmake` | 链接 `comctl32`，供组合框与列表控件使用 |
 
-## 下载
+## 安装包（推荐）
+
+从 [Releases](https://github.com/xieml0303-cyber/putty-cn/releases/latest) 下载 `putty-cn-0.85-cn2-setup.exe`，双击运行、按中文向导安装即可：
+
+- 装到当前用户目录 `%LOCALAPPDATA%\Programs\PuTTY-cn`，不需要管理员权限；
+- 自动创建开始菜单项与桌面快捷方式，安装完可直接启动；
+- 卸载走「设置 → 应用」或开始菜单里的卸载项。
+
+安装包未做代码签名，首次运行时 Windows 可能提示「已保护你的电脑」，点「更多信息 → 仍要运行」即可。
+
+## 免安装版
 
 `dist/` 下的五个程序均为 0.85-cn2 构建、64 位、免安装，可单独取用：
 
