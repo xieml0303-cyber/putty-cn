@@ -30,11 +30,15 @@
 
 ## 下载
 
-直接使用仓库中的 [`dist/putty.exe`](dist/putty.exe)（1,840,077 字节，64 位，免安装）。
+直接使用仓库中的 [`dist/putty.exe`](dist/putty.exe)（1,845,159 字节，64 位，免安装）。
 
 - 仅依赖系统 DLL（ADVAPI32、GDI32、IMM32、KERNEL32、SHELL32、USER32、comdlg32、msvcrt、ole32），无需 MinGW 运行库。
 - 启动后窗口标题为「PuTTY 配置」（英文版为 "PuTTY Configuration"）。
-- 建议先校验 SHA256 再运行。
+- 运行前建议校验 SHA256：
+
+```text
+98c9ee951aecb9f5c9b38dfbfc2f956fb896d2f17db5bf411bfe3f280c0dc4c1
+```
 
 ## 串口默认配置（华为 / 华三 Console 标准）
 
