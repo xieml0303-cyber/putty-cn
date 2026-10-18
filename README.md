@@ -1,6 +1,6 @@
 # PuTTY 0.85-cn2 中文版（Windows 64 位）
 
-基于 [larryli/PuTTY](https://github.com/larryli/PuTTY)（原 Google Code `puttycn` 项目）的中文翻译源码，使用 MSYS2 + MinGW-w64 + CMake 在本地编译生成的 `putty.exe`、`puttygen.exe`、`plink.exe`、`pscp.exe`、`psftp.exe`。
+基于 [larryli/PuTTY](https://github.com/larryli/PuTTY)（原 Google Code `puttycn` 项目）的中文翻译源码，使用 MSYS2 + MinGW-w64 + CMake 在本地编译生成的 `putty.exe`、`puttygen.exe`、`plink.exe`、`pscp.exe`、`psftp.exe`、`pageant.exe`、`puttytel.exe`。
 
 在汉化基线之上，本仓库针对国内网络设备运维场景做了界面与交互改造：启动即串口模式、串口线自动匹配本机真实端口、会话页历史连接记录、配置页标题样式统一等。
 
@@ -11,7 +11,7 @@
 | 目录 | 内容 |
 |------|------|
 | `src/` | 完整源码，基线为 larryli/PuTTY master（commit `7ddf3ae`，版本 0.85），含本项目的界面与串口改造 |
-| `dist/` | 编译产物：`putty.exe`（图形界面）、`puttygen.exe`（密钥工具）、`plink.exe`、`pscp.exe`、`psftp.exe`（命令行工具） |
+| `dist/` | 编译产物：`putty.exe`（图形界面）、`puttygen.exe`（密钥工具）、`plink.exe`、`pscp.exe`、`psftp.exe`（命令行工具）、`pageant.exe`（密钥代理）、`puttytel.exe`（纯 Telnet） |
 | `docs/` | 各轮改造的设计与验证记录；`docs/screenshots/` 为报告引用的界面截图 |
 | `reports/` | 整改、审计与专项验证报告（翻译质量、命令行汉化、风险扫描、命名清理等） |
 | `backup/` | 注册表默认设置快照（不含凭据，见 [`backup/README.md`](backup/README.md)）；二进制备份仅存本地，不入库 |
@@ -37,7 +37,7 @@
 
 ## 安装包（推荐）
 
-从 [Releases](https://github.com/xieml0303-cyber/putty-cn/releases/latest) 下载 `putty-cn-0.85-cn2-setup.exe`，双击运行、按中文向导安装即可：
+从 [Releases](https://github.com/xieml0303-cyber/putty-cn/releases/latest) 下载 `putty-cn-0.85-cn2-setup.exe`（也可直接取仓库里的 [`dist/putty-cn-0.85-cn2-setup.exe`](dist/putty-cn-0.85-cn2-setup.exe)，SHA256 `b4af20280559eb364e0c71c6025b13fcbbdc4d4bd88cc9f8da08909aa0897e49`），双击运行、按中文向导安装即可：
 
 - 装到当前用户目录 `%LOCALAPPDATA%\Programs\PuTTY-cn`，不需要管理员权限；
 - 自动创建开始菜单项与桌面快捷方式，安装完可直接启动；
@@ -47,7 +47,7 @@
 
 ## 免安装版
 
-`dist/` 下的五个程序均为 0.85-cn2 构建、64 位、免安装，可单独取用：
+`dist/` 下的七个程序均为 0.85-cn2 构建、64 位、免安装，可单独取用：
 
 | 文件 | 用途 | 大小（字节） | SHA256 |
 |------|------|-------------|--------|
@@ -56,6 +56,8 @@
 | [`plink.exe`](dist/plink.exe) | 命令行 SSH 客户端 | 1,416,971 | `ce71ef29ddfeea3d32d63c1cb20d23b061534f6a5cd6bef0fd54a78610b9b2f3` |
 | [`pscp.exe`](dist/pscp.exe) | SCP 文件传输 | 1,414,811 | `2455fde87f08b440b0080061357f0d04ead16306b84c2d841ae7d6477c8003cc` |
 | [`psftp.exe`](dist/psftp.exe) | SFTP 文件传输 | 1,430,258 | `c360f05579046f74ae9b087cd88e16150da51f240f4fa0bd24af46204ed47a4c` |
+| [`pageant.exe`](dist/pageant.exe) | 密钥代理（SSH 公钥认证） | 756,950 | `613b0b89279af1adc37529b72d502051d2d59570dab0c3431eab3d165e23a424` |
+| [`puttytel.exe`](dist/puttytel.exe) | 纯 Telnet 客户端（不含 SSH） | 961,969 | `4215d6f50be351ba105af63148175d8d0971fd39aaf1dcd5e9c2013d971c4fe0` |
 
 - 仅依赖系统 DLL（ADVAPI32、COMCTL32、GDI32、IMM32、KERNEL32、SHELL32、USER32、comdlg32、msvcrt、ole32），无需 MinGW 运行库。
 - `putty.exe` 启动后窗口标题为「PuTTY 配置」（英文版为 "PuTTY Configuration"）。
@@ -102,6 +104,7 @@ PuTTY 不会自动保存设置。改完参数后需要点窗口右下角的「�
 | T2 | 公钥认证（ed25519，PPK v3）+ 命令执行 | PASS |
 | T3 | 本地端口转发 `-L 18080:127.0.0.1:18081` | PASS |
 | T4 | 交互式终端会话 | PASS |
+| T5 | Pageant 加载 ed25519 PPK + plink 无密码公钥认证 | PASS |
 
 界面汉化与串口改造未影响协议层行为。测试记录见 [`docs/2026-10-17-PuTTY功能测试.md`](docs/2026-10-17-PuTTY功能测试.md)，串口改造见 [`docs/2026-10-18-串口默认值自动匹配.md`](docs/2026-10-18-串口默认值自动匹配.md)。
 
@@ -111,7 +114,7 @@ PuTTY 不会自动保存设置。改完参数后需要点窗口右下角的「�
 2. **`putty host command` 写法有陷阱**。`putty 127.0.0.1 "echo hello"` 会把 `"echo hello"` 当作端口号（atoi 得 0），报「无法分配请求的地址」。远程命令请用 `-m <命令文件>` 传入，或改用 plink。
 3. **只认 PuTTY 原生 `.ppk` 私钥**。OpenSSH 新格式与旧 PEM 格式均无法加载；可用 puttygen 图形界面导入转换，或用 [`tests/gen-ppk.js`](tests/gen-ppk.js) 生成 ed25519 PPK v3。
 4. **串口下拉框只读**，只能从本机枚举到的端口中选择，不能手输 `\\.\COM10` 这类设备路径；本机没有任何串口时列表为空。Unix 版不受影响。
-5. **未包含 `pageant.exe` 与 `puttytel.exe`**。`pageant`（密钥代理）与 `puttytel`（无 SSH 的 Telnet 版）可按下方步骤从源码构建；其余四个命令行工具与 `puttygen` 已随 `dist/` 发布。命令行工具为实验性汉化，错误提示可能存在个别未翻译或格式瑕疵。
+5. **`pageant.exe` 与 `puttytel.exe` 已随 `dist/` 发布**（0.85-cn2 构建）。`pageant` 为密钥代理，`puttytel` 为不含 SSH 的 Telnet 客户端；两者功能与官方 0.85 一致，仅界面汉化。命令行工具为实验性汉化，错误提示可能存在个别未翻译或格式瑕疵。
 
 ## 自行构建
 
@@ -120,7 +123,7 @@ PuTTY 不会自动保存设置。改完参数后需要点窗口右下角的「�
 pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-make perl
 cd src
 cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -B build
-cmake --build build --target putty puttygen plink pscp psftp -j
+cmake --build build --target putty puttygen plink pscp psftp pageant puttytel -j
 ```
 
 产物为 `src/build/` 下的同名 exe，复制到 `dist/` 即可发布。本仓库中的二进制即由上述流程产出（gcc 16.2.0 / cmake 4.4.4 / ninja）。

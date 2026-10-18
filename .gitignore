@@ -29,3 +29,6 @@ reports/*.ps1
 # 本地二进制备份（不进版本库，仅保留 .reg 文本快照）
 backup/*.exe*
 backup/*.bak
+
+# 本地工作目录（临时截图、脚本）
+.workbuddy/
