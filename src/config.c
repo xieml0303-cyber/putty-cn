@@ -191,20 +191,32 @@ void conf_fontsel_handler(dlgcontrol *ctrl, dlgparam *dlg,
 
 /*
  * Fill a serial-port combo box with the ports this machine actually
- * has, leaving `current' in the edit area.
+ * has. If the configured port is empty or absent from this machine,
+ * fall back to the first one that is present, so a stale setting (a
+ * COM number left over from another machine, say) doesn't leave the
+ * box showing a port that can't be opened.
  */
 static void fill_serial_port_list(dlgcontrol *ctrl, dlgparam *dlg,
-                                  const char *current)
+                                  Conf *conf, const char *current)
 {
     char *saved = current ? dupstr(current) : NULL;
     char **ports;
     int nports, i;
+    bool present = false;
 
     dlg_update_start(ctrl, dlg);
     dlg_listbox_clear(ctrl, dlg);
     ports = get_serial_ports(&nports);
-    for (i = 0; i < nports; i++)
+    for (i = 0; i < nports; i++) {
         dlg_listbox_add(ctrl, dlg, ports[i]);
+        if (saved && !strcmp(saved, ports[i]))
+            present = true;
+    }
+    if (!present && nports > 0) {
+        sfree(saved);
+        saved = dupstr(ports[0]);
+        conf_set_str(conf, CONF_serline, saved);
+    }
     free_serial_ports(ports, nports);
     dlg_editbox_set(ctrl, dlg, saved ? saved : "");
     dlg_update_done(ctrl, dlg);
@@ -217,7 +229,8 @@ static void serial_line_handler(dlgcontrol *ctrl, dlgparam *dlg,
     Conf *conf = (Conf *)data;
 
     if (event == EVENT_REFRESH) {
-        fill_serial_port_list(ctrl, dlg, conf_get_str(conf, CONF_serline));
+        fill_serial_port_list(ctrl, dlg, conf,
+                              conf_get_str(conf, CONF_serline));
     } else if (event == EVENT_VALCHANGE) {
         char *s = dlg_editbox_get(ctrl, dlg);
         conf_set_str(conf, CONF_serline, s);
@@ -242,7 +255,7 @@ static void config_host_handler(dlgcontrol *ctrl, dlgparam *dlg,
              * since that's the shortcut for the host name control.
              */
             dlg_label_change(ctrl, dlg, "串行口(N)");
-            fill_serial_port_list(ctrl, dlg,
+            fill_serial_port_list(ctrl, dlg, conf,
                                   conf_get_str(conf, CONF_serline));
         } else {
             dlg_label_change(ctrl, dlg, HOST_BOX_TITLE);

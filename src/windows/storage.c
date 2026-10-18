@@ -904,6 +904,7 @@ char **get_serial_ports(int *count)
 {
     HKEY key;
     char **ports = NULL;
+    bool *bluetooth = NULL;
     int n = 0, index = 0;
 
     *count = 0;
@@ -924,23 +925,41 @@ char **get_serial_ports(int *count)
         if (strncmp(value, "COM", 3) != 0)
             continue;
         ports = sresize(ports, n+1, char *);
-        ports[n++] = dupstr(value);
+        bluetooth = sresize(bluetooth, n+1, bool);
+        ports[n] = dupstr(value);
+        /*
+         * Bluetooth modems appear in this list too, but they aren't
+         * wired console ports. Flag them so the caller's first choice
+         * is a real one.
+         */
+        bluetooth[n] = (strstr(valname, "BthModem") != NULL);
+        n++;
     }
     RegCloseKey(key);
 
-    /* Sort by port number, so COM2 precedes COM10. */
+    /*
+     * Sort by port number, so COM2 precedes COM10, but keep the
+     * Bluetooth virtual ports at the end.
+     */
     {
         int i;
         for (i = 1; i < n; i++) {
             char *tmp = ports[i];
+            bool tmpbt = bluetooth[i];
             int j = i - 1;
-            while (j >= 0 && atoi(ports[j] + 3) > atoi(tmp + 3)) {
+            while (j >= 0 &&
+                   (bluetooth[j] > tmpbt ||
+                    (bluetooth[j] == tmpbt &&
+                     atoi(ports[j] + 3) > atoi(tmp + 3)))) {
                 ports[j+1] = ports[j];
+                bluetooth[j+1] = bluetooth[j];
                 j--;
             }
             ports[j+1] = tmp;
+            bluetooth[j+1] = tmpbt;
         }
     }
+    sfree(bluetooth);
 
     *count = n;
     return ports;

@@ -477,7 +477,7 @@ CONF_OPTION(passive_telnet,
 /* Serial port options */
 CONF_OPTION(serline,
     VALUE_TYPE(STR),
-    DEFAULT_STR("COM1"),
+    DEFAULT_STR(""),
     SAVE_KEYWORD("SerialLine"),
 )
 CONF_OPTION(serspeed,
