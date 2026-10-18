@@ -1,6 +1,6 @@
 $putty = 'C:\Users\Wrok\AppData\Local\Programs\PuTTY\putty.exe'
 $fp = 'SHA256:R9vbIvocTm5PY2Td87NV0rPsQPKKt9XTklgHal9b/e0'
-$dir = 'C:\Users\Wrok\.zcode\workspace\default\.workbuddy\putty-test'
+$dir = $PSScriptRoot
 $cmdFile = Join-Path $dir 'cmd.txt'
 Set-Content -Path $cmdFile -Value 'echo hello' -Encoding ASCII
 $log = Join-Path $dir 'log-q2.txt'

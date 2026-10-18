@@ -1,4 +1,4 @@
-$dir = 'C:\Users\Wrok\.zcode\workspace\default\.workbuddy\putty-test'
+$dir = $PSScriptRoot
 $putty = 'C:\Users\Wrok\AppData\Local\Programs\PuTTY\putty.exe'
 $fp = (Get-Content (Join-Path $dir 'fingerprint.txt') -Raw).Trim()
 Write-Output "FINGERPRINT=$fp"

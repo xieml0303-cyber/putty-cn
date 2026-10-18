@@ -1,5 +1,5 @@
 $putty = 'C:\Users\Wrok\AppData\Local\Programs\PuTTY\putty.exe'
-$log = 'C:\Users\Wrok\.zcode\workspace\default\.workbuddy\putty-test\log-t1.txt'
+$log = Join-Path $PSScriptRoot 'log-t1.txt'
 $args = '-ssh -4 -P 2222 -l testuser -pw testpass -hostkey SHA256:R9vbIvocTm5PY2Td87NV0rPsQPKKt9XTklgHal9b/e0 -sessionlog "' + $log + '" 127.0.0.1 "echo hello"'
 Write-Output ("ARGS=" + $args)
 $p = Start-Process -FilePath $putty -ArgumentList $args -PassThru

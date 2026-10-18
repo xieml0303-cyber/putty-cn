@@ -11,20 +11,19 @@ tests/id_rsa_pem
 tests/authorized_keys
 tests/log-*.txt
 tests/cmd.txt
-tests/.mimosa/
 
 # 构建产物（dist/putty.exe 例外，见下）
 *.o
 build/
 
-# Mimosa 扫描器会话状态
-.mimosa/
+# 本地安全扫描器会话状态
+**/.mimosa/
 
-# .workbuddy 下的本地诊断脚本与临时截图（只保留 Markdown 报告）
-.workbuddy/*.png
-.workbuddy/*.py
-.workbuddy/*.txt
-.workbuddy/*.ps1
+# reports 下的本地诊断脚本与临时截图（只保留 Markdown 报告）
+reports/*.png
+reports/*.py
+reports/*.txt
+reports/*.ps1
 
 # 本地二进制备份（不进版本库，仅保留 .reg 文本快照）
 backup/*.exe*

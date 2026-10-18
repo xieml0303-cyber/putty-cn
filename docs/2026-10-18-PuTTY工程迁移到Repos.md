@@ -19,7 +19,7 @@
 
 ### 源码实际位置（迁移前）
 
-`C:\Users\Wrok\.zcode\workspace\default\.workbuddy\putty-cn-src\PuTTY-master`
+旧工作区的临时源码目录（已废弃）
 
 - 43M（含 build），不含 build 20M / 1267 个文件
 - 上游 larryli/PuTTY master 的 zip 解压副本，**无 .git**
@@ -28,7 +28,7 @@
 
 ## 二、迁移动作
 
-1. 复制源码到 `C:\Users\Wrok\Repos\putty-cn\src\`，排除 `build/` 与 `.mimosa/`（Mimosa 扫描器会话状态，9.2M / 574 文件，首次提交误带入后已剔除并加入 .gitignore）
+1. 复制源码到 `C:\Users\Wrok\Repos\putty-cn\src\`，排除 `build/` 与本地安全扫描器状态目录（9.2M / 574 文件，首次提交误带入后已剔除并加入 .gitignore）
 2. 搬迁 7 篇历史报告到 `docs/`（0.85 下载、仓库上传、按钮调整、串口与保存优化、串口下拉框、列表高度与滚动条、会话页历史记录改版），现共 9 篇
 3. README 新增「仓库结构」与「相对上游的改动」两节，构建命令改为使用本仓库 `src/`
 4. `dist/putty.exe` 更新为最新构建（1,840,077 字节），README 字节数同步
@@ -44,10 +44,10 @@
 ## 四、待定夺
 
 1. **是否推送 GitHub**：源码 20M，仓库体积会明显增大；本地两个提交尚未 push
-2. **旧源码目录处置**：`.workbuddy\putty-cn-src\PuTTY-master` 暂保留作备份，确认新位置构建无误后可删
+2. **旧源码目录处置**：旧工作区临时源码目录暂保留作备份，确认新位置构建无误后可删
 3. `docs/` 中历史报告含本地回环地址与代理地址（127.0.0.1:7877），无凭据，推送前可复核
 
 ## 五、后续约定
 
 - 今后改代码一律在 `C:\Users\Wrok\Repos\putty-cn\src` 进行，构建产物在 `src/build/`，发布时复制到 `dist/`
-- 每轮改动提交一次，提交信息写清改了什么；推送前跑 Mimosa 完整扫描
+- 每轮改动提交一次，提交信息写清改了什么；推送前跑完整安全扫描
