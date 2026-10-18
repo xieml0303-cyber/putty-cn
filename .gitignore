@@ -24,3 +24,4 @@ build/
 .workbuddy/*.png
 .workbuddy/*.py
 .workbuddy/*.txt
+.workbuddy/*.ps1
