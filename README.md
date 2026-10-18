@@ -1,6 +1,6 @@
-# PuTTY 0.85 中文版（Windows 64 位）
+# PuTTY 0.85-cn2 中文版（Windows 64 位）
 
-基于 [larryli/PuTTY](https://github.com/larryli/PuTTY)（原 Google Code `puttycn` 项目）的中文翻译源码，使用 MSYS2 + MinGW-w64 + CMake 在本地编译生成的 `putty.exe`。
+基于 [larryli/PuTTY](https://github.com/larryli/PuTTY)（原 Google Code `puttycn` 项目）的中文翻译源码，使用 MSYS2 + MinGW-w64 + CMake 在本地编译生成的 `putty.exe`、`puttygen.exe`、`plink.exe`、`pscp.exe`、`psftp.exe`。
 
 > 这不是 PuTTY 官方构建，与 Simon Tatham 及 PuTTY 官方项目无关。官方 PuTTY 从未提供中文界面。
 
@@ -9,9 +9,9 @@
 | 目录 | 内容 |
 |------|------|
 | `src/` | 完整源码，基线为 larryli/PuTTY master（commit `7ddf3ae`，版本 0.85），含本项目的界面改造 |
-| `dist/` | 编译产物 `putty.exe` |
+| `dist/` | 编译产物：`putty.exe`（图形界面）、`puttygen.exe`（密钥工具）、`plink.exe`、`pscp.exe`、`psftp.exe`（命令行工具） |
 | `docs/` | 汉化过程、功能测试与各轮改造记录；`docs/screenshots/` 为报告引用的界面截图 |
-| `backup/` | 改造前的原版/旧版 exe 与注册表默认设置备份 |
+| `backup/` | 注册表默认设置快照（不含凭据，见 [`backup/README.md`](backup/README.md)）；二进制备份仅存本地，不入库 |
 | `tests/` | 本机回环 SSH 测试脚本（Node.js ssh2） |
 
 源码基线不含上游 git 历史（初始导入为快照）。需要比对上游更新时，clone [larryli/PuTTY](https://github.com/larryli/PuTTY) 后用 `diff -r` 对照。
@@ -27,18 +27,25 @@
 | `unix/storage.c`、`unix/dialog.c` | 对应接口的非 Windows 实现 |
 | `storage.h`、`dialog.h` | 新增接口声明 |
 | `conf.h`、`be_list.c` | 默认连接方式与串口默认参数（华为/华三 Console 标准） |
+| `version.h`、`LATEST.VER` | 版本号递增为 0.85-cn2（`TEXTVER`、`SSHVER`、`BINARY_VERSION` 同步） |
+| `pscp.c`、`psftp.c`、`cmdgen.c`、`windows/puttygen.c`、`windows/plink.c` | 命令行工具错误提示与 usage 汉化 |
 
 ## 下载
 
-直接使用仓库中的 [`dist/putty.exe`](dist/putty.exe)（1,845,159 字节，64 位，免安装）。
+`dist/` 下的五个程序均为 0.85-cn2 构建、64 位、免安装，可单独取用：
+
+| 文件 | 用途 | 大小（字节） | SHA256 |
+|------|------|-------------|--------|
+| [`putty.exe`](dist/putty.exe) | 图形界面终端（SSH / Telnet / 串口） | 1,845,159 | `ac439a437d881fcda8707e497257e1793cbd9a5479839f156c1f23f9e42026d3` |
+| [`puttygen.exe`](dist/puttygen.exe) | 密钥生成 / 转换工具 | 902,380 | `4aae98bf6358cf42e32c804a1ed732bf6ee6fb500a0a691f9a60e549df8f3f19` |
+| [`plink.exe`](dist/plink.exe) | 命令行 SSH 客户端 | 1,416,971 | `463c7a17f8f2eb3337dda4bb531300ac5c7bcb1b2ca5751fe71e6e29fecb6ad3` |
+| [`pscp.exe`](dist/pscp.exe) | SCP 文件传输 | 1,414,811 | `2455fde87f08b440b0080061357f0d04ead16306b84c2d841ae7d6477c8003cc` |
+| [`psftp.exe`](dist/psftp.exe) | SFTP 文件传输 | 1,430,258 | `c360f05579046f74ae9b087cd88e16150da51f240f4fa0bd24af46204ed47a4c` |
 
 - 仅依赖系统 DLL（ADVAPI32、GDI32、IMM32、KERNEL32、SHELL32、USER32、comdlg32、msvcrt、ole32），无需 MinGW 运行库。
-- 启动后窗口标题为「PuTTY 配置」（英文版为 "PuTTY Configuration"）。
-- 运行前建议校验 SHA256：
-
-```text
-98c9ee951aecb9f5c9b38dfbfc2f956fb896d2f17db5bf411bfe3f280c0dc4c1
-```
+- `putty.exe` 启动后窗口标题为「PuTTY 配置」（英文版为 "PuTTY Configuration"）。
+- 命令行工具可执行 `plink -V` 确认版本，输出应为 `发布版 0.85-cn2`。
+- 运行前建议按上表校验 SHA256。
 
 ## 串口默认配置（华为 / 华三 Console 标准）
 
@@ -82,7 +89,7 @@ PuTTY 不会自动保存设置。改完参数后需要点窗口右下角的「�
 1. **GUI 版不支持 `-batch`**。该选项属于 plink，传给 `putty.exe` 会弹「命令行错误」。
 2. **`putty host command` 写法有陷阱**。`putty 127.0.0.1 "echo hello"` 会把 `"echo hello"` 当作端口号（atoi 得 0），报「无法分配请求的地址」。远程命令请用 `-m <命令文件>` 传入，或改用 plink。
 3. **只认 PuTTY 原生 `.ppk` 私钥**。OpenSSH 新格式与旧 PEM 格式均无法加载；可用 puttygen 图形界面导入转换，或用 [`tests/gen-ppk.js`](tests/gen-ppk.js) 生成 ed25519 PPK v3。
-4. 仅编译了 `putty.exe`；`puttygen`、`plink`、`pscp`、`psftp`、`pageant` 未包含在本仓库，可自行从 larryli/PuTTY 源码构建。
+4. **未包含 `pageant.exe` 与 `puttytel.exe`**。`pageant`（密钥代理）与 `puttytel`（无 SSH 的 Telnet 版）可按下方步骤从源码构建；其余四个命令行工具与 `puttygen` 已随 `dist/` 发布，汉化覆盖连接错误、参数校验与文件操作提示，命令行工具为实验性汉化，错误提示可能存在个别未翻译或格式瑕疵。
 
 ## 自行构建
 
@@ -91,10 +98,10 @@ PuTTY 不会自动保存设置。改完参数后需要点窗口右下角的「�
 pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-make perl
 cd src
 cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -B build
-cmake --build build --target putty -j
+cmake --build build --target putty puttygen plink pscp psftp -j
 ```
 
-产物为 `src/build/putty.exe`，复制到 `dist/` 即可发布。本仓库中的二进制即由上述流程产出（gcc 16.2.0 / cmake 4.4.4 / ninja，288 个目标全部成功）。
+产物为 `src/build/` 下的同名 exe，复制到 `dist/` 即可发布。本仓库中的二进制即由上述流程产出（gcc 16.2.0 / cmake 4.4.4 / ninja）。
 
 ## 复现测试
 

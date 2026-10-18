@@ -26,5 +26,6 @@ build/
 .workbuddy/*.txt
 .workbuddy/*.ps1
 
-# 本地旧版二进制回滚锚点
+# 本地二进制备份（不进版本库，仅保留 .reg 文本快照）
+backup/*.exe*
 backup/*.bak
