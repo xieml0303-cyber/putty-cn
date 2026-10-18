@@ -25,3 +25,6 @@ build/
 .workbuddy/*.py
 .workbuddy/*.txt
 .workbuddy/*.ps1
+
+# 本地旧版二进制回滚锚点
+backup/*.bak
