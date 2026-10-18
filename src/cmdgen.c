@@ -96,7 +96,7 @@ void showversion(void)
 void usage(bool standalone)
 {
     fprintf(standalone ? stderr : stdout,
-            "用法: puttygen ( 密钥文件 | -t 类型 [ -b 位数 ] )\n"
+            "用法：puttygen ( 密钥文件 | -t 类型 [ -b 位数 ] )\n"
             "                [ -C 注释 ] [ -P ] [ -q ]\n"
             "                [ -o 输出密钥文件 ] [ -O 类型 | -l | -L"
             " | -p ]\n");
@@ -114,14 +114,14 @@ void help(void)
     printf("PuTTYgen: PuTTY 密钥生成与转换工具\n"
            "%s\n", ver);
     usage(false);
-    printf("  -t    指定生成的密钥类型:\n"
+    fputs("  -t    指定要生成的密钥类型：\n", stdout);
            "           eddsa, ecdsa, rsa, dsa, rsa1   配合使用 -b\n"
            "           ed25519, ed448                 来指定 eddsa 实例\n"
            "  -b    指定生成密钥的位数\n"
            "  -C    修改或指定密钥注释\n"
            "  -P    修改密钥密码\n"
-           "  -q    静默: 不显示进度条\n"
-           "  -O    指定输出类型:\n"
+           "  -q    静默：不显示进度条\n"
+           "  -O    指定输出类型：\n"
            "           private             输出 PuTTY 私钥\n"
            "           private-openssh     导出 OpenSSH 私钥\n"
            "           private-openssh-new 导出 OpenSSH 私钥 "
@@ -139,7 +139,7 @@ void help(void)
            "  -p    等价于 `-O public'\n"
            "  --cert-info   等价于 `-O cert-info'\n"
            "  --dump   等价于 `-O text'\n"
-           "  -E fptype            指定指纹输出类型:\n"
+           "  -E fptype            指定指纹输出类型：\n"
            "                          sha256, md5, sha256-cert, md5-cert\n"
            "  --certificate 文件   合并指定证书到密钥\n"
            "  --remove-certificate 从密钥中删除所有证书\n"
@@ -157,8 +157,7 @@ void help(void)
            "        proven-even    已被证实的素数且尽量均匀分布\n"
            "  --strong-rsa         使用 \"强\" 素数作为 RSA 密钥因素\n"
            "  --ppk-param <键>=<值>[,<键>=<值>,...]\n"
-           "        写入 PuTTY 私钥文件格式时"
-           "的指定参数:\n"
+           "        写入 PuTTY 私钥文件格式时的指定参数：\n"
            "            version       PPK 格式版本 (最小 2, 最大 3, "
            "默认 3)\n"
            "            kdf           密钥派生函数 (argon2id, "
@@ -188,7 +187,7 @@ static bool move(char *from, char *to)
         ret = rename(from, to);
     }
     if (ret) {
-        perror("puttygen: cannot move new file on to old one");
+        perror("puttygen：无法用新文件替换旧文件");
         return false;
     }
     return true;
@@ -201,7 +200,7 @@ static char *readpassphrase(const char *filename)
 
     fp = fopen(filename, "r");
     if (!fp) {
-        fprintf(stderr, "puttygen: cannot open %s: %s\n",
+        fprintf(stderr, "puttygen：无法打开 %s：%s\n",
                 filename, strerror(errno));
         return NULL;
     }
@@ -209,7 +208,7 @@ static char *readpassphrase(const char *filename)
     if (line)
         line[strcspn(line, "\r\n")] = '\0';
     else if (ferror(fp))
-        fprintf(stderr, "puttygen: error reading from %s: %s\n",
+        fprintf(stderr, "puttygen：读取 %s 时出错：%s\n",
                 filename, strerror(errno));
     else        /* empty file */
         line = dupstr("");
@@ -223,7 +222,7 @@ static void spr_error(SeatPromptResult spr)
 {
     if (spr.kind == SPRK_SW_ABORT) {
         char *err = spr_get_error_message(spr);
-        fprintf(stderr, "puttygen: unable to read passphrase: %s", err);
+        fprintf(stderr, "puttygen：无法读取密码短语：%s", err);
         sfree(err);
     }
 }
@@ -312,8 +311,7 @@ int main(int argc, char **argv)
                     if (!strcmp(opt, "-help")) {
                         if (val) {
                             errs = true;
-                            fprintf(stderr, "puttygen: option `-%s'"
-                                    " expects no argument\n", opt);
+                            fprintf(stderr, "puttygen：选项 `-%s' 不接受参数\n", opt);
                         } else {
                             help();
                             nogo = true;
@@ -321,8 +319,7 @@ int main(int argc, char **argv)
                     } else if (!strcmp(opt, "-version")) {
                         if (val) {
                             errs = true;
-                            fprintf(stderr, "puttygen: option `-%s'"
-                                    " expects no argument\n", opt);
+                            fprintf(stderr, "puttygen：选项 `-%s' 不接受参数\n", opt);
                         } else {
                             showversion();
                             nogo = true;
@@ -330,8 +327,7 @@ int main(int argc, char **argv)
                     } else if (!strcmp(opt, "-pgpfp")) {
                         if (val) {
                             errs = true;
-                            fprintf(stderr, "puttygen: option `-%s'"
-                                    " expects no argument\n", opt);
+                            fprintf(stderr, "puttygen：选项 `-%s' 不接受参数\n", opt);
                         } else {
                             /* support --pgpfp for consistency */
                             pgp_fingerprints();
@@ -342,8 +338,7 @@ int main(int argc, char **argv)
                             --argc, val = *++argv;
                         if (!val) {
                             errs = true;
-                            fprintf(stderr, "puttygen: option `-%s'"
-                                    " expects an argument\n", opt);
+                            fprintf(stderr, "puttygen：选项 `-%s' 需要一个参数\n", opt);
                         } else {
                             old_passphrase = readpassphrase(val);
                             if (!old_passphrase)
@@ -354,8 +349,7 @@ int main(int argc, char **argv)
                             --argc, val = *++argv;
                         if (!val) {
                             errs = true;
-                            fprintf(stderr, "puttygen: option `-%s'"
-                                    " expects an argument\n", opt);
+                            fprintf(stderr, "puttygen：选项 `-%s' 需要一个参数\n", opt);
                         } else {
                             new_passphrase = readpassphrase(val);
                             if (!new_passphrase)
@@ -366,8 +360,7 @@ int main(int argc, char **argv)
                             --argc, val = *++argv;
                         if (!val) {
                             errs = true;
-                            fprintf(stderr, "puttygen: option `-%s'"
-                                    " expects an argument\n", opt);
+                            fprintf(stderr, "puttygen：选项 `-%s' 需要一个参数\n", opt);
                         } else {
                             random_device = val;
                         }
@@ -382,8 +375,7 @@ int main(int argc, char **argv)
                             --argc, val = *++argv;
                         if (!val) {
                             errs = true;
-                            fprintf(stderr, "puttygen: option `-%s'"
-                                    " expects an argument\n", opt);
+                            fprintf(stderr, "puttygen：选项 `-%s' 需要一个参数\n", opt);
                         } else if (!strcmp(val, "probable") ||
                                    !strcmp(val, "probabilistic")) {
                             primegen = &primegen_probabilistic;
@@ -400,8 +392,7 @@ int main(int argc, char **argv)
                             primegen = &primegen_provable_maurer_complex;
                         } else {
                             errs = true;
-                            fprintf(stderr, "puttygen: unrecognised prime-"
-                                    "generation mode `%s'\n", val);
+                            fprintf(stderr, "puttygen：无法识别的素数生成模式 `%s'\n", val);
                         }
                     } else if (!strcmp(opt, "-strong-rsa")) {
                         strong_rsa = true;
@@ -410,8 +401,7 @@ int main(int argc, char **argv)
                             --argc, val = *++argv;
                         if (!val) {
                             errs = true;
-                            fprintf(stderr, "puttygen: option `-%s'"
-                                    " expects an argument\n", opt);
+                            fprintf(stderr, "puttygen：选项 `-%s' 需要一个参数\n", opt);
                         } else {
                             certfile = val;
                         }
@@ -425,8 +415,7 @@ int main(int argc, char **argv)
                             --argc, val = *++argv;
                         if (!val) {
                             errs = true;
-                            fprintf(stderr, "puttygen: option `-%s'"
-                                    " expects an argument\n", opt);
+                            fprintf(stderr, "puttygen：选项 `-%s' 需要一个参数\n", opt);
                         } else {
                             char *nextval;
                             for (; val; val = nextval) {
@@ -437,8 +426,7 @@ int main(int argc, char **argv)
                                 char *optvalue = strchr(val, '=');
                                 if (!optvalue) {
                                     errs = true;
-                                    fprintf(stderr, "puttygen: PPK parameter "
-                                            "'%s' expected a value\n", val);
+                                    fprintf(stderr, "puttygen：PPK 参数 '%s' 需要一个值\n", val);
                                     continue;
                                 }
                                 *optvalue++ = '\0';
@@ -456,8 +444,7 @@ int main(int argc, char **argv)
                                         params.argon2_flavour = Argon2d;
                                     } else {
                                         errs = true;
-                                        fprintf(stderr, "puttygen: unrecognise"
-                                                "d kdf '%s'\n", optvalue);
+                                        fprintf(stderr, "puttygen：无法识别的 KDF '%s'\n", optvalue);
                                     }
                                     continue;
                                 }
@@ -466,9 +453,7 @@ int main(int argc, char **argv)
                                 unsigned long n = strtoul(optvalue, &end, 0);
                                 if (!*optvalue || *end) {
                                     errs = true;
-                                    fprintf(stderr, "puttygen: value '%s' for "
-                                            "PPK parameter '%s': expected a "
-                                            "number\n", optvalue, val);
+                                    fprintf(stderr, "puttygen：PPK 参数 '%s' 的值 '%s' 应为数字\n", val, optvalue);
                                     continue;
                                 }
 
@@ -488,8 +473,7 @@ int main(int argc, char **argv)
                                     params.argon2_parallelism = n;
                                 } else {
                                     errs = true;
-                                    fprintf(stderr, "puttygen: unrecognised "
-                                            "PPK parameter '%s'\n", val);
+                                    fprintf(stderr, "puttygen：无法识别的 PPK 参数 '%s'\n", val);
                                     continue;
                                 }
                             }
@@ -497,7 +481,7 @@ int main(int argc, char **argv)
                     } else {
                         errs = true;
                         fprintf(stderr,
-                                "puttygen: no such option `-%s'\n", opt);
+                                "puttygen：没有选项 `-%s'\n", opt);
                     }
                     p = NULL;
                     break;
@@ -551,8 +535,7 @@ int main(int argc, char **argv)
                     if (!*p && argc > 1)
                         --argc, p = *++argv;
                     else if (!*p) {
-                        fprintf(stderr, "puttygen: option `-%c' expects a"
-                                " parameter\n", c);
+                        fprintf(stderr, "puttygen：选项 `-%c' 需要一个参数\n", c);
                         errs = true;
                     }
                     /*
@@ -576,7 +559,7 @@ int main(int argc, char **argv)
                             keytype = EDDSA, bits = 448, sshver = 2;
                         else {
                             fprintf(stderr,
-                                    "puttygen: unknown key type `%s'\n", p);
+                                    "puttygen：未知的密钥类型 `%s'\n", p);
                             errs = true;
                         }
                         break;
@@ -607,7 +590,7 @@ int main(int argc, char **argv)
                             outtype = CERTINFO;
                         else {
                             fprintf(stderr,
-                                    "puttygen: unknown output type `%s'\n", p);
+                                    "puttygen：未知的输出类型 `%s'\n", p);
                             errs = true;
                         }
                         break;
@@ -624,8 +607,7 @@ int main(int argc, char **argv)
                         else if (!strcmp(p, "sha256-cert"))
                             fptype = SSH_FPTYPE_SHA256_CERT;
                         else {
-                            fprintf(stderr, "puttygen: unknown fingerprint "
-                                    "type `%s'\n", p);
+                            fprintf(stderr, "puttygen：未知的指纹类型 `%s'\n", p);
                             errs = true;
                         }
                         break;
@@ -637,7 +619,7 @@ int main(int argc, char **argv)
                      * Unrecognised option.
                      */
                     errs = true;
-                    fprintf(stderr, "puttygen: no such option `-%c'\n", c);
+                    fprintf(stderr, "puttygen：没有选项 `-%c'\n", c);
                     break;
                 }
             }
@@ -649,8 +631,7 @@ int main(int argc, char **argv)
                 infile = p;
             else {
                 errs = true;
-                fprintf(stderr, "puttygen: cannot handle more than one"
-                        " input file\n");
+                fprintf(stderr, "puttygen：不能处理多个输入文件\n");
             }
         }
     }
@@ -688,10 +669,10 @@ int main(int argc, char **argv)
         const ssh_keyalg *alg;
 
         if (!alg_and_curve_by_bits(bits, &curve, &alg)) {
-            fprintf(stderr, "puttygen: invalid bits for %s, choose", name);
+            fprintf(stderr, "puttygen：%s 的位数无效，请选择", name);
             for (size_t i = 0; i < n_lengths; i++)
                 fprintf(stderr, "%s%d", (i == 0 ? " " :
-                                         i == n_lengths-1 ? " or " : ", "),
+                                         i == n_lengths-1 ? " 或 " : "、"),
                         valid_lengths[i]);
             fputc('\n', stderr);
             errs = true;
@@ -700,13 +681,12 @@ int main(int argc, char **argv)
 
     if (keytype == RSA2 || keytype == RSA1 || keytype == DSA) {
         if (bits < 256) {
-            fprintf(stderr, "puttygen: cannot generate %s keys shorter than"
-                    " 256 bits\n", (keytype == DSA ? "DSA" : "RSA"));
+            fprintf(stderr, "puttygen：无法生成短于 256 位的 %s 密钥\n",
+                    (keytype == DSA ? "DSA" : "RSA"));
             errs = true;
         } else if (bits < DEFAULT_RSADSA_BITS) {
-            fprintf(stderr, "puttygen: warning: %s keys shorter than"
-                    " %d bits are probably not secure\n",
-                    (keytype == DSA ? "DSA" : "RSA"), DEFAULT_RSADSA_BITS);
+            fprintf(stderr, "puttygen：警告：短于 %d 位的 %s 密钥可能不够安全\n",
+                    DEFAULT_RSADSA_BITS, (keytype == DSA ? "DSA" : "RSA"));
             /* but this is just a warning, so proceed anyway */
         }
     }
@@ -722,8 +702,7 @@ int main(int argc, char **argv)
      * ones, fail with an error.
      */
     if (!infile && keytype == NOKEYGEN) {
-        fprintf(stderr, "puttygen: expected an input key file name, "
-                "or -t for a type of key to generate\n");
+        fprintf(stderr, "puttygen：需要输入密钥文件名，或使用 -t 指定要生成的密钥类型\n");
         RETURN(1);
     }
 
@@ -736,7 +715,7 @@ int main(int argc, char **argv)
      * key.
      */
     if (keytype != NOKEYGEN && infile) {
-        fprintf(stderr, "puttygen: cannot both load and generate a key\n");
+        fprintf(stderr, "puttygen：不能同时载入和生成密钥\n");
         RETURN(1);
     }
 
@@ -746,8 +725,7 @@ int main(int argc, char **argv)
     if (keytype != NOKEYGEN &&
         (outtype != PRIVATE && outtype != OPENSSH_AUTO &&
          outtype != OPENSSH_NEW && outtype != SSHCOM && outtype != TEXT)) {
-        fprintf(stderr, "puttygen: this would generate a new key but "
-                "discard the private part\n");
+        fprintf(stderr, "puttygen：此操作会生成新密钥但丢弃私钥部分\n");
         RETURN(1);
     }
 
@@ -765,7 +743,7 @@ int main(int argc, char **argv)
             infile_lf = lf_load_keyfile(infilename, &load_error);
 
         if (!infile_lf) {
-            fprintf(stderr, "puttygen: unable to load file `%s': %s\n",
+            fprintf(stderr, "puttygen：无法载入文件 `%s'：%s\n",
                     infile, load_error);
             RETURN(1);
         }
@@ -777,15 +755,14 @@ int main(int argc, char **argv)
         switch (intype) {
           case SSH_KEYTYPE_UNOPENABLE:
           case SSH_KEYTYPE_UNKNOWN:
-            fprintf(stderr, "puttygen: unable to load file `%s': %s\n",
+            fprintf(stderr, "puttygen：无法载入文件 `%s'：%s\n",
                     infile, key_type_to_str(intype));
             RETURN(1);
 
           case SSH_KEYTYPE_SSH1:
           case SSH_KEYTYPE_SSH1_PUBLIC:
             if (sshver == 2) {
-                fprintf(stderr, "puttygen: conversion from SSH-1 to SSH-2 keys"
-                        " not supported\n");
+                fprintf(stderr, "puttygen：不支持从 SSH-1 密钥转换为 SSH-2 密钥\n");
                 RETURN(1);
             }
             sshver = 1;
@@ -798,8 +775,7 @@ int main(int argc, char **argv)
           case SSH_KEYTYPE_OPENSSH_NEW:
           case SSH_KEYTYPE_SSHCOM:
             if (sshver == 1) {
-                fprintf(stderr, "puttygen: conversion from SSH-2 to SSH-1 keys"
-                        " not supported\n");
+                fprintf(stderr, "puttygen：不支持从 SSH-2 密钥转换为 SSH-1 密钥\n");
                 RETURN(1);
             }
             sshver = 2;
@@ -807,7 +783,7 @@ int main(int argc, char **argv)
 
           case SSH_KEYTYPE_OPENSSH_AUTO:
           default:
-            unreachable("Should never see these types on an input file");
+            unreachable("输入文件中不应出现这些类型");
         }
     }
 
@@ -833,8 +809,7 @@ int main(int argc, char **argv)
 
         if (!change_passphrase && !comment && !reencrypt && !certfile &&
             !remove_cert) {
-            fprintf(stderr, "puttygen: this command would perform no useful"
-                    " action\n");
+            fprintf(stderr, "puttygen：此命令不会执行任何有实际作用的操作\n");
             RETURN(1);
         }
     } else {
@@ -845,7 +820,7 @@ int main(int argc, char **argv)
              */
             if (outtype == PRIVATE || outtype == OPENSSH_AUTO ||
                 outtype == OPENSSH_NEW || outtype == SSHCOM) {
-                fprintf(stderr, "puttygen: need to specify an output file\n");
+                fprintf(stderr, "puttygen：需要指定输出文件\n");
                 RETURN(1);
             }
         }
@@ -877,8 +852,7 @@ int main(int argc, char **argv)
         load_encrypted = false;
 
     if (load_encrypted && !intype_has_private) {
-        fprintf(stderr, "puttygen: cannot perform this action on a "
-                "public-key-only input file\n");
+        fprintf(stderr, "puttygen：无法对仅含公钥的输入文件执行此操作\n");
         RETURN(1);
     }
 
@@ -887,18 +861,15 @@ int main(int argc, char **argv)
      */
     if (certfile && !(sshver == 2 && intype_has_private &&
                       outtype_has_private && infile)) {
-        fprintf(stderr, "puttygen: certificates can only be added to "
-                "existing SSH-2 private key files\n");
+        fprintf(stderr, "puttygen：只能向已有的 SSH-2 私钥文件添加证书\n");
         RETURN(1);
     }
     if (remove_cert && !(sshver == 2 && infile)) {
-        fprintf(stderr, "puttygen: certificates can only be removed from "
-                "existing SSH-2 key files\n");
+        fprintf(stderr, "puttygen：只能从已有的 SSH-2 密钥文件中删除证书\n");
         RETURN(1);
     }
     if (certfile && remove_cert) {
-        fprintf(stderr, "puttygen: cannot both add and remove a "
-                "certificate\n");
+        fprintf(stderr, "puttygen：不能同时添加和删除证书\n");
         RETURN(1);
     }
 
@@ -928,8 +899,7 @@ int main(int argc, char **argv)
 
         entropy = get_random_data(bits / 8, random_device);
         if (!entropy) {
-            fprintf(stderr, "puttygen: failed to collect entropy, "
-                    "could not generate key\n");
+            fprintf(stderr, "puttygen：收集熵失败，无法生成密钥\n");
             RETURN(1);
         }
         random_setup_special();
@@ -1006,8 +976,8 @@ int main(int argc, char **argv)
                 SeatPromptResult spr;
                 p->to_server = false;
                 p->from_server = false;
-                p->name = dupstr("SSH key passphrase");
-                add_prompt(p, dupstr("Enter passphrase to load key: "), false);
+                p->name = dupstr("SSH 密钥密码短语");
+                add_prompt(p, dupstr("输入用于载入密钥的密码短语："), false);
                 spr = console_get_userpass_input(p);
                 assert(spr.kind != SPRK_INCOMPLETE);
                 if (spr_is_abort(spr)) {
@@ -1057,7 +1027,7 @@ int main(int argc, char **argv)
             if (ret > 0)
                 error = NULL;
             else if (!error)
-                error = "unknown error";
+                error = "未知错误";
             break;
 
           case SSH_KEYTYPE_SSH2:
@@ -1089,9 +1059,9 @@ int main(int argc, char **argv)
                 error = NULL;
             else if (!error) {
                 if (ssh2key == SSH2_WRONG_PASSPHRASE)
-                    error = "wrong passphrase";
+                    error = "密码短语错误";
                 else
-                    error = "unknown error";
+                    error = "未知错误";
             }
             break;
 
@@ -1103,17 +1073,17 @@ int main(int argc, char **argv)
                 if (ssh2key != SSH2_WRONG_PASSPHRASE)
                     error = NULL;
                 else
-                    error = "wrong passphrase";
+                    error = "密码短语错误";
             } else if (!error)
-                error = "unknown error";
+                error = "未知错误";
             break;
 
           default:
-            unreachable("bad input key type");
+            unreachable("错误的输入密钥类型");
         }
 
         if (error) {
-            fprintf(stderr, "puttygen: error loading `%s': %s\n",
+            fprintf(stderr, "puttygen：载入 `%s' 时出错：%s\n",
                     infile, error);
             RETURN(1);
         }
@@ -1150,8 +1120,7 @@ int main(int argc, char **argv)
         filename_free(certfilename);
 
         if (!certfile_lf) {
-            fprintf(stderr, "puttygen: unable to load certificate file `%s': "
-                    "%s\n", certfile, error);
+            fprintf(stderr, "puttygen：无法载入证书文件 `%s'：%s\n", certfile, error);
             RETURN(1);
         }
 
@@ -1160,8 +1129,7 @@ int main(int argc, char **argv)
         strbuf *pub = strbuf_new();
         if (!ppk_loadpub_s(BinarySource_UPCAST(certfile_lf), &algname,
                            BinarySink_UPCAST(pub), &comment, &error)) {
-            fprintf(stderr, "puttygen: unable to load certificate file `%s': "
-                    "%s\n", certfile, error);
+            fprintf(stderr, "puttygen：无法载入证书文件 `%s'：%s\n", certfile, error);
             strbuf_free(pub);
             sfree(algname);
             sfree(comment);
@@ -1174,8 +1142,7 @@ int main(int argc, char **argv)
 
         const ssh_keyalg *alg = find_pubkey_alg(algname);
         if (!alg) {
-            fprintf(stderr, "puttygen: certificate file `%s' has unsupported "
-                    "algorithm name `%s'\n", certfile, algname);
+            fprintf(stderr, "puttygen：证书文件 `%s' 的算法名 `%s' 不受支持\n", certfile, algname);
             strbuf_free(pub);
             sfree(algname);
             RETURN(1);
@@ -1200,8 +1167,7 @@ int main(int argc, char **argv)
         strbuf_free(new_basepub);
 
         if (!match) {
-            fprintf(stderr, "puttygen: certificate in `%s' does not match "
-                    "public key in `%s'\n", certfile, infile);
+            fprintf(stderr, "puttygen：`%s' 中的证书与 `%s' 中的公钥不匹配\n", certfile, infile);
             strbuf_free(pub);
             RETURN(1);
         }
@@ -1214,8 +1180,7 @@ int main(int argc, char **argv)
         strbuf_free(priv);
 
         if (!newkey) {
-            fprintf(stderr, "puttygen: unable to combine certificate in `%s' "
-                    "with private key\n", certfile);
+            fprintf(stderr, "puttygen：无法将 `%s' 中的证书与私钥合并\n", certfile);
             RETURN(1);
         }
 
@@ -1237,8 +1202,7 @@ int main(int argc, char **argv)
             const ssh_keyalg *alg = find_pubkey_alg_len(algname);
 
             if (!alg) {
-                fprintf(stderr, "puttygen: input file `%s' has unsupported "
-                        "algorithm name `%.*s'\n", infile,
+                fprintf(stderr, "puttygen：输入文件 `%s' 的算法名 `%.*s' 不受支持\n", infile,
                         PTRLEN_PRINTF(algname));
                 RETURN(1);
             }
@@ -1274,9 +1238,9 @@ int main(int argc, char **argv)
 
         p->to_server = false;
         p->from_server = false;
-        p->name = dupstr("New SSH key passphrase");
-        add_prompt(p, dupstr("Enter passphrase to save key: "), false);
-        add_prompt(p, dupstr("Re-enter passphrase to verify: "), false);
+        p->name = dupstr("新的 SSH 密钥密码短语");
+        add_prompt(p, dupstr("输入用于保存密钥的密码短语："), false);
+        add_prompt(p, dupstr("再次输入密码短语以确认："), false);
         spr = console_get_userpass_input(p);
         assert(spr.kind != SPRK_INCOMPLETE);
         if (spr_is_abort(spr)) {
@@ -1287,7 +1251,7 @@ int main(int argc, char **argv)
             if (strcmp(prompt_get_result_ref(p->prompts[0]),
                        prompt_get_result_ref(p->prompts[1]))) {
                 free_prompts(p);
-                fprintf(stderr, "puttygen: passphrases do not match\n");
+                fprintf(stderr, "puttygen：两次输入的密码短语不一致\n");
                 RETURN(1);
             }
             new_passphrase = prompt_get_result(p->prompts[0]);
@@ -1322,7 +1286,7 @@ int main(int argc, char **argv)
             assert(ssh1key);
             ret = rsa1_save_f(outfilename, ssh1key, new_passphrase);
             if (!ret) {
-                fprintf(stderr, "puttygen: unable to save SSH-1 private key\n");
+                fprintf(stderr, "puttygen：无法保存 SSH-1 私钥\n");
                 RETURN(1);
             }
         } else {
@@ -1331,14 +1295,14 @@ int main(int argc, char **argv)
                 new_passphrase != NULL,
                 new_passphrase ? strlen(new_passphrase) : 0);
             if (err) {
-                fprintf(stderr, "puttygen: PPK parameters invalid: %s\n", err);
+                fprintf(stderr, "puttygen：PPK 参数无效：%s\n", err);
                 sfree(err);
                 RETURN(1);
             }
             assert(ssh2key);
             ret = ppk_save_f(outfilename, ssh2key, new_passphrase, &params);
             if (!ret) {
-                fprintf(stderr, "puttygen: unable to save SSH-2 private key\n");
+                fprintf(stderr, "puttygen：无法保存 SSH-2 私钥\n");
                 RETURN(1);
             }
         }
@@ -1355,7 +1319,7 @@ int main(int argc, char **argv)
         if (outfile) {
             fp = f_open(outfilename, "w", false);
             if (!fp) {
-                fprintf(stderr, "unable to open output file\n");
+                fprintf(stderr, "无法打开输出文件\n");
                 exit(1);
             }
         } else {
@@ -1404,7 +1368,7 @@ int main(int argc, char **argv)
         if (outfile) {
             fp = f_open(outfilename, "w", false);
             if (!fp) {
-                fprintf(stderr, "unable to open output file\n");
+                fprintf(stderr, "无法打开输出文件\n");
                 exit(1);
             }
         } else {
@@ -1436,11 +1400,11 @@ int main(int argc, char **argv)
             real_outtype = SSH_KEYTYPE_SSHCOM;
             break;
           default:
-            unreachable("control flow goof");
+            unreachable("控制流错误");
         }
         ret = export_ssh2(outfilename, real_outtype, ssh2key, new_passphrase);
         if (!ret) {
-            fprintf(stderr, "puttygen: unable to export key\n");
+            fprintf(stderr, "puttygen：无法导出密钥\n");
             RETURN(1);
         }
         if (outfiletmp) {
@@ -1464,15 +1428,14 @@ int main(int argc, char **argv)
                     ptrlen_from_strbuf(ssh2blob));
                 const ssh_keyalg *alg = find_pubkey_alg_len(algname);
                 if (!alg) {
-                    fprintf(stderr, "puttygen: cannot extract key components "
-                            "from public key of unknown type '%.*s'\n",
+                    fprintf(stderr, "puttygen：无法从类型未知的公钥 '%.*s' 中提取密钥组件\n",
                             PTRLEN_PRINTF(algname));
                     RETURN(1);
                 }
                 ssh_key *sk = ssh_key_new_pub(
                     alg, ptrlen_from_strbuf(ssh2blob));
                 if (!sk) {
-                    fprintf(stderr, "puttygen: unable to decode public key\n");
+                    fprintf(stderr, "puttygen：无法解码公钥\n");
                     RETURN(1);
                 }
                 kc = ssh_key_components(sk);
@@ -1484,7 +1447,7 @@ int main(int argc, char **argv)
         if (outfile) {
             fp = f_open(outfilename, "w", false);
             if (!fp) {
-                fprintf(stderr, "unable to open output file\n");
+                fprintf(stderr, "无法打开输出文件\n");
                 exit(1);
             }
         } else {
@@ -1540,7 +1503,7 @@ int main(int argc, char **argv)
                 break;
               }
               default:
-                unreachable("bad key component type");
+                unreachable("错误的密钥组件类型");
             }
         }
 
@@ -1552,8 +1515,7 @@ int main(int argc, char **argv)
 
       case CERTINFO: {
         if (sshver == 1) {
-            fprintf(stderr, "puttygen: SSH-1 keys cannot contain "
-                    "certificates\n");
+            fprintf(stderr, "puttygen：SSH-1 密钥不能包含证书\n");
             RETURN(1);
         }
 
@@ -1570,21 +1532,20 @@ int main(int argc, char **argv)
                 ptrlen_from_strbuf(ssh2blob));
             alg = find_pubkey_alg_len(algname);
             if (!alg) {
-                fprintf(stderr, "puttygen: cannot extract certificate info "
-                        "from public key of unknown type '%.*s'\n",
+                fprintf(stderr, "puttygen：无法从类型未知的公钥 '%.*s' 中提取证书信息\n",
                         PTRLEN_PRINTF(algname));
                 RETURN(1);
             }
             sk = ssh_key_new_pub(alg, ptrlen_from_strbuf(ssh2blob));
             if (!sk) {
-                fprintf(stderr, "puttygen: unable to decode public key\n");
+                fprintf(stderr, "puttygen：无法解码公钥\n");
                 RETURN(1);
             }
             sk_allocated = true;
         }
 
         if (!alg->is_certificate) {
-            fprintf(stderr, "puttygen: key is not a certificate\n");
+            fprintf(stderr, "puttygen：该密钥不是证书\n");
         } else {
             SeatDialogText *text = ssh_key_cert_info(sk);
 
@@ -1592,7 +1553,7 @@ int main(int argc, char **argv)
             if (outfile) {
                 fp = f_open(outfilename, "w", false);
                 if (!fp) {
-                    fprintf(stderr, "unable to open output file\n");
+                    fprintf(stderr, "无法打开输出文件\n");
                     exit(1);
                 }
             } else {

@@ -2429,7 +2429,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                 cmdline_keyfile = cmdline_arg_to_filename(valarg);
                 continue;
             } else {
-                opt_error("unexpected extra argument '%s'\n",
+                opt_error("多余的参数 '%s'\n",
                           cmdline_arg_to_str(valarg));
             }
         } else if (match_opt("-pgpfp")) {
@@ -2457,7 +2457,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                 params->keybutton = IDC_KEYSSH2EDDSA;
                 argbits = 448;
             } else {
-                opt_error("unknown key type '%s'\n", val);
+                opt_error("未知的密钥类型 '%s'\n", val);
             }
         } else if (match_optval("-b")) {
             argbits = atoi(cmdline_arg_to_str(valarg));
@@ -2468,7 +2468,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             else if (!strcmp(val, "sha256"))
                 params->fptype = SSH_FPTYPE_SHA256;
             else
-                opt_error("unknown fingerprint type '%s'\n", val);
+                opt_error("未知的指纹类型 '%s'\n", val);
         } else if (match_optval("-primes")) {
             const char *val = cmdline_arg_to_str(valarg);
             if (!strcmp(val, "probable") ||
@@ -2486,7 +2486,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                        !strcmp(val, "maurer-complex")) {
                 params->primepolicybutton = IDC_PRIMEGEN_MAURER_COMPLEX;
             } else {
-                opt_error("unrecognised prime-generation mode '%s'\n", val);
+                opt_error("无法识别的素数生成模式 '%s'\n", val);
             }
         } else if (match_opt("-strong-rsa")) {
             params->rsa_strong = true;
@@ -2500,7 +2500,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
                 char *optvalue = strchr(val, '=');
                 if (!optvalue)
-                    opt_error("PPK parameter '%s' expected a value\n", val);
+                    opt_error("PPK 参数 '%s' 缺少取值\n", val);
                 *optvalue++ = '\0';
 
                 /* Non-numeric options */
@@ -2515,7 +2515,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                                !strcmp(optvalue, "argon2d")) {
                         save_params.argon2_flavour = Argon2d;
                     } else {
-                        opt_error("unrecognised kdf '%s'\n", optvalue);
+                        opt_error("无法识别的 KDF '%s'\n", optvalue);
                     }
                     continue;
                 }
@@ -2523,8 +2523,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                 char *end;
                 unsigned long n = strtoul(optvalue, &end, 0);
                 if (!*optvalue || *end)
-                    opt_error("value '%s' for PPK parameter '%s': expected a "
-                              "number\n", optvalue, val);
+                    opt_error("PPK 参数 '%s' 的取值 '%s' 不是数字\n",
+                              val, optvalue);
 
                 if (!strcmp(val, "version")) {
                     save_params.fmt_version = n;
@@ -2541,7 +2541,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                            !strcmp(val, "parallel")) {
                     save_params.argon2_parallelism = n;
                 } else {
-                    opt_error("unrecognised PPK parameter '%s'\n", val);
+                    opt_error("无法识别的 PPK 参数 '%s'\n", val);
                 }
             }
             sfree(val);
@@ -2562,7 +2562,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             params->keybutton = IDC_KEYSSH2EDDSA;
             argbits = 255;
         } else {
-            opt_error("unrecognised option '%s'\n",
+            opt_error("无法识别的选项 '%s'\n",
                       cmdline_arg_to_str(amo.arglist->args[amo.index]));
         }
     }
@@ -2584,7 +2584,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                     break;
                 }
             if (!found)
-                opt_error("unsupported ECDSA bit length %d", argbits);
+                opt_error("不支持的 ECDSA 位长 %d", argbits);
             break;
           }
           case IDC_KEYSSH2EDDSA: {
@@ -2596,7 +2596,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                     break;
                 }
             if (!found)
-                opt_error("unsupported EDDSA bit length %d", argbits);
+                opt_error("不支持的 EdDSA 位长 %d", argbits);
             break;
           }
         }

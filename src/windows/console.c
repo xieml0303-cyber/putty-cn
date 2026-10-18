@@ -402,7 +402,7 @@ SeatPromptResult console_confirm_ssh_host_key(
     ResponseType response;
 
     while (true) {
-        put_fmt(conio, "%s (y/n, Return cancels connection, i for more info) ",
+        put_fmt(conio, "%s（y/n，回车取消连接，i 查看详情）",
                 prompt);
 
         response = parse_and_free_response(console_read_line(conio, true));
@@ -451,7 +451,7 @@ SeatPromptResult console_confirm_weak_crypto_primitive(
 
     const char *prompt = console_print_seatdialogtext(conio, text);
     if (!prompt) {
-        result = SPR_SW_ABORT("无法在批处理模式下确认弱加密基元");
+        result = SPR_SW_ABORT("无法在批处理模式下确认弱密码学原语");
         goto out;
     }
 

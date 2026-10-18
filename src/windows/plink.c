@@ -129,9 +129,9 @@ static void usage(void)
 {
     printf("Plink: 命令行连接工具\n");
     printf("%s\n", ver);
-    printf("用法: plink [选项] [用户名@]主机 [命令]\n");
-    printf("       (\"主机\" 也可以使用已保存的 PuTTY 会话名)\n");
-    printf("选项:\n");
+    printf("用法：plink [选项] [用户名@]主机 [命令]\n");
+    printf("       （\"主机\" 也可以使用已保存的 PuTTY 会话名）\n");
+    printf("选项：\n");
     printf("  -V        显示版本信息后退出\n");
     printf("  -pgpfp    显示 PGP 密钥指纹后退出\n");
     printf("  -v        显示详细信息\n");
@@ -144,12 +144,12 @@ static void usage(void)
     printf("  -l 用户名 使用指定的用户名连接\n");
     printf("  -batch    禁用所有交互式提示\n");
     printf("  -proxycmd 命令\n");
-    printf("            使用 '命令' 作为本地代理\n");
+    printf("            使用 “命令” 作为本地代理\n");
     printf("  -preconnectcommand 命令\n");
-    printf("            在建立网络连接前运行 '命令'\n");
-    printf("  -sercfg 配置字符串 (比如： 19200,8,n,1,X)\n");
-    printf("            指定串口配置 (仅限串口)\n");
-    printf("以下选项仅适用于 SSH 连接:\n");
+    printf("            在建立网络连接前运行 “命令”\n");
+    printf("  -sercfg 配置字符串（例如：19200,8,n,1,X）\n");
+    printf("            指定串口配置（仅限串口）\n");
+    printf("以下选项仅适用于 SSH 连接：\n");
     printf("  -pwfile 文件   使用指定文件中的密码登录\n");
     printf("  -D [监听IP:]监听端口\n");
     printf("            基于 SOCKS 的动态端口转发\n");
@@ -171,16 +171,16 @@ static void usage(void)
     printf("  -noshare  禁用连接共享\n");
     printf("  -share    启用连接共享\n");
     printf("  -hostkey 密钥ID\n");
-    printf("            手动指定主机密钥(可能重复)\n");
+    printf("            手动指定主机密钥（可能重复）\n");
     printf("  -sanitise-stderr, -sanitise-stdout, "
            "-no-sanitise-stderr, -no-sanitise-stdout\n");
     printf("            删除/不删除标准错误/输出中控制字符\n");
     printf("  -no-antispoof   认证后忽略反欺骗提示\n");
     printf("  -m 文件   从文件中读取远程命令\n");
-    printf("  -s        远程命令是 SSH 子系统 (仅限 SSH-2)\n");
-    printf("  -N        完全不运行 shell/命令 (仅限 SSH-2)\n");
+    printf("  -s        远程命令是 SSH 子系统 （仅限 SSH-2）\n");
+    printf("  -N        完全不运行 shell/命令 （仅限 SSH-2）\n");
     printf("  -nc 主机:端口\n");
-    printf("            打开隧道代替会话 (仅限 SSH-2)\n");
+    printf("            打开隧道代替会话 （仅限 SSH-2）\n");
     printf("  -sshlog 文件\n");
     printf("  -sshrawlog 文件\n");
     printf("            记录协议详细日志到指定文件\n");
@@ -340,7 +340,7 @@ int main(int argc, char **argv)
         int ret = cmdline_process_param(arg, nextarg, 1, conf);
         if (ret == -2) {
             fprintf(stderr,
-                    "plink: option \"%s\" requires an argument\n", p);
+                    "plink: 选项 \"%s\" 需要一个参数\n", p);
             errors = true;
         } else if (ret == 2) {
             arglistpos++;
@@ -390,7 +390,7 @@ int main(int argc, char **argv)
             strbuf_free(cmdbuf);
             break;                     /* done with cmdline */
         } else {
-            fprintf(stderr, "plink: unknown option \"%s\"\n", p);
+            fprintf(stderr, "plink: 未知选项 \"%s\"\n", p);
             errors = true;
         }
     }
@@ -399,8 +399,8 @@ int main(int argc, char **argv)
         return 1;
 
     if (!cmdline_host_ok(conf)) {
-        fprintf(stderr, "plink: no valid host name provided\n"
-                "try \"plink --help\" for help\n");
+        fputs("plink: 未提供有效的主机名\n"
+              "请尝试输入 plink --help 获取帮助\n", stderr);
         cmdline_arg_list_free(arglist);
         return 1;
     }
@@ -425,20 +425,20 @@ int main(int argc, char **argv)
     vt = backend_vt_from_proto(conf_get_int(conf, CONF_protocol));
     if (vt == NULL) {
         fprintf(stderr,
-                "Internal fault: Unsupported protocol found\n");
+                "内部错误：找不到支持的协议\n");
         return 1;
     }
 
     if (vt->flags & BACKEND_NEEDS_TERMINAL) {
         fprintf(stderr,
-                "Plink doesn't support %s, which needs terminal emulation\n",
+                "Plink 不支持 %s，该协议需要终端仿真\n",
                 vt->displayname_lc);
         return 1;
     }
 
     sk_init();
     if (p_WSAEventSelect == NULL) {
-        fprintf(stderr, "Plink requires WinSock 2\n");
+        fprintf(stderr, "Plink 需要 WinSock 2\n");
         return 1;
     }
 
@@ -457,8 +457,8 @@ int main(int argc, char **argv)
 
     if (just_test_share_exists) {
         if (!vt->test_for_upstream) {
-            fprintf(stderr, "Connection sharing not supported for this "
-                    "connection type (%s)'\n", vt->displayname_lc);
+            fprintf(stderr, "此连接类型 (%s) 不支持连接共享\n",
+                    vt->displayname_lc);
             return 1;
         }
         if (vt->test_for_upstream(conf_get_str(conf, CONF_host),
@@ -470,7 +470,7 @@ int main(int argc, char **argv)
 
     if (restricted_acl()) {
         lp_eventlog(console_cli_logpolicy,
-                    "Running with restricted process ACL");
+                    "正在以受限的进程 ACL 运行");
     }
 
     inhandle = GetStdHandle(STD_INPUT_HANDLE);

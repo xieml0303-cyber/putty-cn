@@ -303,7 +303,7 @@ static void start_backend(WinGuiSeat *wgs)
             /* Special case for pterm. */
             msg = dupprintf("无法打开终端:\n%s", error);
         } else {
-            msg = dupprintf("无法打开到\n%s 的连接\n%s",
+            msg = dupprintf("无法连接到 %s\n%s",
                             conf_dest(wgs->conf), error);
         }
         sfree(error);
@@ -736,7 +736,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     {
         HMENU m;
         int j;
-        char *str;
 
         wgs->popup_menus[SYSMENU].menu = GetSystemMenu(wgs->term_hwnd, false);
         wgs->popup_menus[CTXMENU].menu = CreatePopupMenu();
@@ -755,16 +754,16 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             m = wgs->popup_menus[j].menu;
 
             AppendMenu(m, MF_SEPARATOR, 0, 0);
-            AppendMenu(m, MF_ENABLED, IDM_SHOWLOG, "事件日志记录(&E)");
+            AppendMenu(m, MF_ENABLED, IDM_SHOWLOG, "事件日志(&E)");
             AppendMenu(m, MF_SEPARATOR, 0, 0);
             AppendMenu(m, MF_ENABLED, IDM_NEWSESS, "新会话(&W)...");
-            AppendMenu(m, MF_ENABLED, IDM_DUPSESS, "复制会话(&D)");
+            AppendMenu(m, MF_ENABLED, IDM_DUPSESS, "克隆会话(&D)");
             AppendMenu(m, MF_POPUP | MF_ENABLED, (UINT_PTR)wgs->savedsess_menu,
                        "保存的会话(&V)");
             AppendMenu(m, MF_ENABLED, IDM_RECONF, "修改设置(&G)...");
             AppendMenu(m, MF_SEPARATOR, 0, 0);
-            AppendMenu(m, MF_ENABLED, IDM_COPYALL, "复制所有内容到剪贴板(&O)");
-            AppendMenu(m, MF_ENABLED, IDM_CLRSB, "清除滚动条(&L)");
+            AppendMenu(m, MF_ENABLED, IDM_COPYALL, "全部复制到剪贴板(&O)");
+            AppendMenu(m, MF_ENABLED, IDM_CLRSB, "清空回滚内容(&L)");
             AppendMenu(m, MF_ENABLED, IDM_RESET, "重置终端(&T)");
             AppendMenu(m, MF_SEPARATOR, 0, 0);
             AppendMenu(m, (conf_get_int(wgs->conf, CONF_resize_action)
@@ -773,9 +772,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             AppendMenu(m, MF_SEPARATOR, 0, 0);
             if (has_help())
                 AppendMenu(m, MF_ENABLED, IDM_HELP, "帮助(&H)");
-            str = dupprintf("关于 %s(&A)", appname);
-            AppendMenu(m, MF_ENABLED, IDM_ABOUT, str);
-            sfree(str);
+            /* 关于/帮助按钮已按改造移除，菜单里不再保留「关于」项。 */
         }
     }
 
@@ -1104,7 +1101,7 @@ static void win_seat_update_specials_menu(Seat *seat)
         if (new_menu) {
             InsertMenu(wgs->popup_menus[j].menu, IDM_SHOWLOG,
                        MF_BYCOMMAND | MF_POPUP | MF_ENABLED,
-                       (UINT_PTR) new_menu, "指定命令(&P)");
+                       (UINT_PTR) new_menu, "特殊命令(&P)");
             InsertMenu(wgs->popup_menus[j].menu, IDM_SHOWLOG,
                        MF_BYCOMMAND | MF_SEPARATOR, IDM_SPECIALSEP, 0);
         }
@@ -2119,7 +2116,7 @@ static void exit_callback(void *vctx)
              * we should not generate this informational one. */
             if (exitcode != INT_MAX) {
                 show_mouseptr(wgs, true);
-                MessageBox(wgs->term_hwnd, "连接被远程主机关闭",
+                MessageBox(wgs->term_hwnd, "远程主机意外关闭了连接",
                            appname, MB_OK | MB_ICONINFORMATION);
             }
         }
@@ -2211,7 +2208,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
         if (wgs->backend && wgs->backend->vt->close_warn_text) {
             additional = wgs->backend->vt->close_warn_text(wgs->backend);
         }
-        msg = dupprintf("确定要关闭本会话么？%s%s",
+        msg = dupprintf("确定要关闭本会话吗？%s%s",
                         additional ? "\n" : "",
                         additional ? additional : "");
         if (wgs->session_closed ||
@@ -2346,7 +2343,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
           }
           case IDM_RESTART:
             if (!wgs->backend) {
-                lp_eventlog(&wgs->logpolicy, "----- Session restarted -----");
+                lp_eventlog(&wgs->logpolicy, "----- 会话已重启 -----");
                 term_pwron(wgs->term, false);
                 start_backend(wgs);
             }

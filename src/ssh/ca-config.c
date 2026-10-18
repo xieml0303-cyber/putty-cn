@@ -466,7 +466,7 @@ void setup_ca_config_box(struct controlbox *b)
 
     s = ctrl_getset(b, "Main", "options", "信任此 CA 执行的操作");
 
-    c = ctrl_editbox(s, "信任此密钥进行认证的有效主机(K)", 'h', 100,
+    c = ctrl_editbox(s, "信任此密钥进行认证的有效主机(K)", 'k', 100,
                      HELPCTX(ssh_cert_valid_expr), ca_validity_handler,
                      P(st), P(NULL));
     st->ca_validity_edit = c;

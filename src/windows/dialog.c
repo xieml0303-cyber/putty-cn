@@ -219,7 +219,7 @@ static char *events_initial[LOGEVENT_INITIAL_MAX];
 static char *events_circular[LOGEVENT_CIRCULAR_MAX];
 static int ninitial = 0, ncircular = 0, circular_first = 0;
 
-#define PRINTER_DISABLED_STRING "无 (禁止打印)"
+#define PRINTER_DISABLED_STRING "无（禁止打印）"
 
 void force_normal(HWND hwnd)
 {
@@ -299,7 +299,7 @@ static INT_PTR CALLBACK LogProc(HWND hwnd, UINT msg,
 
     switch (msg) {
       case WM_INITDIALOG: {
-        char *str = dupprintf("%s 事件日志记录", appname);
+        char *str = dupprintf("%s 事件日志", appname);
         SetWindowText(hwnd, str);
         sfree(str);
 

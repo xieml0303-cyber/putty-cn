@@ -914,7 +914,7 @@ SeatPromptResult verify_ssh_host_key(
             sfree(base64blob);
         }
 
-        return SPR_SW_ABORT("Host key not in manually configured list");
+        return SPR_SW_ABORT("主机密钥不在手动配置的列表中");
     }
 
     /*
@@ -944,21 +944,21 @@ SeatPromptResult verify_ssh_host_key(
         seat_dialog_text_append(
             text, SDT_SCARY_HEADING, "**警告** - 潜在安全隐患！");
         seat_dialog_text_append(
-            text, SDT_PARA, "此服务器提供了经过认证的主机密钥:");
+            text, SDT_PARA, "此服务器提供了带证书的主机密钥：");
         seat_dialog_text_append(
             text, SDT_DISPLAY, "%s (端口 %d)", host, port);
         if (ca_count) {
             seat_dialog_text_append(
-                text, SDT_PARA, "此服务器是由其他证书颁发机构签名认证，"
-                "并未配置在 %s 可信证书颁发机构 (CA) 中。",
+                text, SDT_PARA, "该服务器由某个 CA 签名，"
+                "但该 CA 未在 %s 中配置为可信。",
                 appname);
             if (storage_status == 2) {
                 seat_dialog_text_append(
-                    text, SDT_PARA, "**此外**ALSO，此服务器密钥与 "
+                    text, SDT_PARA, "**此外**，此服务器密钥与 "
                     "%s 此前缓存的密钥不匹配。", appname);
                 seat_dialog_text_append(
                     text, SDT_PARA, "这说明有其他证书颁发机构在此网络提供服务，"
-                    "**并且*可能是该服务器管理员更新了主机密钥，"
+                    "**并且**可能是该服务器管理员更新了主机密钥，"
                     "或者更可能是连接到了一台伪装成该服务器的其他计算机系统。");
             } else {
                 seat_dialog_text_append(
@@ -968,7 +968,7 @@ SeatPromptResult verify_ssh_host_key(
         } else {
             assert(storage_status == 2);
             seat_dialog_text_append(
-                text, SDT_PARA, "此服务器认证密钥与 "
+                text, SDT_PARA, "此服务器带证书的密钥与 "
                 "%s 此前缓存的密钥不匹配。", appname);
             seat_dialog_text_append(
                 text, SDT_PARA, "这说明可能该服务器管理员更新了主机密钥，"
@@ -985,7 +985,7 @@ SeatPromptResult verify_ssh_host_key(
         seat_dialog_text_append(
             text, SDT_DISPLAY, "%s (端口 %d)", host, port);
         seat_dialog_text_append(
-            text, SDT_PARA, "不能保证该服务器是能够正确访问的计算机。");
+            text, SDT_PARA, "无法保证该服务器就是你认为的那台计算机。");
         seat_dialog_text_append(
             text, SDT_PARA, "该服务器的 %s 密钥指纹为:", keytype);
         seat_dialog_text_append(
@@ -1016,16 +1016,16 @@ SeatPromptResult verify_ssh_host_key(
 
     if (storage_status == 1) {
         seat_dialog_text_append(
-            text, SDT_PARA, "如果信任该主机，请%s增加密钥到"
-            "%s 缓存中，并继续连接。",
+            text, SDT_PARA, "如果信任该主机，请%s，将密钥加入"
+            "%s 的缓存，并继续连接。",
             pds->hk_accept_action, appname);
         if (key && ssh_key_alg(key)->is_certificate) {
             seat_dialog_text_append(
-                text, SDT_PARA, "(储存此认证密钥到缓存中将不会"
-                "导致其证书颁发机构信任任何其他密钥或主机。)");
+                text, SDT_PARA, "（将此证书密钥存入缓存，不会"
+                "使其证书颁发机构获得对其他密钥或主机的信任。）");
         }
         seat_dialog_text_append(
-            text, SDT_PARA, "如果仅仅只希望进行本次连接，而不将密钥储存，"
+            text, SDT_PARA, "如果只希望进行本次连接，而不将密钥储存，"
             "请%s。",
             pds->hk_connect_once_action);
         seat_dialog_text_append(
@@ -1040,11 +1040,11 @@ SeatPromptResult verify_ssh_host_key(
             pds->hk_accept_action, appname);
         if (key && ssh_key_alg(key)->is_certificate) {
             seat_dialog_text_append(
-                text, SDT_PARA, "(储存此认证密钥到缓存中将不会"
-                "导致其证书颁发机构信任任何其他密钥或主机。)");
+                text, SDT_PARA, "（将此证书密钥存入缓存，不会"
+                "使其证书颁发机构获得对其他密钥或主机的信任。）");
         }
         seat_dialog_text_append(
-            text, SDT_PARA, "如果仅仅只希望继续本次连接，而不更新系统缓存，"
+            text, SDT_PARA, "如果只希望继续本次连接，而不更新系统缓存，"
             "请%s。", pds->hk_connect_once_action);
         seat_dialog_text_append(
             text, SDT_PARA, "如果希望完全放弃本次连接，"
@@ -1091,7 +1091,7 @@ SeatPromptResult confirm_weak_crypto_primitive(
         seat_dialog_text_append(
             text, SDT_PARA,
             "服务器支持的第一个 %s 为 %s，"
-            "其低于配置的警告阀值。",
+            "其低于配置的警告阈值。",
             algtype, algname);
         break;
       case WCR_TERRAPIN:
@@ -1099,18 +1099,18 @@ SeatPromptResult confirm_weak_crypto_primitive(
         seat_dialog_text_append(
             text, SDT_PARA,
             "该会话选择的 %s 为 %s，"
-            "其连接的服务器会受到“Terrapin” CVE-2023-48795 漏洞攻击，"
+            "该连接所用算法存在 Terrapin CVE-2023-48795 漏洞，"
             "可能会让攻击者修改加密会话。",
             algtype, algname);
         seat_dialog_text_append(
             text, SDT_PARA,
-            "如果可以升级、修补或重新配置该 SSH 服务器是避免此漏洞的最佳方法。");
+            "升级、修补或重新配置该服务器，是避免此漏洞的最佳方法。");
         if (wcr == WCR_TERRAPIN_AVOIDABLE) {
             seat_dialog_text_append(
                 text, SDT_PARA,
                 "另外还可以放弃此连接来避免此漏洞，"
-                "在 PuTTY SSH 密钥配置种将 ChaCha20 移动到"
-                "“下面为警告选项” 线下（以便选择没有漏洞的算法），"
+                "在 PuTTY SSH 密钥配置中将 ChaCha20 移动到"
+                "“下面为警告选项”之下（以便选择没有漏洞的算法），"
                 "然后打开新的连接。");
         }
         break;
@@ -1127,7 +1127,7 @@ SeatPromptResult confirm_weak_crypto_primitive(
         "放弃连接，%s。",
         pds->weak_accept_action, pds->weak_cancel_action);
 
-    seat_dialog_text_append(text, SDT_PROMPT, "是否继续连接?");
+    seat_dialog_text_append(text, SDT_PROMPT, "是否继续连接？");
 
     SeatPromptResult toret = seat_confirm_weak_crypto_primitive(
         iseat, text, callback, ctx);
@@ -1148,11 +1148,11 @@ SeatPromptResult confirm_weak_cached_hostkey(
     seat_dialog_text_append(
         text, SDT_PARA,
         "此服务器要存储的第一个主机密钥类型"
-        "为 %s，其低于配置的警告阀值。", algname);
+        "为 %s，其低于配置的警告阈值。", algname);
 
     seat_dialog_text_append(
         text, SDT_PARA,
-        "此服务器同时也提供有下列高于阀值的"
+        "该服务器还提供以下高于阈值的"
         "主机密钥类型（不会存储）：");
 
     for (const char **p = betteralgs; *p; p++)
@@ -1167,7 +1167,7 @@ SeatPromptResult confirm_weak_cached_hostkey(
         "放弃连接，%s。",
         pds->weak_accept_action, pds->weak_cancel_action);
 
-    seat_dialog_text_append(text, SDT_PROMPT, "是否继续连接?");
+    seat_dialog_text_append(text, SDT_PROMPT, "是否继续连接？");
 
     SeatPromptResult toret = seat_confirm_weak_cached_hostkey(
         iseat, text, callback, ctx);

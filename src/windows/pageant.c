@@ -1854,7 +1854,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      */
     if (already_running) {
         if (!command && !nclkeys) {
-            MessageBox(NULL, "Pageant 已经运行了", "Pageant 错误",
+            MessageBox(NULL, "Pageant 已在运行", "Pageant 错误",
                        MB_ICONERROR | MB_OK);
         }
         return 0;
