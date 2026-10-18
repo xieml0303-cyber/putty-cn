@@ -19,3 +19,8 @@ build/
 
 # Mimosa 扫描器会话状态
 .mimosa/
+
+# .workbuddy 下的本地诊断脚本与临时截图（只保留 Markdown 报告）
+.workbuddy/*.png
+.workbuddy/*.py
+.workbuddy/*.txt
