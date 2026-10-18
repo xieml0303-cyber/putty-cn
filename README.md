@@ -38,7 +38,7 @@
 |------|------|-------------|--------|
 | [`putty.exe`](dist/putty.exe) | 图形界面终端（SSH / Telnet / 串口） | 1,845,159 | `ac439a437d881fcda8707e497257e1793cbd9a5479839f156c1f23f9e42026d3` |
 | [`puttygen.exe`](dist/puttygen.exe) | 密钥生成 / 转换工具 | 902,380 | `4aae98bf6358cf42e32c804a1ed732bf6ee6fb500a0a691f9a60e549df8f3f19` |
-| [`plink.exe`](dist/plink.exe) | 命令行 SSH 客户端 | 1,416,971 | `463c7a17f8f2eb3337dda4bb531300ac5c7bcb1b2ca5751fe71e6e29fecb6ad3` |
+| [`plink.exe`](dist/plink.exe) | 命令行 SSH 客户端 | 1,416,971 | `ce71ef29ddfeea3d32d63c1cb20d23b061534f6a5cd6bef0fd54a78610b9b2f3` |
 | [`pscp.exe`](dist/pscp.exe) | SCP 文件传输 | 1,414,811 | `2455fde87f08b440b0080061357f0d04ead16306b84c2d841ae7d6477c8003cc` |
 | [`psftp.exe`](dist/psftp.exe) | SFTP 文件传输 | 1,430,258 | `c360f05579046f74ae9b087cd88e16150da51f240f4fa0bd24af46204ed47a4c` |
 

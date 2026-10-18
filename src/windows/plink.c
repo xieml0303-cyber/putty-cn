@@ -540,7 +540,7 @@ int main(int argc, char **argv)
                              &realhost, nodelay,
                              conf_get_bool(conf, CONF_tcp_keepalives));
         if (error) {
-            fprintf(stderr, "无法打开连接:\n%s", error);
+            fprintf(stderr, "无法打开连接:\n%s\n", error);
             sfree(error);
             return 1;
         }
