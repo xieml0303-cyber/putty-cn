@@ -25,10 +25,12 @@ reports/*.png
 reports/*.py
 reports/*.txt
 reports/*.ps1
+reports/*.log
+reports/__pycache__/
 
 # 本地二进制备份（不进版本库，仅保留 .reg 文本快照）
 backup/*.exe*
 backup/*.bak
 
-# 本地工作目录（临时截图、脚本）
+# 旧报告目录名（2026-10-18 已更名为 reports/），保留忽略规则防止误建
 .workbuddy/
