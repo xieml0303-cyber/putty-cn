@@ -708,7 +708,7 @@ SeatPromptResult console_get_userpass_input(prompts_t *p)
 
         if (!console_read_line_to_strbuf(conio, pr->echo, pr->result)) {
             result = make_spr_sw_abort_winerror(
-                "从控制台读取错误", GetLastError());
+                "从控制台读取时出错", GetLastError());
             goto out;
         } else if (!pr->result->len) {
             /* Regard EOF on the terminal as a deliberate user-abort */

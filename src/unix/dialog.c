@@ -1141,6 +1141,38 @@ void dlg_end(dlgparam *dp, int value)
     gtk_widget_destroy(dp->window);
 }
 
+/*
+ * GTK has no in-place Apply for a mid-session config box: it closes
+ * the box and the caller then applies the settings. So report the
+ * capability as absent and let the caller use dlg_end() instead.
+ */
+bool dlg_apply_config(dlgparam *dp)
+{
+    return false;
+}
+
+/*
+ * GTK doesn't track an unsaved-changes history for the config box;
+ * the buttons keep their traditional behaviour.
+ */
+void dlg_update_apply_buttons(dlgparam *dp)
+{
+}
+
+bool dlg_has_unsaved_changes(dlgparam *dp)
+{
+    return false;
+}
+
+void dlg_mark_clean(dlgparam *dp)
+{
+}
+
+bool dlg_undo_change(dlgparam *dp)
+{
+    return false;
+}
+
 void dlg_refresh(dlgcontrol *ctrl, dlgparam *dp)
 {
     struct uctrl *uc;

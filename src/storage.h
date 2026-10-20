@@ -92,6 +92,11 @@ void free_recent_hosts(char **hosts, int count);
 
 char **get_serial_ports(int *count);
 void free_serial_ports(char **ports, int count);
+/*
+ * True if the named port is a Bluetooth virtual serial port rather
+ * than a wired one, so callers can prefer real hardware.
+ */
+bool serial_port_is_bluetooth(const char *port);
 
 /* ----------------------------------------------------------------------
  * Functions to access PuTTY's host key database.

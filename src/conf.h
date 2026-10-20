@@ -65,6 +65,7 @@ CONF_OPTION(warn_on_close,
 )
 CONF_OPTION(ping_interval,
     VALUE_TYPE(INT), /* in seconds */
+    DEFAULT_INT(30),
     LOAD_CUSTOM, SAVE_CUSTOM,
     /*
      * Saving/loading is handled by custom code because for historical
@@ -82,7 +83,7 @@ CONF_OPTION(tcp_nodelay,
 )
 CONF_OPTION(tcp_keepalives,
     VALUE_TYPE(BOOL),
-    DEFAULT_BOOL(false),
+    DEFAULT_BOOL(true),
     SAVE_KEYWORD("TCPKeepalives"),
 )
 CONF_OPTION(loghost, /* logical host being contacted, for host key check */

@@ -16,6 +16,7 @@
 #define IDD_HOSTKEY      114
 #define IDD_HK_MOREINFO  116
 #define IDD_CA_CONFIG    117
+#define IDD_SAVECHANGES  118
 
 #define IDN_LIST        1001
 #define IDN_COPY        1002
@@ -31,6 +32,8 @@
 #define IDC_TABLIST     1004
 #define IDC_HELPBTN     1005
 #define IDC_ABOUT       1006
+#define IDC_SAVE_EXIT    1007
+#define IDC_DISCARD_EXIT 1008
 
 #define IDC_HK_ICON       98
 #define IDC_HK_TITLE      99

@@ -461,6 +461,12 @@ struct controlbox {
     size_t freesize;
     void **frees;                      /* array of aux data areas to free */
     ctrl_freefn_t *freefuncs;          /* parallel array of free functions */
+    /*
+     * In a mid-session config box, the "Apply" and "Undo" buttons
+     * whose enabled state follows the dialog's unsaved-changes
+     * tracking. Filled in by setup_config_box().
+     */
+    dlgcontrol *apply_button, *undo_button;
 };
 
 struct controlbox *ctrl_new_box(void);
@@ -635,6 +641,24 @@ void dlg_info_msg(dlgparam *dp, const char *msg);
  * a success status).
  */
 void dlg_end(dlgparam *dp, int value);
+/*
+ * Ask the front end to adopt the current settings of a mid-session
+ * config box in place, leaving the box open so that more settings can
+ * still be changed. Returns false if the platform has no such
+ * capability, in which case the caller should fall back to dlg_end().
+ */
+bool dlg_apply_config(dlgparam *dp);
+
+/*
+ * Unsaved-changes tracking for a mid-session config box. The platform
+ * records a snapshot of the settings before each user edit, so that
+ * "Undo" can step back through the edit history. "Apply" and "Undo"
+ * are greyed out when there is nothing to apply or undo.
+ */
+void dlg_update_apply_buttons(dlgparam *dp);
+bool dlg_has_unsaved_changes(dlgparam *dp);
+void dlg_mark_clean(dlgparam *dp);
+bool dlg_undo_change(dlgparam *dp);
 
 /*
  * Routines to manage a (per-platform) colour selector.

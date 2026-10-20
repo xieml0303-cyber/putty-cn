@@ -45,7 +45,7 @@ static size_t serial_gotdata(
 {
     Serial *serial = (Serial *)handle_get_privdata(h);
     if (err || len == 0) {
-        const char *error_msg;
+        char *error_msg;
 
         /*
          * Currently, len==0 should never happen because we're
@@ -55,9 +55,11 @@ static size_t serial_gotdata(
          * may become meaningful here.
          */
         if (!err)
-            error_msg = "从串口设备读取时到达文件末尾";
+            error_msg = dupstr("串口设备已到达文件末尾");
         else
-            error_msg = "从串口设备读取错误";
+            error_msg = dupprintf(
+                "读取串口设备时出错，串口可能已断开（%s）",
+                win_strerror(err));
 
         serial_terminate(serial);
 
@@ -66,6 +68,8 @@ static size_t serial_gotdata(
         logevent(serial->logctx, error_msg);
 
         seat_connection_fatal(serial->seat, "%s", error_msg);
+
+        sfree(error_msg);
 
         return 0;
     } else {
@@ -78,7 +82,8 @@ static void serial_sentdata(struct handle *h, size_t new_backlog, int err,
 {
     Serial *serial = (Serial *)handle_get_privdata(h);
     if (err) {
-        const char *error_msg = "写入串口设备错误";
+        char *error_msg = dupprintf(
+            "写入串口设备时出错，串口可能已断开（%s）", win_strerror(err));
 
         serial_terminate(serial);
 
@@ -87,6 +92,8 @@ static void serial_sentdata(struct handle *h, size_t new_backlog, int err,
         logevent(serial->logctx, error_msg);
 
         seat_connection_fatal(serial->seat, "%s", error_msg);
+
+        sfree(error_msg);
     } else {
         serial->bufsize = new_backlog;
         seat_sent(serial->seat, serial->bufsize);

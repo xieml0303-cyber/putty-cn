@@ -167,6 +167,11 @@ dlgcontrol *dlg_last_focused(dlgcontrol *ctrl, dlgparam *dp)
 void dlg_beep(dlgparam *dp) { }
 void dlg_error_msg(dlgparam *dp, const char *msg) { }
 void dlg_end(dlgparam *dp, int value) { }
+bool dlg_apply_config(dlgparam *dp) { return false; }
+void dlg_update_apply_buttons(dlgparam *dp) { }
+bool dlg_has_unsaved_changes(dlgparam *dp) { return false; }
+void dlg_mark_clean(dlgparam *dp) { }
+bool dlg_undo_change(dlgparam *dp) { return false; }
 void dlg_coloursel_start(dlgcontrol *ctrl, dlgparam *dp,
                          int r, int g, int b) { }
 bool dlg_coloursel_results(dlgcontrol *ctrl, dlgparam *dp,

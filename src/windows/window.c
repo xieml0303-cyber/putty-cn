@@ -346,7 +346,7 @@ static void close_session(void *vctx)
     int i;
 
     wgs->session_closed = true;
-    newtitle = dupprintf("%s (不活动的)", appname);
+    newtitle = dupprintf("%s (已断开)", appname);
     win_set_icon_title(&wgs->termwin, newtitle, DEFAULT_CODEPAGE);
     win_set_title(&wgs->termwin, newtitle, DEFAULT_CODEPAGE);
     sfree(newtitle);
@@ -750,21 +750,38 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         get_sesslist(&sesslist, true);
         update_savedsess_menu(wgs);
 
+        /*
+         * Menu bar with the two custom top-level entries. Items that
+         * used to live in the context menu are grouped under these.
+         */
+        wgs->menubar = CreateMenu();
+        wgs->menu_session = CreatePopupMenu();
+        wgs->menu_func = CreatePopupMenu();
+
+        AppendMenu(wgs->menu_session, MF_ENABLED, IDM_NEWSESS,
+                   "新会话(&W)...");
+        AppendMenu(wgs->menu_session, MF_ENABLED, IDM_RECONF,
+                   "会话设置(&G)...");
+
+        AppendMenu(wgs->menu_func, MF_ENABLED, IDM_SHOWLOG,
+                   "事件日志(&E)");
+        AppendMenu(wgs->menu_func, MF_ENABLED, IDM_COPYALL,
+                   "全部复制到剪贴板(&O)");
+        AppendMenu(wgs->menu_func, MF_ENABLED, IDM_RESET, "清屏(&T)");
+        AppendMenu(wgs->menu_func, MF_ENABLED, IDM_CLRSB,
+                   "清空回滚内容(&L)");
+
+        AppendMenu(wgs->menubar, MF_POPUP | MF_ENABLED,
+                   (UINT_PTR)wgs->menu_session, "会话(&S)");
+        AppendMenu(wgs->menubar, MF_POPUP | MF_ENABLED,
+                   (UINT_PTR)wgs->menu_func, "功能(&F)");
+        SetMenu(wgs->term_hwnd, wgs->menubar);
+
         for (j = 0; j < lenof(wgs->popup_menus); j++) {
             m = wgs->popup_menus[j].menu;
 
             AppendMenu(m, MF_SEPARATOR, 0, 0);
-            AppendMenu(m, MF_ENABLED, IDM_SHOWLOG, "事件日志(&E)");
-            AppendMenu(m, MF_SEPARATOR, 0, 0);
-            AppendMenu(m, MF_ENABLED, IDM_NEWSESS, "新会话(&W)...");
-            AppendMenu(m, MF_ENABLED, IDM_DUPSESS, "克隆会话(&D)");
-            AppendMenu(m, MF_POPUP | MF_ENABLED, (UINT_PTR)wgs->savedsess_menu,
-                       "保存的会话(&V)");
-            AppendMenu(m, MF_ENABLED, IDM_RECONF, "修改设置(&G)...");
-            AppendMenu(m, MF_SEPARATOR, 0, 0);
-            AppendMenu(m, MF_ENABLED, IDM_COPYALL, "全部复制到剪贴板(&O)");
             AppendMenu(m, MF_ENABLED, IDM_CLRSB, "清空回滚内容(&L)");
-            AppendMenu(m, MF_ENABLED, IDM_RESET, "重置终端(&T)");
             AppendMenu(m, MF_SEPARATOR, 0, 0);
             AppendMenu(m, (conf_get_int(wgs->conf, CONF_resize_action)
                            == RESIZE_DISABLED) ? MF_GRAYED : MF_ENABLED,
@@ -1044,7 +1061,7 @@ static void win_seat_update_specials_menu(Seat *seat)
 {
     WinGuiSeat *wgs = container_of(seat, WinGuiSeat, seat);
     HMENU new_menu;
-    int i, j;
+    int i;
 
     if (wgs->backend)
         wgs->specials = backend_get_specials(wgs->backend);
@@ -1091,18 +1108,22 @@ static void win_seat_update_specials_menu(Seat *seat)
         wgs->n_specials = 0;
     }
 
-    for (j = 0; j < lenof(wgs->popup_menus); j++) {
+    /*
+     * The Special Commands submenu lives in the menu bar's "功能"
+     * entry, ahead of the event log.
+     */
+    if (wgs->menu_func) {
         if (wgs->specials_menu) {
             /* XXX does this free up all submenus? */
-            DeleteMenu(wgs->popup_menus[j].menu, (UINT_PTR)wgs->specials_menu,
+            DeleteMenu(wgs->menu_func, (UINT_PTR)wgs->specials_menu,
                        MF_BYCOMMAND);
-            DeleteMenu(wgs->popup_menus[j].menu, IDM_SPECIALSEP, MF_BYCOMMAND);
+            DeleteMenu(wgs->menu_func, IDM_SPECIALSEP, MF_BYCOMMAND);
         }
         if (new_menu) {
-            InsertMenu(wgs->popup_menus[j].menu, IDM_SHOWLOG,
+            InsertMenu(wgs->menu_func, IDM_SHOWLOG,
                        MF_BYCOMMAND | MF_POPUP | MF_ENABLED,
                        (UINT_PTR) new_menu, "特殊命令(&P)");
-            InsertMenu(wgs->popup_menus[j].menu, IDM_SHOWLOG,
+            InsertMenu(wgs->menu_func, IDM_SHOWLOG,
                        MF_BYCOMMAND | MF_SEPARATOR, IDM_SPECIALSEP, 0);
         }
     }
@@ -2191,6 +2212,194 @@ static void wm_size_resize_term(WinGuiSeat *wgs, LPARAM lParam)
     conf_set_int(wgs->conf, CONF_width, w);
 }
 
+struct reconfig_apply_ctx {
+    WinGuiSeat *wgs;
+    HWND hwnd;
+    Conf *applied;               /* settings the session is running with */
+};
+
+/*
+ * Adopt the settings currently held in wgs->conf into the live
+ * session. Called when the user hits Apply in the mid-session Change
+ * Settings box (which stays open), and again if the box is closed
+ * normally. ctx->applied tracks the state actually in effect, so that
+ * cancelling the box reverts to it.
+ */
+static void reconfig_apply(void *vctx)
+{
+    struct reconfig_apply_ctx *ctx = (struct reconfig_apply_ctx *)vctx;
+    WinGuiSeat *wgs = ctx->wgs;
+    HWND hwnd = ctx->hwnd;
+    Conf *prev_conf = ctx->applied;
+    int resize_action, init_lvl = 1;
+
+    conf_cache_data(wgs);
+
+    resize_action = conf_get_int(wgs->conf, CONF_resize_action);
+    {
+        /* Disable full-screen if resizing forbidden */
+        int i;
+        for (i = 0; i < lenof(wgs->popup_menus); i++)
+            EnableMenuItem(wgs->popup_menus[i].menu, IDM_FULLSCREEN,
+                           MF_BYCOMMAND |
+                           (resize_action == RESIZE_DISABLED
+                            ? MF_GRAYED : MF_ENABLED));
+        /* Gracefully unzoom if necessary */
+        if (IsZoomed(hwnd) && (resize_action == RESIZE_DISABLED))
+            ShowWindow(hwnd, SW_RESTORE);
+    }
+
+    /* Pass new config data to the logging module */
+    log_reconfig(wgs->logctx, wgs->conf);
+
+    sfree(wgs->logpal);
+    /*
+     * Flush the line discipline's edit buffer in the
+     * case where local editing has just been disabled.
+     */
+    if (wgs->ldisc) {
+        ldisc_configure(wgs->ldisc, wgs->conf);
+        ldisc_echoedit_update(wgs->ldisc);
+    }
+
+    if (conf_get_bool(wgs->conf, CONF_system_colour) !=
+        conf_get_bool(prev_conf, CONF_system_colour))
+        term_notify_palette_changed(wgs->term);
+
+    /* Pass new config data to the terminal */
+    term_reconfig(wgs->term, wgs->conf);
+    setup_clipboards(wgs->term, wgs->conf);
+
+    /* Reinitialise the colour palette, in case the terminal
+     * just read new settings out of Conf */
+    if (wgs->pal)
+        DeleteObject(wgs->pal);
+    wgs->logpal = NULL;
+    wgs->pal = NULL;
+    init_palette(wgs);
+
+    /* Pass new config data to the back end */
+    if (wgs->backend)
+        backend_reconfig(wgs->backend, wgs->conf);
+
+    /* Screen size changed ? */
+    if (conf_get_int(wgs->conf, CONF_height) !=
+        conf_get_int(prev_conf, CONF_height) ||
+        conf_get_int(wgs->conf, CONF_width) !=
+        conf_get_int(prev_conf, CONF_width) ||
+        conf_get_int(wgs->conf, CONF_savelines) !=
+        conf_get_int(prev_conf, CONF_savelines) ||
+        resize_action == RESIZE_FONT ||
+        (resize_action == RESIZE_EITHER && IsZoomed(hwnd)) ||
+        resize_action == RESIZE_DISABLED)
+        term_size(wgs->term, conf_get_int(wgs->conf, CONF_height),
+                  conf_get_int(wgs->conf, CONF_width),
+                  conf_get_int(wgs->conf, CONF_savelines));
+
+    /* Enable or disable the scroll bar, etc */
+    {
+        LONG nflg, flag = GetWindowLongPtr(hwnd, GWL_STYLE);
+        LONG nexflag, exflag =
+            GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+
+        nexflag = exflag;
+        if (conf_get_bool(wgs->conf, CONF_alwaysontop) !=
+            conf_get_bool(prev_conf, CONF_alwaysontop)) {
+            if (conf_get_bool(wgs->conf, CONF_alwaysontop)) {
+                nexflag |= WS_EX_TOPMOST;
+                SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE);
+            } else {
+                nexflag &= ~(WS_EX_TOPMOST);
+                SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE);
+            }
+        }
+        if (conf_get_bool(wgs->conf, CONF_sunken_edge))
+            nexflag |= WS_EX_CLIENTEDGE;
+        else
+            nexflag &= ~(WS_EX_CLIENTEDGE);
+
+        nflg = flag;
+        if (conf_get_bool(wgs->conf, is_full_screen(wgs) ?
+                          CONF_scrollbar_in_fullscreen :
+                          CONF_scrollbar))
+            nflg |= WS_VSCROLL;
+        else
+            nflg &= ~WS_VSCROLL;
+
+        if (resize_action == RESIZE_DISABLED ||
+            is_full_screen(wgs))
+            nflg &= ~WS_THICKFRAME;
+        else
+            nflg |= WS_THICKFRAME;
+
+        if (resize_action == RESIZE_DISABLED)
+            nflg &= ~WS_MAXIMIZEBOX;
+        else
+            nflg |= WS_MAXIMIZEBOX;
+
+        if (nflg != flag || nexflag != exflag) {
+            if (nflg != flag)
+                SetWindowLongPtr(hwnd, GWL_STYLE, nflg);
+            if (nexflag != exflag)
+                SetWindowLongPtr(hwnd, GWL_EXSTYLE, nexflag);
+
+            SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
+                         SWP_NOACTIVATE | SWP_NOCOPYBITS |
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                         SWP_FRAMECHANGED);
+
+            init_lvl = 2;
+        }
+    }
+
+    /* Oops */
+    if (resize_action == RESIZE_DISABLED && IsZoomed(hwnd)) {
+        force_normal(hwnd);
+        init_lvl = 2;
+    }
+
+    {
+        FontSpec *font = conf_get_fontspec(wgs->conf, CONF_font);
+        FontSpec *prev_font = conf_get_fontspec(prev_conf,
+                                                CONF_font);
+
+        if (!strcmp(font->name, prev_font->name) ||
+            !strcmp(conf_get_str(wgs->conf, CONF_line_codepage),
+                    conf_get_str(prev_conf, CONF_line_codepage)) ||
+            font->isbold != prev_font->isbold ||
+            font->height != prev_font->height ||
+            font->charset != prev_font->charset ||
+            conf_get_int(wgs->conf, CONF_font_quality) !=
+            conf_get_int(prev_conf, CONF_font_quality) ||
+            conf_get_int(wgs->conf, CONF_vtmode) !=
+            conf_get_int(prev_conf, CONF_vtmode) ||
+            conf_get_int(wgs->conf, CONF_bold_style) !=
+            conf_get_int(prev_conf, CONF_bold_style) ||
+            resize_action == RESIZE_DISABLED ||
+            resize_action == RESIZE_EITHER ||
+            resize_action != conf_get_int(prev_conf,
+                                          CONF_resize_action))
+            init_lvl = 2;
+    }
+
+    InvalidateRect(hwnd, NULL, true);
+    reset_window(wgs, init_lvl);
+
+    /*
+     * The main event loop is not running while the config box is
+     * modal, so anything the terminal deferred (window title, palette,
+     * cursor shape) would not show up until the box closed. Flush it
+     * now, so that hitting Apply has a visible effect straight away.
+     */
+    term_update(wgs->term);
+
+    /* These settings are now what a subsequent cancel reverts to. */
+    conf_free(ctx->applied);
+    ctx->applied = conf_copy(wgs->conf);
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                                 WPARAM wParam, LPARAM lParam)
 {
@@ -2223,6 +2432,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
         return 0;
       }
       case WM_DESTROY:
+        if (wgs && wgs->imc)
+            ImmAssociateContext(hwnd, wgs->imc);
         show_mouseptr(wgs, true);
         PostQuitMessage(0);
         return 0;
@@ -2350,8 +2561,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 
             break;
           case IDM_RECONF: {
-            Conf *prev_conf;
-            int init_lvl = 1;
+            struct reconfig_apply_ctx rctx;
             bool reconfig_result;
 
             if (wgs->reconfiguring)
@@ -2360,172 +2570,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                 wgs->reconfiguring = true;
 
             term_pre_reconfig(wgs->term, wgs->conf);
-            prev_conf = conf_copy(wgs->conf);
+            rctx.wgs = wgs;
+            rctx.hwnd = hwnd;
+            rctx.applied = conf_copy(wgs->conf);
 
             reconfig_result = do_reconfig(
                 hwnd, wgs->conf,
-                wgs->backend ? backend_cfg_info(wgs->backend) : 0);
+                wgs->backend ? backend_cfg_info(wgs->backend) : 0,
+                reconfig_apply, &rctx);
             wgs->reconfiguring = false;
             if (!reconfig_result) {
-                conf_free(prev_conf);
+                /* Cancelled: do_reconfig has rolled the settings back
+                 * to the ones last applied, which are already live. */
+                conf_free(rctx.applied);
                 break;
             }
 
-            conf_cache_data(wgs);
-
-            resize_action = conf_get_int(wgs->conf, CONF_resize_action);
-            {
-                /* Disable full-screen if resizing forbidden */
-                int i;
-                for (i = 0; i < lenof(wgs->popup_menus); i++)
-                    EnableMenuItem(wgs->popup_menus[i].menu, IDM_FULLSCREEN,
-                                   MF_BYCOMMAND |
-                                   (resize_action == RESIZE_DISABLED
-                                    ? MF_GRAYED : MF_ENABLED));
-                /* Gracefully unzoom if necessary */
-                if (IsZoomed(hwnd) && (resize_action == RESIZE_DISABLED))
-                    ShowWindow(hwnd, SW_RESTORE);
-            }
-
-            /* Pass new config data to the logging module */
-            log_reconfig(wgs->logctx, wgs->conf);
-
-            sfree(wgs->logpal);
-            /*
-             * Flush the line discipline's edit buffer in the
-             * case where local editing has just been disabled.
-             */
-            if (wgs->ldisc) {
-                ldisc_configure(wgs->ldisc, wgs->conf);
-                ldisc_echoedit_update(wgs->ldisc);
-            }
-
-            if (conf_get_bool(wgs->conf, CONF_system_colour) !=
-                conf_get_bool(prev_conf, CONF_system_colour))
-                term_notify_palette_changed(wgs->term);
-
-            /* Pass new config data to the terminal */
-            term_reconfig(wgs->term, wgs->conf);
-            setup_clipboards(wgs->term, wgs->conf);
-
-            /* Reinitialise the colour palette, in case the terminal
-             * just read new settings out of Conf */
-            if (wgs->pal)
-                DeleteObject(wgs->pal);
-            wgs->logpal = NULL;
-            wgs->pal = NULL;
-            init_palette(wgs);
-
-            /* Pass new config data to the back end */
-            if (wgs->backend)
-                backend_reconfig(wgs->backend, wgs->conf);
-
-            /* Screen size changed ? */
-            if (conf_get_int(wgs->conf, CONF_height) !=
-                conf_get_int(prev_conf, CONF_height) ||
-                conf_get_int(wgs->conf, CONF_width) !=
-                conf_get_int(prev_conf, CONF_width) ||
-                conf_get_int(wgs->conf, CONF_savelines) !=
-                conf_get_int(prev_conf, CONF_savelines) ||
-                resize_action == RESIZE_FONT ||
-                (resize_action == RESIZE_EITHER && IsZoomed(hwnd)) ||
-                resize_action == RESIZE_DISABLED)
-                term_size(wgs->term, conf_get_int(wgs->conf, CONF_height),
-                          conf_get_int(wgs->conf, CONF_width),
-                          conf_get_int(wgs->conf, CONF_savelines));
-
-            /* Enable or disable the scroll bar, etc */
-            {
-                LONG nflg, flag = GetWindowLongPtr(hwnd, GWL_STYLE);
-                LONG nexflag, exflag =
-                    GetWindowLongPtr(hwnd, GWL_EXSTYLE);
-
-                nexflag = exflag;
-                if (conf_get_bool(wgs->conf, CONF_alwaysontop) !=
-                    conf_get_bool(prev_conf, CONF_alwaysontop)) {
-                    if (conf_get_bool(wgs->conf, CONF_alwaysontop)) {
-                        nexflag |= WS_EX_TOPMOST;
-                        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                                     SWP_NOMOVE | SWP_NOSIZE);
-                    } else {
-                        nexflag &= ~(WS_EX_TOPMOST);
-                        SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
-                                     SWP_NOMOVE | SWP_NOSIZE);
-                    }
-                }
-                if (conf_get_bool(wgs->conf, CONF_sunken_edge))
-                    nexflag |= WS_EX_CLIENTEDGE;
-                else
-                    nexflag &= ~(WS_EX_CLIENTEDGE);
-
-                nflg = flag;
-                if (conf_get_bool(wgs->conf, is_full_screen(wgs) ?
-                                  CONF_scrollbar_in_fullscreen :
-                                  CONF_scrollbar))
-                    nflg |= WS_VSCROLL;
-                else
-                    nflg &= ~WS_VSCROLL;
-
-                if (resize_action == RESIZE_DISABLED ||
-                    is_full_screen(wgs))
-                    nflg &= ~WS_THICKFRAME;
-                else
-                    nflg |= WS_THICKFRAME;
-
-                if (resize_action == RESIZE_DISABLED)
-                    nflg &= ~WS_MAXIMIZEBOX;
-                else
-                    nflg |= WS_MAXIMIZEBOX;
-
-                if (nflg != flag || nexflag != exflag) {
-                    if (nflg != flag)
-                        SetWindowLongPtr(hwnd, GWL_STYLE, nflg);
-                    if (nexflag != exflag)
-                        SetWindowLongPtr(hwnd, GWL_EXSTYLE, nexflag);
-
-                    SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
-                                 SWP_NOACTIVATE | SWP_NOCOPYBITS |
-                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
-                                 SWP_FRAMECHANGED);
-
-                    init_lvl = 2;
-                }
-            }
-
-            /* Oops */
-            if (resize_action == RESIZE_DISABLED && IsZoomed(hwnd)) {
-                force_normal(hwnd);
-                init_lvl = 2;
-            }
-
-            {
-                FontSpec *font = conf_get_fontspec(wgs->conf, CONF_font);
-                FontSpec *prev_font = conf_get_fontspec(prev_conf,
-                                                        CONF_font);
-
-                if (!strcmp(font->name, prev_font->name) ||
-                    !strcmp(conf_get_str(wgs->conf, CONF_line_codepage),
-                            conf_get_str(prev_conf, CONF_line_codepage)) ||
-                    font->isbold != prev_font->isbold ||
-                    font->height != prev_font->height ||
-                    font->charset != prev_font->charset ||
-                    conf_get_int(wgs->conf, CONF_font_quality) !=
-                    conf_get_int(prev_conf, CONF_font_quality) ||
-                    conf_get_int(wgs->conf, CONF_vtmode) !=
-                    conf_get_int(prev_conf, CONF_vtmode) ||
-                    conf_get_int(wgs->conf, CONF_bold_style) !=
-                    conf_get_int(prev_conf, CONF_bold_style) ||
-                    resize_action == RESIZE_DISABLED ||
-                    resize_action == RESIZE_EITHER ||
-                    resize_action != conf_get_int(prev_conf,
-                                                  CONF_resize_action))
-                    init_lvl = 2;
-            }
-
-            InvalidateRect(hwnd, NULL, true);
-            reset_window(wgs, init_lvl);
-
-            conf_free(prev_conf);
+            reconfig_apply(&rctx);
+            conf_free(rctx.applied);
             break;
           }
           case IDM_COPYALL:
@@ -2883,6 +2945,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
         winselgui_response(message, wParam, lParam);
         return 0;
       case WM_SETFOCUS:
+        /*
+         * Keep the terminal in plain-ASCII input mode: detach this
+         * window's IME context so no Chinese (or other IME) input can
+         * be composed into the session. Other programs are unaffected,
+         * and the context is restored in WM_DESTROY.
+         */
+        if (wgs) {
+            if (!wgs->imc)
+                wgs->imc = ImmAssociateContext(hwnd, NULL);
+            else
+                ImmAssociateContext(hwnd, NULL);
+        }
         term_set_focus(wgs->term, true);
         CreateCaret(hwnd, wgs->caretbm, wgs->font_width, wgs->font_height);
         ShowCaret(hwnd);
@@ -4462,15 +4536,29 @@ static int TranslateKey(WinGuiSeat *wgs, UINT message, WPARAM wParam,
         }
 
         if (wParam == VK_BACK && shift_state == 0) {    /* Backspace */
-            *p++ = (conf_get_bool(wgs->conf, CONF_bksp_is_delete) ?
-                    0x7F : 0x08);
+            /*
+             * Serial consoles (e.g. network switch management ports)
+             * are line-edited by the device itself and expect the
+             * traditional ASCII BS character, not DEL.  The
+             * BackspaceIsDelete setting only makes sense for
+             * network sessions, where the remote pty handles the
+             * erase character.
+             */
+            bool bksp_is_delete =
+                conf_get_bool(wgs->conf, CONF_bksp_is_delete);
+            if (conf_get_int(wgs->conf, CONF_protocol) == PROT_SERIAL)
+                bksp_is_delete = false;
+            *p++ = bksp_is_delete ? 0x7F : 0x08;
             *p++ = 0;
             return -2;
         }
         if (wParam == VK_BACK && shift_state == 1) {    /* Shift Backspace */
             /* We do the opposite of what is configured */
-            *p++ = (conf_get_bool(wgs->conf, CONF_bksp_is_delete) ?
-                    0x08 : 0x7F);
+            bool bksp_is_delete =
+                conf_get_bool(wgs->conf, CONF_bksp_is_delete);
+            if (conf_get_int(wgs->conf, CONF_protocol) == PROT_SERIAL)
+                bksp_is_delete = true;
+            *p++ = bksp_is_delete ? 0x08 : 0x7F;
             *p++ = 0;
             return -2;
         }

@@ -196,10 +196,24 @@ void conf_fontsel_handler(dlgcontrol *ctrl, dlgparam *dlg,
  * COM number left over from another machine, say) doesn't leave the
  * box showing a port that can't be opened.
  */
+/*
+ * The port list shows each entry with a （物理）/（蓝牙） suffix. The
+ * stored setting must remain a bare port name ("COM4"), so strip the
+ * suffix whenever a list entry's text becomes a configuration value.
+ */
+static void strip_port_suffix(char *s)
+{
+    char *p = strstr(s, "（");
+    if (p)
+        *p = '\0';
+}
+
 static void fill_serial_port_list(dlgcontrol *ctrl, dlgparam *dlg,
                                   Conf *conf, const char *current)
 {
     char *saved = current ? dupstr(current) : NULL;
+    if (saved)
+        strip_port_suffix(saved);
     char **ports;
     int nports, i, selected = -1;
     bool present = false;
@@ -208,7 +222,10 @@ static void fill_serial_port_list(dlgcontrol *ctrl, dlgparam *dlg,
     dlg_listbox_clear(ctrl, dlg);
     ports = get_serial_ports(&nports);
     for (i = 0; i < nports; i++) {
-        dlg_listbox_add(ctrl, dlg, ports[i]);
+        char item[64];
+        snprintf(item, sizeof(item), "%s（%s）", ports[i],
+                 serial_port_is_bluetooth(ports[i]) ? "蓝牙" : "物理");
+        dlg_listbox_add(ctrl, dlg, item);
         if (saved && !strcmp(saved, ports[i])) {
             present = true;
             selected = i;
@@ -219,6 +236,23 @@ static void fill_serial_port_list(dlgcontrol *ctrl, dlgparam *dlg,
         saved = dupstr(ports[0]);
         conf_set_str(conf, CONF_serline, saved);
         selected = 0;
+    } else if (present && nports > 0 &&
+               serial_port_is_bluetooth(saved)) {
+        /*
+         * The saved port is a Bluetooth virtual one. If a real serial
+         * port is present (a USB console lead has been plugged in
+         * since the setting was last used), prefer that instead of
+         * staying on the Bluetooth entry.
+         */
+        for (i = 0; i < nports; i++) {
+            if (!serial_port_is_bluetooth(ports[i])) {
+                sfree(saved);
+                saved = dupstr(ports[i]);
+                conf_set_str(conf, CONF_serline, saved);
+                selected = i;
+                break;
+            }
+        }
     }
     free_serial_ports(ports, nports);
     /*
@@ -228,7 +262,14 @@ static void fill_serial_port_list(dlgcontrol *ctrl, dlgparam *dlg,
      */
     if (selected >= 0)
         dlg_listbox_select(ctrl, dlg, selected);
-    dlg_editbox_set(ctrl, dlg, saved ? saved : "");
+    if (saved && saved[0]) {
+        char display[64];
+        snprintf(display, sizeof(display), "%s（%s）", saved,
+                 serial_port_is_bluetooth(saved) ? "蓝牙" : "物理");
+        dlg_editbox_set(ctrl, dlg, display);
+    } else {
+        dlg_editbox_set(ctrl, dlg, "");
+    }
     dlg_update_done(ctrl, dlg);
     sfree(saved);
 }
@@ -272,10 +313,17 @@ static void config_host_handler(dlgcontrol *ctrl, dlgparam *dlg,
         }
     } else if (event == EVENT_VALCHANGE) {
         char *s = dlg_editbox_get(ctrl, dlg);
-        if (conf_get_int(conf, CONF_protocol) == PROT_SERIAL)
+        if (conf_get_int(conf, CONF_protocol) == PROT_SERIAL) {
+            /*
+             * Picking an entry from the drop-down puts its display text
+             * ("COM4（蓝牙）") into the edit box. Store the bare port
+             * name; the box keeps showing the annotated form.
+             */
+            strip_port_suffix(s);
             conf_set_str(conf, CONF_serline, s);
-        else
+        } else {
             conf_set_str(conf, CONF_host, s);
+        }
         sfree(s);
     }
 }
@@ -962,8 +1010,16 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
             /* 退出时关闭窗口固定为「从不」。 */
             conf_set_int(conf, CONF_close_on_exit, FORCE_OFF);
             if (ssd->midsession) {
-                /* In a mid-session Change Settings, Apply is always OK. */
-                dlg_end(dlg, 1);
+                /* In a mid-session Change Settings, Apply takes effect
+                 * at once, but the box stays open so that further
+                 * settings can be changed and applied as well. */
+                if (!dlg_apply_config(dlg))
+                    dlg_end(dlg, 1);
+                else {
+                    /* 已保存，应用/撤销按钮回到置灰状态。 */
+                    dlg_mark_clean(dlg);
+                    dlg_info_msg(dlg, "修改成功！");
+                }
                 return;
             }
             /*
@@ -986,7 +1042,13 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                 dlg_info_msg(dlg, "请先输入主机名称（或 IP 地址），"
                              "或从历史连接记录中选择一项。");
         } else if (ctrl == ssd->cancelbutton) {
-            dlg_end(dlg, 0);
+            if (ssd->midsession) {
+                /* 撤销最近一步修改；平台不支持历史时退回取消语义。 */
+                if (!dlg_undo_change(dlg))
+                    dlg_end(dlg, 0);
+            } else {
+                dlg_end(dlg, 0);
+            }
         }
     }
 }
@@ -1989,10 +2051,18 @@ void setup_config_box(struct controlbox *b, bool midsession,
                                     sessionsaver_handler, P(ssd));
     ssd->okbutton->button.isdefault = true;
     ssd->okbutton->column = 3;
-    ssd->cancelbutton = ctrl_pushbutton(s, "取消(C)", 'c', HELPCTX(no_help),
+    ssd->cancelbutton = ctrl_pushbutton(s,
+                                        (midsession ? "撤销(U)" : "取消(C)"),
+                                        (char)(midsession ? 'u' : 'c'),
+                                        HELPCTX(no_help),
                                         sessionsaver_handler, P(ssd));
     ssd->cancelbutton->button.iscancel = true;
     ssd->cancelbutton->column = 4;
+    if (midsession) {
+        /* 会话设置窗口：应用/撤销按钮的置灰状态由修改历史驱动。 */
+        b->apply_button = ssd->okbutton;
+        b->undo_button = ssd->cancelbutton;
+    }
     /* We carefully don't close the 5-column part, so that platform-
      * specific add-ons can put extra buttons alongside Open and Cancel. */
 

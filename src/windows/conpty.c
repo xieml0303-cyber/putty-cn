@@ -146,7 +146,7 @@ static void conpty_sentdata(struct handle *h, size_t new_backlog, int err,
 {
     ConPTY *conpty = (ConPTY *)handle_get_privdata(h);
     if (err) {
-        const char *error_msg = "写入控制台 PTY 设备错误";
+        const char *error_msg = "写入控制台 PTY 设备时出错";
 
         conpty_terminate(conpty);
 

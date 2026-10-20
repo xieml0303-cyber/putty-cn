@@ -1840,6 +1840,102 @@ dlgcontrol *dlg_last_focused(dlgcontrol *ctrl, dlgparam *dp)
  * The dialog-box procedure calls this function to handle Windows
  * messages on a control we manage.
  */
+/*
+ * Enable or disable a control, looking up its Windows handle by
+ * matching the dlgcontrol pointer against the instantiated controls.
+ */
+static void dlg_set_ctrl_enabled(dlgparam *dp, dlgcontrol *ctrl, bool enabled)
+{
+    if (!ctrl)
+        return;
+
+    for (int j = 0; j < dp->nctrltrees; j++) {
+        for (int i = 0; ; i++) {
+            struct winctrl *c = winctrl_findbyindex(dp->controltrees[j], i);
+            if (!c)
+                break;
+            if (c->ctrl == ctrl) {
+                HWND hwnd = GetDlgItem(dp->hwnd, c->base_id);
+                if (hwnd)
+                    EnableWindow(hwnd, enabled);
+                return;
+            }
+        }
+    }
+}
+
+void dlg_update_apply_buttons(dlgparam *dp)
+{
+    if (!dp->ctrlbox || !dp->track_changes)
+        return;
+
+    dlg_set_ctrl_enabled(dp, dp->ctrlbox->apply_button, dp->dirty);
+    dlg_set_ctrl_enabled(dp, dp->ctrlbox->undo_button, dp->nundo > 0);
+}
+
+bool dlg_has_unsaved_changes(dlgparam *dp)
+{
+    return dp->track_changes && dp->dirty;
+}
+
+void dlg_mark_clean(dlgparam *dp)
+{
+    for (int i = 0; i < dp->nundo; i++)
+        conf_free(dp->undo_stack[i]);
+    dp->nundo = 0;
+    dp->dirty = false;
+    dp->last_change_ctrl = NULL;
+    dlg_update_apply_buttons(dp);
+}
+
+bool dlg_undo_change(dlgparam *dp)
+{
+    if (!dp->track_changes || dp->nundo <= 0)
+        return false;
+
+    Conf *prev = dp->undo_stack[--dp->nundo];
+    conf_copy_into((Conf *)dp->data, prev);
+    conf_free(prev);
+
+    dp->last_change_ctrl = NULL;
+    dp->dirty = (dp->nundo > 0);
+
+    dlg_refresh(NULL, dp);
+    dlg_update_apply_buttons(dp);
+    return true;
+}
+
+/*
+ * Called just before an EVENT_VALCHANGE reaches a control's handler,
+ * i.e. while the settings still hold the value the edit is about to
+ * replace. Snapshot that value so "Undo" can restore it. Repeated
+ * edits of the same control are merged into one history step.
+ */
+static void dlg_note_change(dlgparam *dp, dlgcontrol *ctrl)
+{
+    if (!dp->track_changes)
+        return;
+
+    if (dp->last_change_ctrl != ctrl && dp->nundo < 100) {
+        if (dp->nundo == dp->undosize) {
+            dp->undosize = dp->undosize ? dp->undosize * 2 : 16;
+            dp->undo_stack = sresize(dp->undo_stack, dp->undosize, Conf *);
+        }
+        dp->undo_stack[dp->nundo++] = conf_copy((Conf *)dp->data);
+    }
+
+    dp->last_change_ctrl = ctrl;
+    dp->dirty = true;
+    dlg_update_apply_buttons(dp);
+}
+
+static void dlg_send_event(dlgcontrol *ctrl, dlgparam *dp, int event)
+{
+    if (event == EVENT_VALCHANGE)
+        dlg_note_change(dp, ctrl);
+    ctrl->handler(ctrl, dp, dp->data, event);
+}
+
 bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
                             WPARAM wParam, LPARAM lParam)
 {
@@ -1947,7 +2043,7 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
 
         if (msg == WM_COMMAND && !ctrl->editbox.has_list &&
             HIWORD(wParam) == EN_CHANGE)
-            ctrl->handler(ctrl, dp, dp->data, EVENT_VALCHANGE);
+            dlg_send_event(ctrl, dp, EVENT_VALCHANGE);
         if (msg == WM_COMMAND &&
             ctrl->editbox.has_list) {
             if (HIWORD(wParam) == CBN_SELCHANGE) {
@@ -1963,11 +2059,11 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
                                    index, (LPARAM)text);
                 SetDlgItemText(dp->hwnd, c->base_id+1, text);
                 sfree(text);
-                ctrl->handler(ctrl, dp, dp->data, EVENT_VALCHANGE);
+                dlg_send_event(ctrl, dp, EVENT_VALCHANGE);
             } else if (HIWORD(wParam) == CBN_EDITCHANGE) {
-                ctrl->handler(ctrl, dp, dp->data, EVENT_VALCHANGE);
+                dlg_send_event(ctrl, dp, EVENT_VALCHANGE);
             } else if (HIWORD(wParam) == CBN_KILLFOCUS) {
-                ctrl->handler(ctrl, dp, dp->data, EVENT_REFRESH);
+                dlg_send_event(ctrl, dp, EVENT_REFRESH);
             }
 
         }
@@ -1987,7 +2083,7 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
             (HIWORD(wParam) == BN_CLICKED ||
              HIWORD(wParam) == BN_DOUBLECLICKED) &&
             IsDlgButtonChecked(dp->hwnd, LOWORD(wParam))) {
-            ctrl->handler(ctrl, dp, dp->data, EVENT_VALCHANGE);
+            dlg_send_event(ctrl, dp, EVENT_VALCHANGE);
         }
         break;
       case CTRL_CHECKBOX:
@@ -1997,7 +2093,7 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
         if (msg == WM_COMMAND &&
             (HIWORD(wParam) == BN_CLICKED ||
              HIWORD(wParam) == BN_DOUBLECLICKED)) {
-            ctrl->handler(ctrl, dp, dp->data, EVENT_VALCHANGE);
+            dlg_send_event(ctrl, dp, EVENT_VALCHANGE);
         }
         break;
       case CTRL_BUTTON:
@@ -2007,7 +2103,7 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
         if (msg == WM_COMMAND &&
             (HIWORD(wParam) == BN_CLICKED ||
              HIWORD(wParam) == BN_DOUBLECLICKED)) {
-            ctrl->handler(ctrl, dp, dp->data, EVENT_ACTION);
+            dlg_send_event(ctrl, dp, EVENT_ACTION);
         }
         break;
       case CTRL_LISTBOX:
@@ -2025,14 +2121,14 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
             pret = handle_prefslist(c->data, NULL, 0, (msg != WM_COMMAND),
                                     dp->hwnd, wParam, lParam);
             if (pret & 2)
-                ctrl->handler(ctrl, dp, dp->data, EVENT_VALCHANGE);
+                dlg_send_event(ctrl, dp, EVENT_VALCHANGE);
             ret = pret & 1;
         } else {
             if (msg == WM_COMMAND && HIWORD(wParam) == LBN_DBLCLK) {
                 SetCapture(dp->hwnd);
-                ctrl->handler(ctrl, dp, dp->data, EVENT_ACTION);
+                dlg_send_event(ctrl, dp, EVENT_ACTION);
             } else if (msg == WM_COMMAND && HIWORD(wParam) == LBN_SELCHANGE) {
-                ctrl->handler(ctrl, dp, dp->data, EVENT_SELCHANGE);
+                dlg_send_event(ctrl, dp, EVENT_SELCHANGE);
             }
         }
         break;
@@ -2044,7 +2140,7 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
             (HIWORD(wParam) == BN_SETFOCUS || HIWORD(wParam) == BN_KILLFOCUS))
             winctrl_set_focus(ctrl, dp, HIWORD(wParam) == BN_SETFOCUS);
         if (msg == WM_COMMAND && id == 1 && HIWORD(wParam) == EN_CHANGE)
-            ctrl->handler(ctrl, dp, dp->data, EVENT_VALCHANGE);
+            dlg_send_event(ctrl, dp, EVENT_VALCHANGE);
         if (id == 2 &&
             (msg == WM_COMMAND &&
              (HIWORD(wParam) == BN_CLICKED ||
@@ -2068,11 +2164,11 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
                 if (!ctrl->fileselect.just_button) {
                     SetDlgItemTextW(dp->hwnd, c->base_id + 1,
                                     filename_to_wstr(fn));
-                    ctrl->handler(ctrl, dp, dp->data, EVENT_VALCHANGE);
+                    dlg_send_event(ctrl, dp, EVENT_VALCHANGE);
                 } else {
                     assert(!c->data);
                     c->data = fn;
-                    ctrl->handler(ctrl, dp, dp->data, EVENT_ACTION);
+                    dlg_send_event(ctrl, dp, EVENT_ACTION);
                     c->data = NULL;
                 }
                 filename_free(fn);
@@ -2120,7 +2216,7 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
                 dlg_fontsel_set(ctrl, dp, fs);
                 fontspec_free(fs);
 
-                ctrl->handler(ctrl, dp, dp->data, EVENT_VALCHANGE);
+                dlg_send_event(ctrl, dp, EVENT_VALCHANGE);
             }
         }
         break;
@@ -2151,7 +2247,7 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
             dp->coloursel_result.ok = true;
         } else
             dp->coloursel_result.ok = false;
-        ctrl->handler(ctrl, dp, dp->data, EVENT_CALLBACK);
+        dlg_send_event(ctrl, dp, EVENT_CALLBACK);
     }
 
     return ret;
@@ -2655,6 +2751,14 @@ void dlg_refresh(dlgcontrol *ctrl, dlgparam *dp)
 {
     int i, j;
     struct winctrl *c;
+    bool track_changes = dp->track_changes;
+
+    /*
+     * Refreshing a control writes its value from the settings, which
+     * can make an edit box emit EN_CHANGE. That is not a user edit, so
+     * don't let it create a new undo step or dirty the dialog.
+     */
+    dp->track_changes = false;
 
     if (!ctrl) {
         /*
@@ -2676,6 +2780,8 @@ void dlg_refresh(dlgcontrol *ctrl, dlgparam *dp)
         if (ctrl->handler != NULL)
             ctrl->handler(ctrl, dp, dp->data, EVENT_REFRESH);
     }
+
+    dp->track_changes = track_changes;
 }
 
 void dlg_coloursel_start(dlgcontrol *ctrl, dlgparam *dp, int r, int g, int b)
@@ -2761,6 +2867,14 @@ void dp_init(struct dlgparam *dp)
     dp->hwnd = NULL;
     dp->wintitle = dp->errtitle = NULL;
     dp->fixed_pitch_fonts = true;
+    dp->apply_cb = NULL;
+    dp->apply_ctx = NULL;
+    dp->ctrlbox = NULL;
+    dp->track_changes = false;
+    dp->dirty = false;
+    dp->last_change_ctrl = NULL;
+    dp->undo_stack = NULL;
+    dp->nundo = dp->undosize = 0;
 }
 
 void dp_add_tree(struct dlgparam *dp, struct winctrls *wc)
@@ -2771,6 +2885,9 @@ void dp_add_tree(struct dlgparam *dp, struct winctrls *wc)
 
 void dp_cleanup(struct dlgparam *dp)
 {
+    for (int i = 0; i < dp->nundo; i++)
+        conf_free(dp->undo_stack[i]);
+    sfree(dp->undo_stack);
     sfree(dp->wintitle);
     sfree(dp->errtitle);
 }

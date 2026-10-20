@@ -1039,3 +1039,8 @@ void free_serial_ports(char **ports, int count)
         sfree(ports[i]);
     sfree(ports);
 }
+
+bool serial_port_is_bluetooth(const char *port)
+{
+    return false;
+}

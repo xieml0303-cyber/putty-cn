@@ -493,6 +493,20 @@ struct dlgparam {
     bool ended;                        /* has the dialog been ended? */
     int endresult;                     /* and if so, what was the result? */
     bool fixed_pitch_fonts;            /* are we constrained to fixed fonts? */
+    void (*apply_cb)(void *ctx);       /* adopt settings without closing,
+                                        * used by a mid-session config box */
+    void *apply_ctx;
+    /*
+     * Unsaved-changes tracking (mid-session config box only). Every
+     * user edit pushes a snapshot of the settings as they were before
+     * the edit, so that "Undo" can walk back through the history.
+     */
+    struct controlbox *ctrlbox;        /* where the Apply/Undo buttons live */
+    bool track_changes;
+    bool dirty;
+    dlgcontrol *last_change_ctrl;      /* merge repeated edits of one control */
+    struct conf_tag **undo_stack;
+    int nundo, undosize;
 };
 
 /*
@@ -635,7 +649,7 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
  */
 void defuse_showwindow(void);
 bool do_config(Conf *);
-bool do_reconfig(HWND, Conf *, int);
+bool do_reconfig(HWND, Conf *, int, void (*)(void *), void *);
 void showeventlog(HWND);
 void showabout(HWND);
 void force_normal(HWND hwnd);

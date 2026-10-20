@@ -59,6 +59,13 @@ struct WinGuiSeat {
 
     HWND term_hwnd;
 
+    /*
+     * The IME context this window had before we detached it, so the
+     * terminal window can be kept in plain-ASCII input mode and the
+     * context restored when the window is destroyed.
+     */
+    HANDLE imc;
+
     int extra_width, extra_height;
     int font_width, font_height;
     bool font_dualwidth, font_varpitch;
@@ -86,6 +93,9 @@ struct WinGuiSeat {
 
     struct PopupMenu popup_menus[2];
     HMENU savedsess_menu;
+    HMENU menubar;
+    HMENU menu_session;
+    HMENU menu_func;
 
     Conf *conf;
     LogContext *logctx;

@@ -98,6 +98,44 @@ static void pds_free(PortableDialogStuff *pds)
     sfree(pds);
 }
 
+/*
+ * Ask what to do about unsaved changes when the config box is closed
+ * with the title-bar X. Returns 1 for "save and exit", 2 for "discard
+ * and exit", and 0 for "cancel" (stay in the box).
+ */
+static INT_PTR CALLBACK SaveChangesProc(HWND hwnd, UINT msg,
+                                        WPARAM wParam, LPARAM lParam)
+{
+    switch (msg) {
+      case WM_INITDIALOG:
+        return TRUE;
+      case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+          case IDC_SAVE_EXIT:
+            EndDialog(hwnd, 1);
+            return TRUE;
+          case IDC_DISCARD_EXIT:
+            EndDialog(hwnd, 2);
+            return TRUE;
+          case IDCANCEL:
+            EndDialog(hwnd, 0);
+            return TRUE;
+        }
+        break;
+      case WM_CLOSE:
+        EndDialog(hwnd, 0);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static int ask_save_changes(HWND hwnd)
+{
+    INT_PTR ret = DialogBox(hinst, MAKEINTRESOURCE(IDD_SAVECHANGES),
+                            hwnd, SaveChangesProc);
+    return (ret == 1 || ret == 2) ? (int)ret : 0;
+}
+
 static INT_PTR pds_default_dlgproc(PortableDialogStuff *pds, HWND hwnd,
                                    UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -132,6 +170,17 @@ static INT_PTR pds_default_dlgproc(PortableDialogStuff *pds, HWND hwnd,
             MessageBeep(0);
         break;
       case WM_CLOSE:
+        if (dlg_has_unsaved_changes(pds->dp)) {
+            int choice = ask_save_changes(hwnd);
+            if (choice == 0)
+                return 0;              /* stay in the box */
+            quit_help(hwnd);
+            if (choice == 1 && dlg_apply_config(pds->dp))
+                ShinyEndDialog(hwnd, 1);   /* saved, then exit */
+            else
+                ShinyEndDialog(hwnd, 0);   /* discard, then exit */
+            return 0;
+        }
         quit_help(hwnd);
         ShinyEndDialog(hwnd, 0);
         return 0;
@@ -153,15 +202,19 @@ static void pds_initdialog_start(PortableDialogStuff *pds, HWND hwnd)
     if (pds->dp->wintitle)     /* apply override title, if provided */
         SetWindowText(hwnd, pds->dp->wintitle);
 
-    /* The portable dialog system generally includes the ability to
-     * handle context help for particular controls. Enable the
-     * relevant window styles if we have a help file available. */
-    if (has_help()) {
+    /*
+     * The title bar deliberately carries no context-help "?" button;
+     * the dialog templates don't request one, and we make sure the
+     * window style doesn't add one either. The help file (if any) is
+     * still reachable through the normal Help menu.
+     */
+    {
         LONG_PTR style = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
-        SetWindowLongPtr(hwnd, GWL_EXSTYLE, style | WS_EX_CONTEXTHELP);
-    } else {
-        /* If not, and if the dialog template provided a top-level
-         * Help button, delete it */
+        SetWindowLongPtr(hwnd, GWL_EXSTYLE, style & ~WS_EX_CONTEXTHELP);
+    }
+    {
+        /* If the dialog template provided a top-level Help button,
+         * delete it. */
         HWND item = GetDlgItem(hwnd, IDC_HELPBTN);
         if (item)
             DestroyWindow(item);
@@ -207,6 +260,7 @@ static void pds_initdialog_finish(PortableDialogStuff *pds)
      * it's safe to actually show the window without risking setup
      * flicker.
      */
+    dlg_update_apply_buttons(pds->dp);
     ShowWindow(pds->dp->hwnd, SW_SHOWNORMAL);
 
     pds->initialised = true;
@@ -524,6 +578,10 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
     struct treeview_faff tvfaff;
 
     switch (msg) {
+      case WM_CLOSE:
+        /* 关闭事件必须显式转发：default 分支只处理控件命令。 */
+        return pds_default_dlgproc(pds, hwnd, msg, wParam, lParam);
+
       case WM_INITDIALOG:
         pds_initdialog_start(pds, hwnd);
 
@@ -723,6 +781,20 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
     }
 }
 
+/*
+ * Called by the config box when the user hits Apply in a mid-session
+ * reconfigure. If the caller installed an Apply hook, adopt the new
+ * settings in place and tell the handler to leave the box open.
+ */
+bool dlg_apply_config(dlgparam *dp)
+{
+    if (!dp->apply_cb)
+        return false;
+
+    dp->apply_cb(dp->apply_ctx);
+    return true;
+}
+
 void modal_about_box(HWND hwnd)
 {
     EnableWindow(hwnd, 0);
@@ -776,22 +848,53 @@ bool do_config(Conf *conf)
     return ret;
 }
 
-bool do_reconfig(HWND hwnd, Conf *conf, int protcfginfo)
+struct reconfig_apply_ctx {
+    void (*cb)(void *ctx);
+    void *ctx;
+    Conf *conf;                  /* the live config being edited */
+    Conf *applied;               /* settings currently in effect */
+};
+
+/*
+ * Wrapper passed to the dialog as its Apply hook: hand the new
+ * settings to the caller, then remember them as the state the session
+ * will fall back to if the box is cancelled afterwards.
+ */
+static void reconfig_apply_hook(void *vctx)
+{
+    struct reconfig_apply_ctx *actx = (struct reconfig_apply_ctx *)vctx;
+
+    actx->cb(actx->ctx);
+    conf_copy_into(actx->applied, actx->conf);
+}
+
+bool do_reconfig(HWND hwnd, Conf *conf, int protcfginfo,
+                 void (*apply_cb)(void *), void *apply_ctx)
 {
     Conf *backup_conf;
     bool ret;
     int protocol;
     PortableDialogStuff *pds = pds_new(2);
+    struct reconfig_apply_ctx actx;
 
     backup_conf = conf_copy(conf);
+
+    actx.cb = apply_cb;
+    actx.ctx = apply_ctx;
+    actx.conf = conf;
+    actx.applied = backup_conf;
 
     protocol = conf_get_int(conf, CONF_protocol);
     setup_config_box(pds->ctrlbox, true, protocol, protcfginfo);
     win_setup_config_box(pds->ctrlbox, &pds->dp->hwnd, has_help(),
                          true, protocol);
 
-    pds->dp->wintitle = dupprintf("%s 重新配置", appname);
+    pds->dp->wintitle = dupprintf("%s 会话设置", appname);
     pds->dp->data = conf;
+    pds->dp->apply_cb = apply_cb ? reconfig_apply_hook : NULL;
+    pds->dp->apply_ctx = &actx;
+    pds->dp->ctrlbox = pds->ctrlbox;
+    pds->dp->track_changes = true;
 
     dlg_auto_set_fixed_pitch_flag(pds->dp);
 

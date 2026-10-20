@@ -19,6 +19,7 @@
 #include "ssh.h"
 
 #include <ws2tcpip.h>
+#include <mstcpip.h>
 
 #if HAVE_AFUNIX_H
 #include <afunix.h>
@@ -950,6 +951,24 @@ static DWORD try_connect(NetSocket *sock)
     if (sock->keepalive) {
         BOOL b = true;
         p_setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, (void *) &b, sizeof(b));
+
+        /*
+         * Windows only probes an idle connection after two hours by
+         * default, far too slow to notice a dead console session. Ask
+         * for a probe after 30 seconds of idleness and every 5 seconds
+         * after that, so a link that has silently died is detected
+         * instead of leaving the window looking alive while it
+         * swallows input.
+         */
+        {
+            struct tcp_keepalive ka;
+            DWORD bytes_returned;
+            ka.onoff = 1;
+            ka.keepalivetime = 30000;
+            ka.keepaliveinterval = 5000;
+            WSAIoctl(s, SIO_KEEPALIVE_VALS, &ka, sizeof(ka),
+                     NULL, 0, &bytes_returned, NULL, NULL);
+        }
     }
 
     /*

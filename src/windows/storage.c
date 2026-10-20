@@ -922,6 +922,7 @@ char **get_serial_ports(int *count)
         if (type != REG_SZ)
             continue;
         value[sizeof(value)-1] = '\0';
+        valname[sizeof(valname)-1] = '\0';
         if (strncmp(value, "COM", 3) != 0)
             continue;
         ports = sresize(ports, n+1, char *);
@@ -971,6 +972,36 @@ void free_serial_ports(char **ports, int count)
     for (i = 0; i < count; i++)
         sfree(ports[i]);
     sfree(ports);
+}
+
+bool serial_port_is_bluetooth(const char *port)
+{
+    HKEY key;
+    bool ret = false;
+    int index = 0;
+
+    if (RegOpenKeyEx(HKEY_LOCAL_MACHINE,
+                     "HARDWARE\\DEVICEMAP\\SERIALCOMM", 0,
+                     KEY_READ, &key) != ERROR_SUCCESS)
+        return false;
+
+    while (index < 64) {
+        char valname[256], value[64];
+        DWORD vnlen = sizeof(valname), size = sizeof(value), type;
+        if (RegEnumValue(key, index++, valname, &vnlen, NULL, &type,
+                         (BYTE *)value, &size) != ERROR_SUCCESS)
+            break;
+        if (type != REG_SZ)
+            continue;
+        value[sizeof(value)-1] = '\0';
+        valname[sizeof(valname)-1] = '\0';
+        if (strcmp(value, port) != 0)
+            continue;
+        ret = (strstr(valname, "BthModem") != NULL);
+        break;
+    }
+    RegCloseKey(key);
+    return ret;
 }
 
 /*
