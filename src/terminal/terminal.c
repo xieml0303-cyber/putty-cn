@@ -1698,6 +1698,23 @@ static void term_copy_stuff_from_conf(Terminal *term)
     }
 }
 
+/*
+ * Return true if this window title looks like one we generated
+ * ourselves from the host name ("host - PuTTY"), rather than one the
+ * user or the server chose.
+ */
+static bool title_is_auto_generated(const char *title)
+{
+    size_t title_len = strlen(title);
+    size_t appname_len = strlen(appname);
+
+    if (title_len < appname_len + 3)
+        return false;
+    if (memcmp(title + title_len - appname_len - 3, " - ", 3) != 0)
+        return false;
+    return memcmp(title + title_len - appname_len, appname, appname_len) == 0;
+}
+
 void term_pre_reconfig(Terminal *term, Conf *conf)
 {
 
@@ -1705,8 +1722,15 @@ void term_pre_reconfig(Terminal *term, Conf *conf)
      * Copy the current window title into the stored previous
      * configuration, so that doing nothing to the window title field
      * in the config box doesn't reset the title to its startup state.
+     *
+     * A title we generated from the host name isn't a real setting,
+     * though: storing it would pin every later session to that host,
+     * so leave the field empty and let it be regenerated on connect.
      */
-    conf_set_str(conf, CONF_wintitle, term->window_title);
+    if (term->window_title && title_is_auto_generated(term->window_title))
+        conf_set_str(conf, CONF_wintitle, "");
+    else
+        conf_set_str(conf, CONF_wintitle, term->window_title);
 }
 
 /*
@@ -1899,7 +1923,7 @@ void term_setup_window_titles(Terminal *term, const char *title_hostname)
     const char *conf_title = conf_get_str(term->conf, CONF_wintitle);
     sfree(term->window_title);
     sfree(term->icon_title);
-    if (*conf_title) {
+    if (*conf_title && !title_is_auto_generated(conf_title)) {
         term->window_title = dupstr(conf_title);
         term->icon_title = dupstr(conf_title);
     } else {
