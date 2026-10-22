@@ -16,6 +16,7 @@ tests/cmd.txt
 *.o
 build/
 installer/output/
+dist/deploy-result.txt
 
 # 本地安全扫描器会话状态
 **/.mimosa/

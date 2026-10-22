@@ -436,6 +436,15 @@ struct terminal_tag {
     int win_resize_pending_w, win_resize_pending_h;
 
     /*
+     * Set while the front end is doing an interactive resize and wants
+     * the terminal to track its size live without telling the back end
+     * about every intermediate width. The front end calls
+     * term_set_defer_backend_size(false) once the drag is over, which
+     * sends the single final size.
+     */
+    bool defer_backend_size;
+
+    /*
      * Indicates whether term_get_userpass_input is currently using
      * the terminal to present a password prompt or similar, and if
      * so, whether it's overridden the terminal into UTF-8 mode.

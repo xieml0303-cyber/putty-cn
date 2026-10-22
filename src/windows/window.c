@@ -576,7 +576,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         sw_DefWindowProc = DefWindowProcW;
         wgs->term_hwnd = CreateWindowExW(
             exwinmode, terminal_window_class_w(), uappname,
-            winmode, CW_USEDEFAULT, CW_USEDEFAULT,
+            winmode, 0, 0,
             guess_width, guess_height, NULL, NULL, inst, NULL);
 #endif
 
@@ -590,7 +590,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             sw_DefWindowProc = DefWindowProcA;
             wgs->term_hwnd = CreateWindowExA(
                 exwinmode, terminal_window_class_a(), appname,
-                winmode, CW_USEDEFAULT, CW_USEDEFAULT,
+                winmode, 0, 0,
                 guess_width, guess_height, NULL, NULL, inst, NULL);
         }
 #endif
@@ -630,6 +630,15 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     term_size(wgs->term, conf_get_int(wgs->conf, CONF_height),
               conf_get_int(wgs->conf, CONF_width),
               conf_get_int(wgs->conf, CONF_savelines));
+
+    /*
+     * Remember the size the session was configured with. WM_SIZE
+     * overwrites these conf values during startup (see
+     * wm_size_resize_term), and the self-check below needs the values
+     * the user actually asked for.
+     */
+    int want_rows = conf_get_int(wgs->conf, CONF_height);
+    int want_cols = conf_get_int(wgs->conf, CONF_width);
 
     /*
      * Correct the guesses for extra_{width,height}.
@@ -791,6 +800,47 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                 AppendMenu(m, MF_ENABLED, IDM_HELP, "帮助(&H)");
             /* 关于/帮助按钮已按改造移除，菜单里不再保留「关于」项。 */
         }
+    }
+
+    /*
+     * The window was measured and sized above while it still had no menu
+     * bar, so the non-client height was short by the menu's height and
+     * the window came out a row or two smaller than the session asked
+     * for. Now that the frame is complete, measure it again, restore the
+     * configured terminal size and resize the window to fit. Doing this
+     * before ShowWindow means the correction is never visible.
+     */
+    {
+        RECT cr, wr;
+
+        /*
+         * The menu bar was attached only a moment ago, so the window's
+         * non-client area still describes the old menu-less frame until
+         * the next WM_NCCALCSIZE. Resize once to force that recalculation
+         * before measuring, otherwise the measurement is wrong (and
+         * AdjustWindowRectEx is no help either: it models the style bits
+         * rather than PuTTY's scroll bar, so it gets both dimensions off).
+         */
+        SetWindowPos(wgs->term_hwnd, NULL, 0, 0,
+                     wgs->font_width * want_cols + 60,
+                     wgs->font_height * want_rows + 80,
+                     SWP_NOZORDER);
+
+        GetWindowRect(wgs->term_hwnd, &wr);
+        GetClientRect(wgs->term_hwnd, &cr);
+        wgs->extra_width =
+            wr.right - wr.left - cr.right + cr.left + wgs->offset_width*2;
+        wgs->extra_height =
+            wr.bottom - wr.top - cr.bottom + cr.top + wgs->offset_height*2;
+        if (wgs->term->rows != want_rows || wgs->term->cols != want_cols)
+            term_size(wgs->term, want_rows, want_cols,
+                      conf_get_int(wgs->conf, CONF_savelines));
+        SetWindowPos(wgs->term_hwnd, NULL, 0, 0,
+                     wgs->extra_width + wgs->font_width*wgs->term->cols,
+                     wgs->extra_height + wgs->font_height*wgs->term->rows,
+                     SWP_NOZORDER);
+        conf_set_int(wgs->conf, CONF_height, want_rows);
+        conf_set_int(wgs->conf, CONF_width, want_cols);
     }
 
     if (restricted_acl()) {
@@ -2195,21 +2245,62 @@ static void wm_size_resize_term(WinGuiSeat *wgs, LPARAM lParam)
 
     if (wgs->resizing) {
         /*
-         * If we're in the middle of an interactive resize, we don't
-         * call term_size. This means that, firstly, the user can drag
-         * the size back and forth indecisively without wiping out any
-         * actual terminal contents, and secondly, the Terminal
-         * doesn't call back->size in turn for each increment of the
-         * resizing drag, so we don't spam the server with huge
-         * numbers of resize events.
+         * Reflow at every intermediate width, so that the text re-wraps
+         * while the user is still dragging, instead of only when the
+         * mouse button comes up. The back end is kept quiet until the
+         * drag ends (see WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE), so the
+         * server still only hears about one final size and a drag back
+         * and forth doesn't spray window-change requests at it.
          */
         wgs->need_backend_resize = true;
-    } else {
-        term_size(wgs->term, h, w,
-                  conf_get_int(wgs->conf, CONF_savelines));
+    }
+    term_size(wgs->term, h, w,
+              conf_get_int(wgs->conf, CONF_savelines));
+    if (wgs->resizing) {
+        /*
+         * While Windows runs its modal size-move loop, gui_main_loop()
+         * is not being called, so run_toplevel_callbacks() does not run
+         * either - and the update term_size() queued sits there until
+         * the drag ends. That is precisely the "text only reflows when
+         * you let go of the mouse" symptom. term_update() repaints
+         * synchronously, so the re-wrap is visible mid-drag.
+         */
+        term_update(wgs->term);
     }
     conf_set_int(wgs->conf, CONF_height, h);
     conf_set_int(wgs->conf, CONF_width, w);
+}
+
+/*
+ * Write the terminal dimensions the user left the window at back to the
+ * default session, so the next run comes up at that size instead of the
+ * one it was configured with.
+ *
+ * Only the row and column counts are stored: the pixel size is derived
+ * from them plus the font metrics and border, so the window still opens
+ * at its configured position rather than wherever it happened to be
+ * dragged. A maximised window is skipped, since its row and column
+ * counts describe the current monitor rather than a size the user chose.
+ */
+static void save_window_size(WinGuiSeat *wgs, HWND hwnd)
+{
+    char *errmsg = NULL;
+    settings_w *handle;
+
+    if (IsZoomed(hwnd))
+        return;
+
+    handle = open_settings_w("", &errmsg);
+    if (!handle) {
+        sfree(errmsg);
+        return;
+    }
+
+    write_setting_i(handle, "TermWidth",
+                    conf_get_int(wgs->conf, CONF_width));
+    write_setting_i(handle, "TermHeight",
+                    conf_get_int(wgs->conf, CONF_height));
+    close_settings_w(handle);
 }
 
 struct reconfig_apply_ctx {
@@ -2434,6 +2525,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
       case WM_DESTROY:
         if (wgs && wgs->imc)
             ImmAssociateContext(hwnd, wgs->imc);
+        if (wgs)
+            save_window_size(wgs, hwnd);
         show_mouseptr(wgs, true);
         PostQuitMessage(0);
         return 0;
@@ -2975,10 +3068,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
         EnableSizeTip(true);
         wgs->resizing = true;
         wgs->need_backend_resize = false;
+        /*
+         * Reflow live during the drag, but hold back the back-end
+         * resize notification: only the size the user settles on is
+         * worth telling the server about.
+         */
+        term_set_defer_backend_size(wgs->term, true);
         break;
       case WM_EXITSIZEMOVE:
         EnableSizeTip(false);
         wgs->resizing = false;
+        term_set_defer_backend_size(wgs->term, false);
         if (wgs->need_backend_resize) {
             term_size(wgs->term, conf_get_int(wgs->conf, CONF_height),
                       conf_get_int(wgs->conf, CONF_width),

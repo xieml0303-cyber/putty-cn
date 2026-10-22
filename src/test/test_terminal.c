@@ -524,6 +524,188 @@ static void test_wintitle(Mock *mk)
     SEQUAL(mk->title->s, "bar");
 }
 
+/*
+ * Count every non-blank character cell in the whole buffer, scrollback
+ * included. Reflow must never change this number: text can move around
+ * and re-wrap, but it must not be lost or duplicated.
+ */
+static int reflow_count_chars(Mock *mk)
+{
+    int total = 0;
+    int sblines = count234(mk->term->scrollback);
+
+    for (int y = -sblines; y < mk->term->rows; y++) {
+        termline *tl = term_get_line(mk->term, y);
+        for (int x = 0; x < tl->cols; x++)
+            if (tl->chars[x].chr != (CSET_ASCII | ' ') &&
+                tl->chars[x].chr != UCSWIDE)
+                total++;
+        term_release_line(tl);
+    }
+    return total;
+}
+
+static void reflow_print_filled(Mock *mk, int count, char ch)
+{
+    for (int i = 0; i < count; i++)
+        term_data(mk->term, &ch, 1);
+}
+
+static void test_reflow(Mock *mk)
+{
+    mk->ucsdata->line_codepage = CP_UTF8;
+
+    /* ---- Narrowing re-wraps a long line instead of truncating it ---- */
+    reset(mk);
+    term_size(mk->term, 24, 80, 100);
+
+    reflow_print_filled(mk, 100, 'a');
+    IEQUAL(mk->term->curs.y, 1);
+    IEQUAL(mk->term->curs.x, 20);
+    IEQUAL(get_lineattr(mk->term, 0) & LATTR_WRAPPED, LATTR_WRAPPED);
+
+    term_size(mk->term, 24, 40, 100);
+    IEQUAL(mk->term->cols, 40);
+    IEQUAL(reflow_count_chars(mk), 100);
+    /* 100 characters now occupy 40 + 40 + 20 */
+    IEQUAL(get_termchar(mk->term, 39, 0).chr, CSET_ASCII | 'a');
+    IEQUAL(get_termchar(mk->term, 0, 1).chr, CSET_ASCII | 'a');
+    IEQUAL(get_termchar(mk->term, 39, 1).chr, CSET_ASCII | 'a');
+    IEQUAL(get_termchar(mk->term, 19, 2).chr, CSET_ASCII | 'a');
+    IEQUAL(get_termchar(mk->term, 20, 2).chr, CSET_ASCII | ' ');
+    IEQUAL(get_lineattr(mk->term, 0) & LATTR_WRAPPED, LATTR_WRAPPED);
+    IEQUAL(get_lineattr(mk->term, 1) & LATTR_WRAPPED, LATTR_WRAPPED);
+    IEQUAL(get_lineattr(mk->term, 2) & LATTR_WRAPPED, 0);
+    IEQUAL(mk->term->curs.y, 2);
+    IEQUAL(mk->term->curs.x, 20);
+
+    /* ---- Widening joins the pieces back up ---- */
+    term_size(mk->term, 24, 80, 100);
+    IEQUAL(reflow_count_chars(mk), 100);
+    IEQUAL(get_termchar(mk->term, 79, 0).chr, CSET_ASCII | 'a');
+    IEQUAL(get_termchar(mk->term, 0, 1).chr, CSET_ASCII | 'a');
+    IEQUAL(get_termchar(mk->term, 19, 1).chr, CSET_ASCII | 'a');
+    IEQUAL(get_lineattr(mk->term, 0) & LATTR_WRAPPED, LATTR_WRAPPED);
+    IEQUAL(get_lineattr(mk->term, 1) & LATTR_WRAPPED, 0);
+    IEQUAL(mk->term->curs.y, 1);
+    IEQUAL(mk->term->curs.x, 20);
+
+    /* ---- A trip through assorted widths still loses nothing ---- */
+    {
+        static const int widths[] = { 80, 37, 80, 21, 80, 100, 80 };
+        for (int i = 0; i < (int)(sizeof(widths) / sizeof(widths[0])); i++) {
+            term_size(mk->term, 24, widths[i], 100);
+            IEQUAL(reflow_count_chars(mk), 100);
+        }
+        IEQUAL(get_termchar(mk->term, 79, 0).chr, CSET_ASCII | 'a');
+        IEQUAL(get_lineattr(mk->term, 0) & LATTR_WRAPPED, LATTR_WRAPPED);
+    }
+
+    /* ---- A live resize drag: many small width changes in a row ---- */
+    {
+        int w = 80;
+
+        for (int i = 0; i < 60; i++) {
+            /* wobble, the way a mouse drag does */
+            w += (i % 5) - 2;
+            if (w < 12) w = 12;
+            if (w > 120) w = 120;
+            term_size(mk->term, 24, w, 100);
+            IEQUAL(reflow_count_chars(mk), 100);
+        }
+        term_size(mk->term, 24, 80, 100);
+        IEQUAL(reflow_count_chars(mk), 100);
+        IEQUAL(get_termchar(mk->term, 79, 0).chr, CSET_ASCII | 'a');
+        IEQUAL(mk->term->curs.y, 1);
+        IEQUAL(mk->term->curs.x, 20);
+    }
+
+    /* ---- Wide characters are never cut in half at a wrap ---- */
+    reset(mk);
+    term_size(mk->term, 24, 40, 100);
+    for (int i = 0; i < 21; i++)
+        term_datapl(mk->term, PTRLEN_LITERAL("\xEA\xB0\x80")); /* U+AC00 */
+    IEQUAL(reflow_count_chars(mk), 21);
+    IEQUAL(mk->term->curs.y, 1);
+    IEQUAL(mk->term->curs.x, 2);
+
+    /* 21 columns fits 10 wide characters and one spare cell per row. */
+    term_size(mk->term, 24, 21, 100);
+    IEQUAL(reflow_count_chars(mk), 21);
+    for (int y = 0; y < 3; y++) {
+        termchar c = get_termchar(mk->term, 0, y);
+        if (c.chr == (CSET_ASCII | ' '))
+            continue;
+        IEQUAL(c.chr != UCSWIDE, 1);
+    }
+
+    /* Widen back to 40: two rows of 20 and 1 wide character. */
+    term_size(mk->term, 24, 40, 100);
+    IEQUAL(reflow_count_chars(mk), 21);
+    IEQUAL(get_termchar(mk->term, 39, 0).chr, UCSWIDE);
+    IEQUAL(get_termchar(mk->term, 0, 1).chr, 0xAC00);
+    IEQUAL(get_termchar(mk->term, 1, 1).chr, UCSWIDE);
+    IEQUAL(get_lineattr(mk->term, 0) & LATTR_WRAPPED, LATTR_WRAPPED);
+    IEQUAL(get_lineattr(mk->term, 1) & LATTR_WRAPPED, 0);
+
+    /* ---- Scrollback is reflowed too, and the viewport tracks text ---- */
+    reset(mk);
+    term_size(mk->term, 24, 80, 100);
+    mk->term->wrap = true;
+
+    /* 40 lines of 80 characters: 16 of them scroll off the top. */
+    for (int r = 0; r < 40; r++) {
+        for (int c = 0; c < 80; c++) {
+            char ch = 'A' + (r % 26);
+            term_data(mk->term, &ch, 1);
+        }
+        if (r < 39)
+            term_datapl(mk->term, PTRLEN_LITERAL("\r\n"));
+    }
+    IEQUAL(count234(mk->term->scrollback), 16);
+    IEQUAL(reflow_count_chars(mk), 3200);
+
+    term_size(mk->term, 24, 40, 100);
+    IEQUAL(reflow_count_chars(mk), 3200);
+    {
+        int sblines = count234(mk->term->scrollback);
+        /* 40 rows of 80 become 80 rows of 40; 24 stay on screen. */
+        IEQUAL(sblines, 56);
+        IEQUAL(mk->term->disptop, 0);
+        IEQUAL(get_termchar(mk->term, 0, -sblines).chr, CSET_ASCII | 'A');
+        IEQUAL(get_termchar(mk->term, 39, -sblines).chr, CSET_ASCII | 'A');
+        IEQUAL(get_lineattr(mk->term, -sblines) & LATTR_WRAPPED,
+               LATTR_WRAPPED);
+        /* the second half of that logical line, then the 'B' line */
+        IEQUAL(get_termchar(mk->term, 0, -sblines + 1).chr,
+               CSET_ASCII | 'A');
+        IEQUAL(get_lineattr(mk->term, -sblines + 1) & LATTR_WRAPPED, 0);
+        IEQUAL(get_termchar(mk->term, 0, -sblines + 2).chr,
+               CSET_ASCII | 'B');
+    }
+    /* the cursor still sits at the end of the last output line */
+    IEQUAL(mk->term->curs.y, 23);
+    IEQUAL(mk->term->curs.x, 39);
+
+    /* Scrolled-back viewports survive a resize without jumping home. */
+    mk->term->disptop = -5;
+    term_size(mk->term, 24, 80, 100);
+    IEQUAL(mk->term->disptop < 0, 1);
+
+    /* ---- no-wrap (DECAWM off) text is not falsely marked as wrapped ---- */
+    reset(mk);
+    term_size(mk->term, 24, 80, 100);
+    mk->term->wrap = false;
+    reflow_print_filled(mk, 100, 'b');
+    IEQUAL(get_lineattr(mk->term, 0) & LATTR_WRAPPED, 0);
+    term_size(mk->term, 24, 40, 100);
+    /* The overlong line is split, and its first part now wraps. */
+    IEQUAL(get_lineattr(mk->term, 0) & LATTR_WRAPPED, LATTR_WRAPPED);
+    IEQUAL(get_termchar(mk->term, 39, 0).chr, CSET_ASCII | 'b');
+    IEQUAL(get_termchar(mk->term, 0, 1).chr, CSET_ASCII | 'b');
+    mk->term->wrap = true;
+}
+
 int main(void)
 {
     Mock *mk = mock_new();
@@ -533,6 +715,7 @@ int main(void)
     test_wrap(mk);
     test_nonwrap(mk);
     test_wintitle(mk);
+    test_reflow(mk);
 
     bool failed = mk->any_test_failed;
     mock_free(mk);

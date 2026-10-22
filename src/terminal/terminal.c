@@ -2116,6 +2116,7 @@ Terminal *term_init(Conf *myconf, struct unicode_data *ucsdata, TermWin *win)
     term->wintitle_codepage = term->icontitle_codepage = DEFAULT_CODEPAGE;
 
     term->win_resize_pending = WIN_RESIZE_NO;
+    term->defer_backend_size = false;
 
     term->bidi_ctx = bidi_new_context();
 
@@ -2204,6 +2205,318 @@ void term_get_cursor_position(Terminal *term, int *x, int *y)
 /*
  * Set up the terminal for a given size.
  */
+/*
+ * ----------------------------------------------------------------------
+ * Soft-wrap reflow on width changes.
+ * ----------------------------------------------------------------------
+ *
+ * When the width changes, lines that were automatically wrapped at the
+ * old width have to be re-assembled into their logical lines and split
+ * again at the new width. Without that, narrowing the window silently
+ * throws away everything past the new right margin (lineptr() only
+ * truncates lazily), and widening leaves the old wrap points stranded
+ * in the middle of lines.
+ *
+ * The approach here is to rebuild the whole buffer: take ownership of
+ * every line, concatenate each run of LATTR_WRAPPED lines into one
+ * logical line, split that at the new width, then repartition the
+ * result between the scrollback and the screen so that the cursor keeps
+ * the screen row it had before.
+ *
+ * This is the full version, so it reflows the scrollback too, which
+ * means decompressing all of it. That is a temporary quadratic-ish
+ * spike in memory use (the compressed format exists precisely to avoid
+ * keeping it all uncompressed), so we bound the work: above
+ * REFLOW_MAX_LINES of buffer we fall back to the old resize behaviour,
+ * and a single logical line is never allowed to grow past
+ * REFLOW_MAX_LOGIC_LEN characters.
+ */
+#define REFLOW_MAX_LINES 20000
+#define REFLOW_MAX_LOGIC_LEN 262144
+
+/* Is this line entirely the default blank cell? */
+static bool reflow_line_blank(Terminal *term, termline *line)
+{
+    for (int i = 0; i < line->cols; i++)
+        if (!termchars_equal(&line->chars[i], &term->basic_erase_char))
+            return false;
+    return true;
+}
+
+/*
+ * The number of meaningful cells in a line. A line carrying
+ * LATTR_WRAPPED2 ended with a wide character that didn't fit, so its
+ * last cell is only a padding space and must not be carried into the
+ * joined-up logical line.
+ */
+static int reflow_line_width(termline *line)
+{
+    int n = line->cols;
+    if ((line->lattr & LATTR_WRAPPED2) && n > 0)
+        n--;
+    return n;
+}
+
+static void reflow_buffer(Terminal *term, int newrows, int newcols,
+                          int newsavelines)
+{
+    int sblen = count234(term->scrollback);
+    int nsrc = sblen + count234(term->screen);
+    int curs_row = sblen + term->curs.y;
+    int curs_col = term->curs.x;
+    int old_top_row = sblen + term->disptop;
+    termline **src, **out = NULL;
+    size_t out_len = 0;
+    int nout = 0;
+    int cursor_out = -1, cursor_col = 0;
+    int top, keep_sb, i;
+
+    src = snewn(nsrc, termline *);
+
+    /*
+     * Take ownership of every line in the buffer, decompressing the
+     * scrollback as we go. After this the trees are empty but still
+     * valid, and we rebuild them at the end.
+     */
+    for (i = 0; i < sblen; i++) {
+        compressed_scrollback_line *cline = delpos234(term->scrollback, 0);
+        src[i] = decompressline_and_free(cline);
+        src[i]->temporary = false;     /* we own it outright now */
+    }
+    for (i = sblen; i < nsrc; i++)
+        src[i] = delpos234(term->screen, 0);
+
+    /*
+     * Re-assemble logical lines and re-split them at the new width.
+     */
+    i = 0;
+    while (i < nsrc) {
+        int j = i, k, len;
+        bool trusted = src[i]->trusted;
+        bool mergeable = ((src[i]->lattr & LATTR_MODE) == LATTR_NORM);
+        unsigned long lattr;
+        int first_out = nout, nrow = 0;
+        int *row_off = NULL;
+        size_t row_off_len = 0;
+        int coff = -1;
+        termline *flat;
+        int flatpos = 0;
+
+        lattr = src[i]->lattr & ~(LATTR_WRAPPED | LATTR_WRAPPED2);
+        len = reflow_line_width(src[i]);
+
+        /*
+         * Join the run of wrapped lines. Lines in a double-width or
+         * double-height mode are left alone: their geometry does not
+         * follow the plain column count.
+         */
+        if (mergeable) {
+            while (j + 1 < nsrc && (src[j]->lattr & LATTR_WRAPPED) &&
+                   len + reflow_line_width(src[j + 1]) <= REFLOW_MAX_LOGIC_LEN) {
+                j++;
+                len += reflow_line_width(src[j]);
+                trusted = trusted && src[j]->trusted;
+            }
+        }
+        if (curs_row >= i && curs_row <= j) {
+            coff = curs_col;
+            for (k = i; k < curs_row; k++)
+                coff += reflow_line_width(src[k]);
+        }
+
+        /*
+         * Flatten the logical line into one scratch termline, so that
+         * splitting it can look ahead and avoid cutting a wide
+         * character in half at the boundary.
+         */
+        flat = newtermline(term, len, false);
+        for (k = i; k <= j; k++)
+            for (int c = 0; c < reflow_line_width(src[k]); c++)
+                copy_termchar(flat, flatpos++, &src[k]->chars[c]);
+
+        for (int off = 0; off < len; ) {
+            int take = len - off;
+            bool pad = false;
+            termline *nl;
+
+            if (take > newcols)
+                take = newcols;
+
+            /*
+             * If the cell just past the boundary is the right half of a
+             * wide character, the real character is the cell before it,
+             * so leave that one for the next line. The cell we give up
+             * is blank padding, so mark it LATTR_WRAPPED2: a later
+             * reflow must not carry that space into the character run.
+             */
+            if (off + take < len && flat->chars[off + take].chr == UCSWIDE) {
+                take--;
+                pad = true;
+            }
+            if (take <= 0)
+                take = 1;          /* terminal narrower than one wide char */
+
+            nl = newtermline(term, newcols, false);
+            for (int c = 0; c < take; c++) {
+                termchar *sc = &flat->chars[off + c];
+                if (c == 0 && sc->chr == UCSWIDE)
+                    copy_termchar(nl, c, &term->basic_erase_char);
+                else
+                    copy_termchar(nl, c, sc);
+            }
+            nl->lattr = lattr | ((off + take < len) ? LATTR_WRAPPED : 0) |
+                        (pad ? LATTR_WRAPPED2 : 0);
+            nl->trusted = trusted;
+
+            sgrowarray(out, out_len, nout);
+            out[nout] = nl;
+            sgrowarray(row_off, row_off_len, nrow);
+            row_off[nrow] = off;
+            nout++;
+            nrow++;
+            off += take;
+        }
+
+        /* Map the cursor into this logical line's new rows. */
+        if (coff >= 0) {
+            cursor_out = first_out + nrow - 1;
+            cursor_col = 0;
+            for (int r = 0; r < nrow; r++) {
+                int start = row_off[r];
+                int end = (r + 1 < nrow) ? row_off[r + 1] : len;
+
+                if (coff >= start && coff < end) {
+                    cursor_out = first_out + r;
+                    cursor_col = coff - start;
+                    break;
+                }
+                if (coff == end) {
+                    if (r + 1 < nrow) {
+                        cursor_out = first_out + r + 1;
+                        cursor_col = 0;
+                    } else {
+                        cursor_out = first_out + r;
+                        cursor_col = end - start;
+                    }
+                    break;
+                }
+            }
+            if (cursor_col >= newcols)
+                cursor_col = newcols - 1;
+        }
+
+        /*
+         * Re-wrapping pads the end of a logical line with blank rows
+         * whenever its length is not an exact multiple of the new
+         * width. Drop that padding, but never the row holding the
+         * cursor.
+         */
+        while (nout - first_out > 1 && nout - 1 != cursor_out &&
+               reflow_line_blank(term, out[nout - 1]) &&
+               (out[nout - 2]->lattr & LATTR_WRAPPED)) {
+            nout--;
+            freetermline(out[nout]);
+            out[nout - 1]->lattr &= ~(LATTR_WRAPPED | LATTR_WRAPPED2);
+        }
+        sfree(row_off);
+        freetermline(flat);
+        for (k = i; k <= j; k++)
+            freetermline(src[k]);
+        i = j + 1;
+    }
+
+    if (cursor_out < 0) {
+        cursor_out = nout > 0 ? nout - 1 : 0;
+        cursor_col = 0;
+    }
+
+    /*
+     * Decide where the screen starts. Blank rows below the last real
+     * content are just padding and must not push the content off the
+     * top, so measure to the last non-blank row (or the cursor, if it
+     * is further down). If everything fits, show it from the top;
+     * otherwise bottom-anchor it, which is what the user expects when
+     * the buffer is full. But if the cursor was well above the bottom
+     * to begin with, don't let it slide down the screen.
+     */
+    {
+        int used = 0;
+
+        for (i = 0; i < nout; i++)
+            if (!reflow_line_blank(term, out[i]))
+                used = i + 1;
+        if (cursor_out + 1 > used)
+            used = cursor_out + 1;
+
+        if (used <= newrows) {
+            top = 0;
+        } else {
+            int want = cursor_out - term->curs.y;
+            top = used - newrows;
+            if (want < top)
+                top = want;
+            if (top < 0)
+                top = 0;
+        }
+    }
+    keep_sb = top < newsavelines ? top : newsavelines;
+
+    /*
+     * Keep the viewpoint where it was, measured as a distance from the
+     * end of the buffer. The old top line may have been split or joined
+     * by the reflow, so an exact line-for-line mapping isn't meaningful;
+     * holding the distance from the tail is what keeps a scrolled-back
+     * user scrolled back (and a user at the bottom at the bottom).
+     */
+    {
+        int from_end = nsrc - old_top_row;
+        int d = nout - from_end;
+
+        if (d < 0)
+            d = 0;
+        if (d > nout)
+            d = nout;
+        term->disptop = d - top;
+        if (term->disptop < -keep_sb)
+            term->disptop = -keep_sb;
+        if (term->disptop > 0)
+            term->disptop = 0;
+    }
+
+    /* Rebuild the scrollback from the oldest surviving rows. */
+    for (i = 0; i < top - keep_sb; i++)
+        freetermline(out[i]);
+    for (i = top - keep_sb; i < top; i++)
+        addpos234(term->scrollback, compressline_and_free(out[i]),
+                  count234(term->scrollback));
+    term->tempsblines = 0;
+
+    /* And the screen from the rest, padding with blanks if needed. */
+    for (i = top; i < nout; i++) {
+        if (count234(term->screen) >= newrows)
+            freetermline(out[i]);      /* only ever trailing blank rows */
+        else
+            addpos234(term->screen, out[i], count234(term->screen));
+    }
+    while (count234(term->screen) < newrows)
+        addpos234(term->screen, newtermline(term, newcols, false),
+                  count234(term->screen));
+
+    term->curs.y = cursor_out - top;
+    term->curs.x = cursor_col;
+    if (term->curs.y < 0)
+        term->curs.y = 0;
+    if (term->curs.y >= newrows)
+        term->curs.y = newrows - 1;
+    if (term->curs.x < 0)
+        term->curs.x = 0;
+    if (term->curs.x >= newcols)
+        term->curs.x = newcols - 1;
+
+    sfree(src);
+    sfree(out);
+}
+
 void term_size(Terminal *term, int newrows, int newcols, int newsavelines)
 {
     tree234 *newalt;
@@ -2211,6 +2524,13 @@ void term_size(Terminal *term, int newrows, int newcols, int newsavelines)
     int i, j, oldrows = term->rows;
     int sblen;
     int save_alt_which = term->alt_which;
+    /*
+     * swap_screen() below runs seen_disp_event(), which honours the
+     * "scroll to bottom on display activity" setting and would throw
+     * away the user's scrollback position. A resize is not output, so
+     * keep the viewpoint where it was; reflow_buffer() re-maps it.
+     */
+    int save_disptop = term->disptop;
 
     if (newrows == term->rows && newcols == term->cols &&
         newsavelines == term->savelines)
@@ -2223,6 +2543,7 @@ void term_size(Terminal *term, int newrows, int newcols, int newsavelines)
 
     deselect(term);
     swap_screen(term, 0, false, false);
+    term->disptop = save_disptop;
 
     term->alt_t = term->marg_t = 0;
     term->alt_b = term->marg_b = newrows - 1;
@@ -2254,8 +2575,32 @@ void term_size(Terminal *term, int newrows, int newcols, int newsavelines)
      *    away.
      */
     sblen = count234(term->scrollback);
-    /* Do this loop to expand the screen if newrows > rows */
     assert(term->rows == count234(term->screen));
+    if (term->cols > 0 && term->rows > 0 && newcols != term->cols &&
+        sblen + count234(term->screen) <= REFLOW_MAX_LINES) {
+        /*
+         * The width changed, so re-wrap the whole buffer instead of
+         * letting individual lines be truncated or padded. This also
+         * settles the row-count change, so the legacy path below is
+         * skipped entirely.
+         */
+        /*
+         * Drop history that the new scrollback limit no longer wants
+         * before reflowing. Otherwise a reset that sets the limit to
+         * zero would be undone, because the reflow would happily pull
+         * the old lines back onto the screen.
+         */
+        while (sblen > newsavelines) {
+            compressed_scrollback_line *cline =
+                delpos234(term->scrollback, 0);
+            sfree(cline);
+            sblen--;
+        }
+        reflow_buffer(term, newrows, newcols, newsavelines);
+        sblen = count234(term->scrollback);
+        term->rows = newrows;
+    } else {
+    /* Do this loop to expand the screen if newrows > rows */
     while (term->rows < newrows) {
         if (term->tempsblines > 0) {
             compressed_scrollback_line *cline;
@@ -2309,6 +2654,7 @@ void term_size(Terminal *term, int newrows, int newcols, int newsavelines)
     assert(count234(term->scrollback) <= newsavelines);
     assert(count234(term->scrollback) >= term->tempsblines);
     term->disptop = 0;
+    }
 
     /* Make a new displayed text buffer. */
     newdisp = snewn(newrows, termline *);
@@ -2378,11 +2724,31 @@ void term_size(Terminal *term, int newrows, int newcols, int newsavelines)
     term->cols = newcols;
     term->savelines = newsavelines;
 
-    swap_screen(term, save_alt_which, false, false);
+    /* Same reason as at the top: don't let the swap-on-display logic
+     * discard the viewpoint we just re-mapped. */
+    {
+        int final_disptop = term->disptop;
+        swap_screen(term, save_alt_which, false, false);
+        term->disptop = final_disptop;
+    }
 
     term->win_scrollbar_update_pending = true;
     term_schedule_update(term);
-    if (term->backend)
+    if (term->backend && !term->defer_backend_size)
+        backend_size(term->backend, term->cols, term->rows);
+}
+
+/*
+ * Track live during an interactive resize: the terminal reflows at
+ * every intermediate size, but the back end only hears about the final
+ * one, so a drag doesn't spray window-change requests at the server.
+ */
+void term_set_defer_backend_size(Terminal *term, bool defer)
+{
+    if (term->defer_backend_size == defer)
+        return;
+    term->defer_backend_size = defer;
+    if (!defer && term->backend && term->cols > 0 && term->rows > 0)
         backend_size(term->backend, term->cols, term->rows);
 }
 
