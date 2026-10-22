@@ -812,6 +812,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      */
     {
         RECT cr, wr;
+        POINT client_origin;
+        int left_border;
 
         /*
          * The menu bar was attached only a moment ago, so the window's
@@ -835,7 +837,21 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         if (wgs->term->rows != want_rows || wgs->term->cols != want_cols)
             term_size(wgs->term, want_rows, want_cols,
                       conf_get_int(wgs->conf, CONF_savelines));
-        SetWindowPos(wgs->term_hwnd, NULL, 0, 0,
+
+        /*
+         * The left border of the frame is non-client area, so a window
+         * sitting at x=0 still puts its text a few pixels in and leaves a
+         * visible strip of frame at the screen edge. Shift the window left
+         * by exactly that border so the client area - the terminal itself -
+         * starts at x=0. Only the horizontal position moves: the title bar
+         * stays on screen, so the window can still be dragged and closed.
+         */
+        client_origin.x = 0;
+        client_origin.y = 0;
+        ClientToScreen(wgs->term_hwnd, &client_origin);
+        left_border = client_origin.x - wr.left;
+
+        SetWindowPos(wgs->term_hwnd, NULL, -left_border, 0,
                      wgs->extra_width + wgs->font_width*wgs->term->cols,
                      wgs->extra_height + wgs->font_height*wgs->term->rows,
                      SWP_NOZORDER);
