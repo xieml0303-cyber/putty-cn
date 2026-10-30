@@ -354,6 +354,8 @@ dlgcontrol *ctrl_listbox(struct controlset *s, const char *label,
     c->listbox.ncols = 0;
     c->listbox.percentages = NULL;
     c->listbox.hscroll = true;
+    c->listbox.dimmed = false;
+    c->listbox.ruledlines = false;
     return c;
 }
 
@@ -371,6 +373,7 @@ dlgcontrol *ctrl_droplist(struct controlset *s, const char *label,
     c->listbox.ncols = 0;
     c->listbox.percentages = NULL;
     c->listbox.hscroll = false;
+    c->listbox.dimmed = false;
     return c;
 }
 
@@ -388,6 +391,7 @@ dlgcontrol *ctrl_draglist(struct controlset *s, const char *label,
     c->listbox.ncols = 0;
     c->listbox.percentages = NULL;
     c->listbox.hscroll = false;
+    c->listbox.dimmed = false;
     return c;
 }
 

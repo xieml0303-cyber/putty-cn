@@ -374,6 +374,36 @@ struct hostport {
 };
 
 /*
+ * The "Other:" list holds the protocols that did not earn a radio
+ * button. It only governs the connection when "Other:" is the chosen
+ * type, so that is when it is drawn at full strength; otherwise it is
+ * muted, to match the radio button beside it.
+ *
+ * Whether the current protocol is one of the radio buttons is asked of
+ * the button group itself rather than hardcoded, since which protocols
+ * get a button depends on which backends were compiled in.
+ */
+static void config_protocols_setdim(struct hostport *hp, dlgparam *dlg,
+                                    Conf *conf)
+{
+    int proto = conf_get_int(conf, CONF_protocol);
+    bool on_button = false;
+    int i;
+
+    if (!hp->protradio || !hp->protlist)
+        return;
+
+    for (i = 0; i < hp->protradio->radio.nbuttons; i++) {
+        if (hp->protradio->radio.buttondata[i].i == proto) {
+            on_button = true;
+            break;
+        }
+    }
+
+    dlg_listbox_setdim(hp->protlist, dlg, on_button);
+}
+
+/*
  * Shared handler for protocol radio-button and drop-list controls.
  * Handles the interaction of those two controls, and also changes
  * the setting of the port box to match the protocol if necessary,
@@ -461,6 +491,13 @@ static void config_protocols_handler(dlgcontrol *ctrl, dlgparam *dlg,
             dlg_update_done(ctrl, dlg);
         }
 
+        /*
+         * Refreshing either control can change which type is in force,
+         * and the list's appearance follows that.
+         */
+        if (ctrl == hp->protradio || ctrl == hp->protlist)
+            config_protocols_setdim(hp, dlg, conf);
+
         hp->mid_refresh = false;
     } else if (!hp->mid_refresh) {
         /*
@@ -530,6 +567,15 @@ static void config_protocols_handler(dlgcontrol *ctrl, dlgparam *dlg,
             dlg_refresh(hp->host, dlg);
             dlg_refresh(hp->port, dlg);
         }
+
+        /*
+         * Either control can change which type is in force - the radio
+         * buttons directly, and the list by moving the choice to
+         * "Other:" - so bring the list's appearance back in step
+         * whenever one of them reports a change.
+         */
+        if (ctrl == hp->protradio || ctrl == hp->protlist)
+            config_protocols_setdim(hp, dlg, conf);
     }
 }
 

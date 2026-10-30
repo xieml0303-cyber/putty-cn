@@ -38,6 +38,19 @@
 #define PUSHBTNHEIGHT 14
 #define PROGBARHEIGHT 14
 
+/*
+ * Colour used for radio-button labels that are not the current
+ * choice: a mid grey, dark enough to stay readable on the dialog
+ * background but clearly lighter than normal text.
+ */
+#define DIMMED_TEXT_COLOUR RGB(128, 128, 128)
+
+/*
+ * A dimmed drop-down list is painted from a picture of itself, which
+ * has to be thrown away whenever the text it shows changes.
+ */
+static void combo_dim_invalidate(HWND combo);
+
 DECL_WINDOWS_FUNCTION(static, void, InitCommonControls, (void));
 DECL_WINDOWS_FUNCTION(static, BOOL, MakeDragList, (HWND));
 DECL_WINDOWS_FUNCTION(static, int, LBItemFromPt, (HWND, POINT, BOOL));
@@ -70,6 +83,105 @@ void ctlposinit(struct ctlpos *cp, HWND hwnd,
     cp->xoff = leftborder;
     cp->width -= leftborder + rightborder;
 }
+
+/*
+ * Subclass for a radio button. The control keeps its ordinary
+ * BS_AUTORADIOBUTTON behaviour, so the dialog manager still handles
+ * the click and the mutual exclusion, but its appearance is painted
+ * here instead of by the theme engine: the selected option is drawn
+ * in the normal text colour and the rest are dimmed, which a themed
+ * button gives no way to do.
+ */
+static LRESULT CALLBACK radio_button_subclass(
+    HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+    UINT_PTR subclass_id, DWORD_PTR ref_data)
+{
+    switch (msg) {
+      case WM_ERASEBKGND:
+        /*
+         * The whole client area is repainted in WM_PAINT, so there
+         * is no point letting the default handler flicker the
+         * background in first.
+         */
+        return TRUE;
+
+      case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT r, rr, tr;
+        char text[128];
+        bool selected = SendMessage(hwnd, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        bool disabled = !IsWindowEnabled(hwnd);
+        COLORREF textcol = disabled ? GetSysColor(COLOR_GRAYTEXT) :
+            selected ? GetSysColor(COLOR_WINDOWTEXT) : DIMMED_TEXT_COLOUR;
+        int d = 11;                    /* indicator diameter, pixels */
+        HGDIOBJ oldpen, oldbrush, oldfont;
+        HPEN pen;
+        TEXTMETRIC tm;
+        int texty;
+
+        GetClientRect(hwnd, &r);
+        GetWindowText(hwnd, text, sizeof(text));
+
+        SetBkMode(hdc, TRANSPARENT);
+        FillRect(hdc, &r, GetSysColorBrush(COLOR_BTNFACE));
+
+        /*
+         * The indicator, at the left edge and vertically centred in
+         * the control.
+         */
+        rr.left = r.left + 1;
+        rr.top = r.top + (r.bottom - r.top - d) / 2;
+        rr.right = rr.left + d;
+        rr.bottom = rr.top + d;
+
+        pen = CreatePen(PS_SOLID, 1, textcol);
+        oldpen = SelectObject(hdc, pen);
+        oldbrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        Ellipse(hdc, rr.left, rr.top, rr.right, rr.bottom);
+        if (selected) {
+            /*
+             * A smaller filled ellipse inside the ring is what a
+             * classic selected radio button looks like.
+             */
+            HBRUSH dot = CreateSolidBrush(textcol);
+            SelectObject(hdc, dot);
+            Ellipse(hdc, rr.left + 3, rr.top + 3,
+                    rr.right - 2, rr.bottom - 2);
+            SelectObject(hdc, oldbrush);
+            DeleteObject(dot);
+        } else {
+            SelectObject(hdc, oldbrush);
+        }
+        SelectObject(hdc, oldpen);
+        DeleteObject(pen);
+
+        /*
+         * The label. The control is only a few pixels taller than
+         * the font's line height, so DT_VCENTER would push the text
+         * off the bottom; centre it on the glyph box instead.
+         * DrawText is used so the '&' shortcut marker is handled.
+         */
+        oldfont = SelectObject(hdc, (HGDIOBJ)(ULONG_PTR)
+                               SendMessage(hwnd, WM_GETFONT, 0, 0));
+        GetTextMetrics(hdc, &tm);
+        texty = r.top + (r.bottom - r.top - tm.tmHeight) / 2;
+        tr = r;
+        tr.left = rr.right + 4;
+        tr.top = texty;
+        tr.bottom = texty + tm.tmHeight;
+        SetTextColor(hdc, textcol);
+        DrawText(hdc, text, -1, &tr, DT_LEFT | DT_SINGLELINE);
+        SelectObject(hdc, oldfont);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+      }
+    }
+
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
 
 HWND doctl(struct ctlpos *cp, RECT r, const char *wclass, int wstyle,
            int exstyle, const char *wtext, int wid)
@@ -252,9 +364,20 @@ static void radioline_common(struct ctlpos *cp, const char *text, int id,
             r.right = cp->width - r.left;
         r.top = cp->ypos;
         r.bottom = RADIOHEIGHT;
-        doctl(cp, r, "BUTTON",
-              BS_NOTIFY | BS_AUTORADIOBUTTON | WS_CHILD |
-              WS_VISIBLE | WS_TABSTOP | group, 0, btext, bid);
+        /*
+         * The button keeps its ordinary BS_AUTORADIOBUTTON type so
+         * that the dialog manager still maintains the mutual
+         * exclusion and check state; the drawing is taken over by a
+         * subclass instead, because a themed radio button ignores
+         * WM_CTLCOLORBTN's text colour and there is no other way to
+         * show the unselected options dimmed.
+         */
+        {
+            HWND btn = doctl(cp, r, "BUTTON",
+                             BS_NOTIFY | BS_AUTORADIOBUTTON | WS_CHILD |
+                             WS_VISIBLE | WS_TABSTOP | group, 0, btext, bid);
+            SetWindowSubclass(btn, radio_button_subclass, 1, 0);
+        }
         group = 0;
         i++;
     }
@@ -2083,6 +2206,16 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
             (HIWORD(wParam) == BN_CLICKED ||
              HIWORD(wParam) == BN_DOUBLECLICKED) &&
             IsDlgButtonChecked(dp->hwnd, LOWORD(wParam))) {
+            /*
+             * The group is owner-drawn and its appearance depends on
+             * which button is checked, so repaint all of it now that
+             * the click has moved the selection.
+             */
+            for (i = 0; i < ctrl->radio.nbuttons; i++) {
+                HWND button = GetDlgItem(dp->hwnd, c->base_id + 1 + i);
+                if (button)
+                    InvalidateRect(button, NULL, false);
+            }
             dlg_send_event(ctrl, dp, EVENT_VALCHANGE);
         }
         break;
@@ -2316,11 +2449,23 @@ bool dlg_is_visible(dlgcontrol *ctrl, dlgparam *dp)
 void dlg_radiobutton_set(dlgcontrol *ctrl, dlgparam *dp, int whichbutton)
 {
     struct winctrl *c = dlg_findbyctrl(dp, ctrl);
+    int i;
     assert(c && c->ctrl->type == CTRL_RADIO);
     CheckRadioButton(dp->hwnd,
                      c->base_id + 1,
                      c->base_id + c->ctrl->radio.nbuttons,
                      c->base_id + 1 + whichbutton);
+    /*
+     * Owner-drawn buttons do not repaint themselves when their check
+     * state changes, and the appearance depends on that state (selected
+     * options are drawn in full-strength text, the rest dimmed), so
+     * invalidate the whole group.
+     */
+    for (i = 0; i < c->ctrl->radio.nbuttons; i++) {
+        HWND button = GetDlgItem(dp->hwnd, c->base_id + 1 + i);
+        if (button)
+            InvalidateRect(button, NULL, false);
+    }
 }
 
 int dlg_radiobutton_get(dlgcontrol *ctrl, dlgparam *dp)
@@ -2551,6 +2696,276 @@ void dlg_listbox_select(dlgcontrol *ctrl, dlgparam *dp, int index)
     msg = (c->ctrl->type == CTRL_LISTBOX && c->ctrl->listbox.height != 0 ?
            LB_SETCURSEL : CB_SETCURSEL);
     SendDlgItemMessage(dp->hwnd, c->base_id+1, msg, index, 0);
+
+    if (c->ctrl->type == CTRL_LISTBOX && c->ctrl->listbox.height == 0) {
+        /*
+         * A dimmed list is painted from a picture of itself, and that
+         * picture shows the text of whichever entry was selected when
+         * it was taken, so a change of selection makes it stale.
+         */
+        HWND combo = GetDlgItem(dp->hwnd, c->base_id+1);
+        if (combo && GetWindowLongPtr(combo, GWLP_USERDATA)) {
+            combo_dim_invalidate(combo);
+            InvalidateRect(combo, NULL, true);
+        }
+    }
+}
+
+/*
+ * A drop-down list that can be asked to look inactive.
+ *
+ * The combo box paints its face itself and ignores the colours offered
+ * through WM_CTLCOLOR*, so the muted appearance cannot be requested
+ * through the normal colour messages. It does, however, have a native
+ * disabled look, and that is what gets shown: while the list is marked
+ * dim, its face is painted from a bitmap of itself taken while it was
+ * temporarily disabled, which is the same picture the control would
+ * have drawn on its own.
+ *
+ * The control is never actually left disabled - the disabled state is
+ * only held for the instant needed to take the picture - so it stays
+ * clickable and the dropped list keeps working normally.
+ */
+struct combo_dim {
+    HWND combo;
+    HBITMAP shot;               /* cached disabled appearance */
+    int shotw, shoth;
+    int shotsel;                /* selection index the picture shows */
+    bool dim;                   /* draw the disabled picture */
+    bool grabbing;              /* inside the snapshot, avoid recursion */
+};
+
+/*
+ * Discard a cached picture, so that the next paint takes a fresh one.
+ *
+ * Needed whenever the control's contents change, since the picture
+ * shows the text as it was when it was taken.
+ */
+static void combo_dim_invalidate(HWND combo)
+{
+    struct combo_dim *p = (struct combo_dim *)
+        GetWindowLongPtr(combo, GWLP_USERDATA);
+
+    if (p && p->shot) {
+        DeleteObject(p->shot);
+        p->shot = NULL;
+        p->shotw = p->shoth = 0;
+        p->shotsel = -1;
+    }
+}
+
+/*
+ * Take a picture of the control as it would look while disabled.
+ *
+ * The caller must already have disabled it. Returns false if a bitmap
+ * could not be made, in which case the control simply keeps its normal
+ * appearance.
+ */
+static bool combo_dim_snapshot(struct combo_dim *p)
+{
+    RECT r;
+    HDC hdc, memdc;
+    HBITMAP bmp, oldbmp;
+
+    if (p->shot) {
+        DeleteObject(p->shot);
+        p->shot = NULL;
+    }
+
+    GetClientRect(p->combo, &r);
+    if (r.right <= 0 || r.bottom <= 0)
+        return false;
+
+    hdc = GetDC(p->combo);
+    if (!hdc)
+        return false;
+    memdc = CreateCompatibleDC(hdc);
+    if (!memdc) {
+        ReleaseDC(p->combo, hdc);
+        return false;
+    }
+    bmp = CreateCompatibleBitmap(hdc, r.right, r.bottom);
+    if (!bmp) {
+        DeleteDC(memdc);
+        ReleaseDC(p->combo, hdc);
+        return false;
+    }
+    oldbmp = SelectObject(memdc, bmp);
+
+    /*
+     * Let the control paint itself into the bitmap. It is disabled at
+     * this point, so this is exactly the picture wanted.
+     */
+    p->grabbing = true;
+    SendMessage(p->combo, WM_PRINTCLIENT, (WPARAM)memdc,
+                PRF_CLIENT | PRF_ERASEBKGND | PRF_NONCLIENT);
+    p->grabbing = false;
+
+    SelectObject(memdc, oldbmp);
+    DeleteDC(memdc);
+    ReleaseDC(p->combo, hdc);
+
+    p->shot = bmp;
+    p->shotw = r.right;
+    p->shoth = r.bottom;
+    p->shotsel = (int)SendMessage(p->combo, CB_GETCURSEL, 0, 0);
+    return true;
+}
+
+/*
+ * Paint the cached disabled picture over the control's face.
+ *
+ * Anything the control drew for itself has already happened by the
+ * time this runs, so the picture is simply painted on top; the result
+ * is the disabled appearance with no change to how the control behaves.
+ */
+static void combo_dim_paint(struct combo_dim *p, HDC hdc)
+{
+    HDC memdc;
+    HGDIOBJ oldbmp;
+
+    if (!p->shot)
+        return;
+
+    memdc = CreateCompatibleDC(hdc);
+    if (!memdc)
+        return;
+    oldbmp = SelectObject(memdc, p->shot);
+    BitBlt(hdc, 0, 0, p->shotw, p->shoth, memdc, 0, 0, SRCCOPY);
+    SelectObject(memdc, oldbmp);
+    DeleteDC(memdc);
+}
+
+static LRESULT CALLBACK combo_dim_subclass(
+    HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+    UINT_PTR subclass_id, DWORD_PTR ref_data)
+{
+    struct combo_dim *p = (struct combo_dim *)ref_data;
+
+    switch (msg) {
+      case WM_PAINT:
+        if (p && p->dim && !p->grabbing) {
+            PAINTSTRUCT ps;
+            RECT r;
+            HDC hdc = BeginPaint(hwnd, &ps);
+
+            /*
+             * The picture has to match the control as it is now: if
+             * the control has been resized, or its selection has
+             * changed since the picture was taken, it is out of date.
+             */
+            GetClientRect(hwnd, &r);
+            if (p->shot && (p->shotw != r.right || p->shoth != r.bottom ||
+                            p->shotsel != (int)SendMessage(hwnd, CB_GETCURSEL,
+                                                           0, 0))) {
+                DeleteObject(p->shot);
+                p->shot = NULL;
+                p->shotsel = -1;
+            }
+
+            if (!p->shot) {
+                /*
+                 * No usable picture. The control has to be disabled for
+                 * the duration of the snapshot, which must not happen
+                 * while it is painting, so the paint is finished
+                 * normally and the snapshot taken straight after.
+                 */
+                EndPaint(hwnd, &ps);
+                LRESULT ret = DefSubclassProc(hwnd, msg, wParam, lParam);
+                EnableWindow(hwnd, false);
+                combo_dim_snapshot(p);
+                EnableWindow(hwnd, true);
+                InvalidateRect(hwnd, NULL, false);
+                return ret;
+            }
+
+            /*
+             * Paint normally first, then lay the disabled picture over
+             * the result.
+             */
+            EndPaint(hwnd, &ps);
+            {
+                LRESULT ret = DefSubclassProc(hwnd, msg, wParam, lParam);
+                HDC screen = GetDC(hwnd);
+                if (screen) {
+                    combo_dim_paint(p, screen);
+                    ReleaseDC(hwnd, screen);
+                }
+                return ret;
+            }
+        }
+        break;
+
+      case WM_COMMAND:
+        /*
+         * A selection made in the dropped list changes the text on the
+         * control's face, so any cached picture of it is out of date.
+         */
+        if (p && HIWORD(wParam) == CBN_SELCHANGE)
+            combo_dim_invalidate(hwnd);
+        break;
+
+      case WM_NCDESTROY:
+        if (p) {
+            if (p->shot)
+                DeleteObject(p->shot);
+            SetWindowLongPtr(hwnd, GWLP_USERDATA, 0);
+            sfree(p);
+        }
+        RemoveWindowSubclass(hwnd, combo_dim_subclass, 1);
+        break;
+    }
+
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
+
+/*
+ * Set whether a drop-down list is drawn in the muted colours.
+ *
+ * A combo box paints its own face and ignores the colours offered
+ * through WM_CTLCOLOR*, so there is no way to ask it for a muted
+ * appearance directly. What it does have is a native disabled look, so
+ * that is what gets used: the control is subclassed (see
+ * combo_dim_subclass above) and, while it is marked dim, the face it
+ * paints is the disabled one, obtained from the control itself.
+ */
+void dlg_listbox_setdim(dlgcontrol *ctrl, dlgparam *dp, bool dim)
+{
+    struct winctrl *c = dlg_findbyctrl(dp, ctrl);
+    struct combo_dim *p;
+    HWND combo;
+
+    if (!c || c->ctrl->type != CTRL_LISTBOX ||
+        c->ctrl->listbox.height != 0 || c->ctrl->listbox.dimmed == dim)
+        return;
+
+    c->ctrl->listbox.dimmed = dim;
+
+    combo = GetDlgItem(dp->hwnd, c->base_id+1);
+    if (!combo)
+        return;
+
+    p = (struct combo_dim *)GetWindowLongPtr(combo, GWLP_USERDATA);
+    if (!p) {
+        p = snew(struct combo_dim);
+        p->combo = combo;
+        p->shot = NULL;
+        p->shotw = p->shoth = 0;
+        p->shotsel = -1;
+        p->dim = false;
+        p->grabbing = false;
+        SetWindowLongPtr(combo, GWLP_USERDATA, (LONG_PTR)p);
+        SetWindowSubclass(combo, combo_dim_subclass, 1, (DWORD_PTR)p);
+    }
+
+    p->dim = dim;
+    if (!dim && p->shot) {
+        DeleteObject(p->shot);
+        p->shot = NULL;
+        p->shotw = p->shoth = 0;
+    }
+    InvalidateRect(combo, NULL, true);
 }
 
 void dlg_text_set(dlgcontrol *ctrl, dlgparam *dp, char const *text)

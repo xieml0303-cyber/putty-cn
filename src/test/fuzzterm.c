@@ -153,6 +153,7 @@ int dlg_listbox_index(dlgcontrol *ctrl, dlgparam *dp) { return -1; }
 bool dlg_listbox_issel(dlgcontrol *ctrl, dlgparam *dp, int index)
 { return false; }
 void dlg_listbox_select(dlgcontrol *ctrl, dlgparam *dp, int index) { }
+void dlg_listbox_setdim(dlgcontrol *ctrl, dlgparam *dp, bool dim) { }
 void dlg_text_set(dlgcontrol *ctrl, dlgparam *dp, char const *text) { }
 void dlg_filesel_set(dlgcontrol *ctrl, dlgparam *dp, Filename *fn) { }
 Filename *dlg_filesel_get(dlgcontrol *ctrl, dlgparam *dp) { return NULL; }

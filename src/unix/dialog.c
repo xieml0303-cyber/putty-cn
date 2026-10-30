@@ -887,6 +887,15 @@ void dlg_listbox_select(dlgcontrol *ctrl, dlgparam *dp, int index)
     unreachable("bad control type in listbox_select");
 }
 
+void dlg_listbox_setdim(dlgcontrol *ctrl, dlgparam *dp, bool dim)
+{
+    /*
+     * GTK draws its own widgets and gives no way to ask for a muted
+     * variant of a combo box, so there is nothing to do here. The list
+     * still works; it just does not change appearance.
+     */
+}
+
 void dlg_text_set(dlgcontrol *ctrl, dlgparam *dp, char const *text)
 {
     struct uctrl *uc = dlg_find_byctrl(dp, ctrl);

@@ -339,6 +339,22 @@ struct dlgcontrol {
              * right-hand side.
              */
             bool hscroll;
+            /*
+             * Flag which can be set to make a drop-down list look
+             * inactive: its text and background are drawn in the
+             * muted colours instead of the normal ones. Used where
+             * the list belongs to an option that is not currently
+             * the chosen one, so it should look the part without
+             * becoming unusable. Only meaningful when height == 0.
+             */
+            bool dimmed;
+            /*
+             * Flag which can be set to draw a thin horizontal rule
+             * under every entry, so the list reads like a table.
+             * Front ends that cannot customise list drawing may
+             * ignore this.
+             */
+            bool ruledlines;
         } listbox;
         struct { /* for CTRL_FILESELECT */
             char shortcut;
@@ -596,6 +612,13 @@ int dlg_listbox_getid(dlgcontrol *ctrl, dlgparam *dp, int index);
 int dlg_listbox_index(dlgcontrol *ctrl, dlgparam *dp);
 bool dlg_listbox_issel(dlgcontrol *ctrl, dlgparam *dp, int index);
 void dlg_listbox_select(dlgcontrol *ctrl, dlgparam *dp, int index);
+/*
+ * Set whether a drop-down list is drawn in the muted colours, for a
+ * list that belongs to an option which is not currently the chosen
+ * one. The list stays usable; only its appearance changes. Front ends
+ * that cannot do this may treat it as a no-op.
+ */
+void dlg_listbox_setdim(dlgcontrol *ctrl, dlgparam *dp, bool dim);
 void dlg_text_set(dlgcontrol *ctrl, dlgparam *dp, char const *text);
 void dlg_filesel_set(dlgcontrol *ctrl, dlgparam *dp, Filename *fn);
 Filename *dlg_filesel_get(dlgcontrol *ctrl, dlgparam *dp);
