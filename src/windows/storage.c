@@ -795,16 +795,17 @@ char *get_jumplist_registry_entries (void)
 /* ----------------------------------------------------------------------
  * Recent connection history: host names / IP addresses the user has
  * tried to connect to, stored under a separate registry key, most
- * recent first.
+ * recent first. Each entry keeps the port it was last used on, so
+ * picking one from the list restores both boxes.
  */
 
 static const char *const recent_hosts_key = PUTTY_REG_POS "\\RecentHosts";
 #define MAX_RECENT_HOSTS 20
 
-char **get_recent_hosts(int *count)
+struct recent_conn *get_recent_conns(int *count)
 {
     HKEY key;
-    char **hosts = NULL;
+    struct recent_conn *list = NULL;
     int n = 0;
 
     *count = 0;
@@ -813,23 +814,40 @@ char **get_recent_hosts(int *count)
         return NULL;
 
     while (n < MAX_RECENT_HOSTS) {
-        char valname[16], value[1024];
+        char valname[16], portname[24], value[1024];
         DWORD size = sizeof(value), type;
+        DWORD portval = 0, portsize = sizeof(portval), porttype;
+        int port = 0;
+
         snprintf(valname, sizeof(valname), "%d", n);
         if (RegQueryValueEx(key, valname, NULL, &type,
                             (BYTE *)value, &size) != ERROR_SUCCESS ||
             type != REG_SZ)
             break;
         value[sizeof(value)-1] = '\0';
-        hosts = sresize(hosts, n+1, char *);
-        hosts[n++] = dupstr(value);
+
+        /*
+         * Entries written before ports were tracked have no companion
+         * value, so they simply come back with port 0 and the caller
+         * leaves the port box alone.
+         */
+        snprintf(portname, sizeof(portname), "%d.port", n);
+        if (RegQueryValueEx(key, portname, NULL, &porttype,
+                            (BYTE *)&portval, &portsize) == ERROR_SUCCESS &&
+            porttype == REG_DWORD && portsize == sizeof(portval))
+            port = (int)portval;
+
+        list = sresize(list, n+1, struct recent_conn);
+        list[n].host = dupstr(value);
+        list[n].port = port;
+        n++;
     }
     RegCloseKey(key);
     *count = n;
-    return hosts;
+    return list;
 }
 
-static void put_recent_hosts(char **hosts, int n)
+static void put_recent_conns(struct recent_conn *list, int n)
 {
     HKEY key;
     int i;
@@ -839,59 +857,76 @@ static void put_recent_hosts(char **hosts, int n)
                        KEY_ALL_ACCESS, NULL, &key, NULL) != ERROR_SUCCESS)
         return;
     for (i = 0; i < n; i++) {
-        char valname[16];
+        char valname[16], portname[24];
         snprintf(valname, sizeof(valname), "%d", i);
         RegSetValueEx(key, valname, 0, REG_SZ,
-                      (const BYTE *)hosts[i], strlen(hosts[i]) + 1);
+                      (const BYTE *)list[i].host,
+                      strlen(list[i].host) + 1);
+        if (list[i].port > 0) {
+            DWORD portval = (DWORD)list[i].port;
+            snprintf(portname, sizeof(portname), "%d.port", i);
+            RegSetValueEx(key, portname, 0, REG_DWORD,
+                          (const BYTE *)&portval, sizeof(portval));
+        }
     }
     RegCloseKey(key);
 }
 
-void add_recent_host(const char *host)
+void add_recent_conn(const char *host, int port)
 {
     int n, i, j;
-    char **old, **newlist;
+    struct recent_conn *old, *newlist;
 
     if (!host || !*host)
         return;
-    old = get_recent_hosts(&n);
-    newlist = snewn(n+1, char *);
+    old = get_recent_conns(&n);
+    newlist = snewn(n+1, struct recent_conn);
     j = 0;
-    newlist[j++] = dupstr(host);
+    newlist[j].host = dupstr(host);
+    newlist[j].port = port;
+    j++;
     for (i = 0; i < n && j < MAX_RECENT_HOSTS; i++) {
-        if (!strcmp(old[i], host))
+        /* Same host on a different port is a separate entry: the two
+         * connections are not interchangeable. */
+        if (!strcmp(old[i].host, host) && old[i].port == port)
             continue;
-        newlist[j++] = dupstr(old[i]);
+        newlist[j].host = dupstr(old[i].host);
+        newlist[j].port = old[i].port;
+        j++;
     }
-    put_recent_hosts(newlist, j);
+    put_recent_conns(newlist, j);
     for (i = 0; i < j; i++)
-        sfree(newlist[i]);
+        sfree(newlist[i].host);
     sfree(newlist);
-    free_recent_hosts(old, n);
+    free_recent_conns(old, n);
 }
 
-void del_recent_host(const char *host)
+void del_recent_conn(const char *host, int port)
 {
     int n, i, j = 0;
-    char **old = get_recent_hosts(&n);
-    char **newlist = snewn(n+1, char *);
+    struct recent_conn *old = get_recent_conns(&n);
+    struct recent_conn *newlist = snewn(n+1, struct recent_conn);
 
-    for (i = 0; i < n; i++)
-        if (strcmp(old[i], host))
-            newlist[j++] = dupstr(old[i]);
-    put_recent_hosts(newlist, j);
+    for (i = 0; i < n; i++) {
+        if (!strcmp(old[i].host, host) && old[i].port == port)
+            continue;
+        newlist[j].host = dupstr(old[i].host);
+        newlist[j].port = old[i].port;
+        j++;
+    }
+    put_recent_conns(newlist, j);
     for (i = 0; i < j; i++)
-        sfree(newlist[i]);
+        sfree(newlist[i].host);
     sfree(newlist);
-    free_recent_hosts(old, n);
+    free_recent_conns(old, n);
 }
 
-void free_recent_hosts(char **hosts, int count)
+void free_recent_conns(struct recent_conn *list, int count)
 {
     int i;
     for (i = 0; i < count; i++)
-        sfree(hosts[i]);
-    sfree(hosts);
+        sfree(list[i].host);
+    sfree(list);
 }
 
 /* ----------------------------------------------------------------------

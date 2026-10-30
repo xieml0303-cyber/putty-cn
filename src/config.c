@@ -888,10 +888,11 @@ static void sshbug_handler_manual_only(dlgcontrol *ctrl, dlgparam *dlg,
 
 struct sessionsaver_data {
     dlgcontrol *hostbox;        /* 上方「主机名称(或IP地址)」输入框 */
+    dlgcontrol *portbox;        /* 旁边「端口」输入框，随历史条目一起回填 */
     dlgcontrol *listbox;
     dlgcontrol *savebutton, *delbutton;
     dlgcontrol *okbutton, *cancelbutton;
-    char **history;             /* recent host names/IPs, newest first */
+    struct recent_conn *history; /* recent connections, newest first */
     int nhistory;
     bool midsession;
 };
@@ -899,42 +900,72 @@ struct sessionsaver_data {
 static void sessionsaver_data_free(void *ssdv)
 {
     struct sessionsaver_data *ssd = (struct sessionsaver_data *)ssdv;
-    free_recent_hosts(ssd->history, ssd->nhistory);
+    free_recent_conns(ssd->history, ssd->nhistory);
     sfree(ssd);
 }
 
 /*
+ * The list shows "host:port" when a port is known, so two entries for
+ * the same host on different ports are tellable apart.
+ */
+static char *recent_entry_text(const struct recent_conn *rc)
+{
+    if (rc->port > 0)
+        return dupprintf("%s:%d", rc->host, rc->port);
+    return dupstr(rc->host);
+}
+
+/*
  * Refill the list box from the persistent history of recently used
- * host names / IP addresses.
+ * connections.
  */
 static void refresh_history(struct sessionsaver_data *ssd, dlgparam *dlg)
 {
     int i;
 
-    free_recent_hosts(ssd->history, ssd->nhistory);
-    ssd->history = get_recent_hosts(&ssd->nhistory);
+    free_recent_conns(ssd->history, ssd->nhistory);
+    ssd->history = get_recent_conns(&ssd->nhistory);
 
     dlg_update_start(ssd->listbox, dlg);
     dlg_listbox_clear(ssd->listbox, dlg);
-    for (i = 0; i < ssd->nhistory; i++)
-        dlg_listbox_addwithid(ssd->listbox, dlg, ssd->history[i], i);
+    for (i = 0; i < ssd->nhistory; i++) {
+        char *text = recent_entry_text(&ssd->history[i]);
+        dlg_listbox_addwithid(ssd->listbox, dlg, text, i);
+        sfree(text);
+    }
     dlg_update_done(ssd->listbox, dlg);
 }
 
 /*
  * Put the history entry selected in the list box into the host name
- * box above it, and keep the Conf in sync so「打开」can use it.
+ * and port boxes above it, and keep the Conf in sync so「打开」can
+ * use them. Entries with no recorded port leave the port box alone,
+ * so the protocol default stays in force.
+ *
+ * The history is a list of network connections. Under the serial
+ * backend the host box is the serial port picker and the port box is
+ * the baud rate, so an entry must not be poured into either of them.
  */
 static void select_history_entry(struct sessionsaver_data *ssd,
                                  dlgparam *dlg, Conf *conf)
 {
     int i = dlg_listbox_index(ssd->listbox, dlg);
 
+    if (conf_get_int(conf, CONF_protocol) == PROT_SERIAL)
+        return;
+
     if (i >= 0 && ssd->hostbox) {
         int id = dlg_listbox_getid(ssd->listbox, dlg, i);
         if (id >= 0 && id < ssd->nhistory) {
-            dlg_editbox_set(ssd->hostbox, dlg, ssd->history[id]);
-            conf_set_str(conf, CONF_host, ssd->history[id]);
+            struct recent_conn *rc = &ssd->history[id];
+            dlg_editbox_set(ssd->hostbox, dlg, rc->host);
+            conf_set_str(conf, CONF_host, rc->host);
+            if (rc->port > 0 && ssd->portbox) {
+                char portbuf[16];
+                sprintf(portbuf, "%d", rc->port);
+                dlg_editbox_set(ssd->portbox, dlg, portbuf);
+                conf_set_int(conf, CONF_port, rc->port);
+            }
         }
     }
 }
@@ -1002,7 +1033,8 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
             } else {
                 int id = dlg_listbox_getid(ssd->listbox, dlg, i);
                 if (id >= 0 && id < ssd->nhistory) {
-                    del_recent_host(ssd->history[id]);
+                    del_recent_conn(ssd->history[id].host,
+                                    ssd->history[id].port);
                     refresh_history(ssd, dlg);
                 }
             }
@@ -1024,19 +1056,33 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
             }
             /*
              * If no host name has been entered, fall back to the
-             * history entry selected in the list box.
+             * history entry selected in the list box. Under the serial
+             * backend the list is irrelevant: the host box is the
+             * serial port picker, and the history holds network hosts.
              */
-            if (!conf_launchable(conf)) {
+            if (!conf_launchable(conf) &&
+                conf_get_int(conf, CONF_protocol) != PROT_SERIAL) {
                 int i = dlg_listbox_index(ssd->listbox, dlg);
                 if (i >= 0) {
                     int id = dlg_listbox_getid(ssd->listbox, dlg, i);
-                    if (id >= 0 && id < ssd->nhistory)
-                        conf_set_str(conf, CONF_host,
-                                     ssd->history[id]);
+                    if (id >= 0 && id < ssd->nhistory) {
+                        struct recent_conn *rc = &ssd->history[id];
+                        conf_set_str(conf, CONF_host, rc->host);
+                        if (rc->port > 0)
+                            conf_set_int(conf, CONF_port, rc->port);
+                    }
                 }
             }
             if (conf_launchable(conf)) {
-                add_recent_host(conf_get_str(conf, CONF_host));
+                /*
+                 * Only network connections go into the history: the
+                 * serial port box holds a device name, not a host, and
+                 * the neighbouring box is a baud rate rather than a
+                 * port number.
+                 */
+                if (conf_get_int(conf, CONF_protocol) != PROT_SERIAL)
+                    add_recent_conn(conf_get_str(conf, CONF_host),
+                                    conf_get_int(conf, CONF_port));
                 dlg_end(dlg, 1);
             } else
                 dlg_info_msg(dlg, "请先输入主机名称（或 IP 地址），"
@@ -2092,6 +2138,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                          config_port_handler, I(0), I(0));
         c->column = 1;
         hp->port = c;
+        ssd->portbox = c;
 
         ctrl_columns(s, 1, 100);
         c = ctrl_text(s, "连接类型：", HELPCTX(session_hostname));

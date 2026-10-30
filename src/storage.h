@@ -76,13 +76,20 @@ void enum_settings_finish(settings_e *handle);
 
 /* ----------------------------------------------------------------------
  * Recent connection history: host names / IP addresses the user has
- * tried to connect to, most recent first.
+ * tried to connect to, together with the port each was last used on,
+ * most recent first.
  */
 
-char **get_recent_hosts(int *count);   /* caller frees via free_recent_hosts */
-void add_recent_host(const char *host);
-void del_recent_host(const char *host);
-void free_recent_hosts(char **hosts, int count);
+struct recent_conn {
+    char *host;
+    int port;      /* 0 if the entry predates port tracking */
+};
+
+/* caller frees via free_recent_conns */
+struct recent_conn *get_recent_conns(int *count);
+void add_recent_conn(const char *host, int port);
+void del_recent_conn(const char *host, int port);
+void free_recent_conns(struct recent_conn *list, int count);
 
 /* ----------------------------------------------------------------------
  * Serial ports: the serial ports actually present on this machine,

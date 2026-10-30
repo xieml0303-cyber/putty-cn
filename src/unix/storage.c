@@ -1000,26 +1000,26 @@ void cleanup_all(void)
 /*
  * Recent connection history: not implemented on Unix.
  */
-char **get_recent_hosts(int *count)
+struct recent_conn *get_recent_conns(int *count)
 {
     *count = 0;
     return NULL;
 }
 
-void add_recent_host(const char *host)
+void add_recent_conn(const char *host, int port)
 {
 }
 
-void del_recent_host(const char *host)
+void del_recent_conn(const char *host, int port)
 {
 }
 
-void free_recent_hosts(char **hosts, int count)
+void free_recent_conns(struct recent_conn *list, int count)
 {
     int i;
     for (i = 0; i < count; i++)
-        sfree(hosts[i]);
-    sfree(hosts);
+        sfree(list[i].host);
+    sfree(list);
 }
 
 /*
