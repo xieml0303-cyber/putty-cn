@@ -312,7 +312,14 @@ static void start_backend(WinGuiSeat *wgs)
         sfree(msg);
         exit(0);
     }
-    term_setup_window_titles(wgs->term, realhost);
+    /*
+     * Under the serial backend the port box holds a baud rate, not a
+     * port number, and realhost is already the COM port name.
+     */
+    term_setup_window_titles(wgs->term, realhost,
+                             conf_get_int(wgs->conf, CONF_protocol) ==
+                             PROT_SERIAL ? 0 :
+                             conf_get_int(wgs->conf, CONF_port));
     sfree(realhost);
 
     /*

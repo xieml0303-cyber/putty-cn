@@ -2047,7 +2047,8 @@ void term_set_trust_status(Terminal *term, bool trusted);
 void term_keyinput(Terminal *, int codepage, const void *buf, int len);
 void term_keyinputw(Terminal *, const wchar_t *widebuf, int len);
 void term_get_cursor_position(Terminal *term, int *x, int *y);
-void term_setup_window_titles(Terminal *term, const char *title_hostname);
+void term_setup_window_titles(Terminal *term, const char *title_hostname,
+                              int title_port);
 void term_notify_minimised(Terminal *term, bool minimised);
 void term_notify_palette_changed(Terminal *term);
 void term_notify_window_pos(Terminal *term, int x, int y);

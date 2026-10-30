@@ -1918,7 +1918,8 @@ void term_clrsb(Terminal *term)
 
 const optionalrgb optionalrgb_none = {0, 0, 0, 0};
 
-void term_setup_window_titles(Terminal *term, const char *title_hostname)
+void term_setup_window_titles(Terminal *term, const char *title_hostname,
+                              int title_port)
 {
     const char *conf_title = conf_get_str(term->conf, CONF_wintitle);
     sfree(term->window_title);
@@ -1926,11 +1927,23 @@ void term_setup_window_titles(Terminal *term, const char *title_hostname)
     if (*conf_title && !title_is_auto_generated(conf_title)) {
         term->window_title = dupstr(conf_title);
         term->icon_title = dupstr(conf_title);
-    } else {
-        if (title_hostname && *title_hostname)
-            term->window_title = dupcat(title_hostname, " - ", appname);
+    } else if (title_hostname && *title_hostname) {
+        /*
+         * Show the port alongside the host so that two connections to
+         * the same machine on different ports are tellable apart. The
+         * serial backend has no port to speak of: title_hostname is
+         * already the COM port name there, so a port number would be
+         * meaningless (and would in fact be the baud rate).
+         */
+        if (title_port > 0 &&
+            conf_get_int(term->conf, CONF_protocol) != PROT_SERIAL)
+            term->window_title = dupprintf("%s:%d - %s", title_hostname,
+                                           title_port, appname);
         else
-            term->window_title = dupstr(appname);
+            term->window_title = dupcat(title_hostname, " - ", appname);
+        term->icon_title = dupstr(term->window_title);
+    } else {
+        term->window_title = dupstr(appname);
         term->icon_title = dupstr(term->window_title);
     }
     term->wintitle_codepage = term->icontitle_codepage = DEFAULT_CODEPAGE;

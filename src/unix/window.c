@@ -5263,7 +5263,14 @@ static void start_backend(GtkFrontend *inst)
         return;
     }
 
-    term_setup_window_titles(inst->term, realhost);
+    /*
+     * Under the serial backend the port box holds a baud rate, not a
+     * port number, and realhost is already the device name.
+     */
+    term_setup_window_titles(inst->term, realhost,
+                             conf_get_int(inst->conf, CONF_protocol) ==
+                             PROT_SERIAL ? 0 :
+                             conf_get_int(inst->conf, CONF_port));
     sfree(realhost);
 
     term_provide_backend(inst->term, inst->backend);
