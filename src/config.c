@@ -2254,6 +2254,8 @@ void setup_config_box(struct controlbox *b, bool midsession,
      * once the history outgrows the box.
      */
     ssd->listbox->listbox.height = 13;
+    /* 每行下方画一条细分隔线，让历史列表看起来像表格。 */
+    ssd->listbox->listbox.ruledlines = true;
     /* "Save" button lives in the standard panel at the bottom. */
     if (!midsession) {
         ssd->delbutton = ctrl_pushbutton(s, "删除(D)", 'd',

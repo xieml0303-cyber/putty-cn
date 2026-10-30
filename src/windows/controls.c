@@ -921,8 +921,39 @@ void bigeditctrl(struct ctlpos *cp, const char *stext,
 /*
  * A list box with a static labelling it.
  */
+/*
+ * Font used by a ruled list box. It is derived from the dialog font at
+ * a larger size, so the history list is easier to read than the rest
+ * of the panel. Cached across dialogs: the source font handle is
+ * remembered so the derived font is rebuilt if it ever changes.
+ */
+#define RULEDLIST_FONT_PERCENT 130
+
+static HFONT ruledlist_font = NULL;
+static HFONT ruledlist_font_src = NULL;
+
+static HFONT ruledlist_getfont(HFONT src)
+{
+    LOGFONT lf;
+
+    if (!src || !GetObject(src, sizeof(lf), &lf))
+        return NULL;
+    if (ruledlist_font && ruledlist_font_src == src)
+        return ruledlist_font;
+
+    lf.lfHeight = MulDiv(lf.lfHeight, RULEDLIST_FONT_PERCENT, 100);
+    if (lf.lfHeight == 0)
+        lf.lfHeight = -12;
+
+    if (ruledlist_font)
+        DeleteObject(ruledlist_font);
+    ruledlist_font = CreateFontIndirect(&lf);
+    ruledlist_font_src = src;
+    return ruledlist_font;
+}
+
 void listbox(struct ctlpos *cp, const char *stext,
-             int sid, int lid, int lines, bool multi)
+             int sid, int lid, int lines, bool multi, bool ruledlines)
 {
     RECT r;
 
@@ -943,8 +974,46 @@ void listbox(struct ctlpos *cp, const char *stext,
     doctl(cp, r, "LISTBOX",
           WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
           LBS_NOTIFY | LBS_HASSTRINGS | LBS_USETABSTOPS |
+          (ruledlines ? LBS_OWNERDRAWFIXED : 0) |
           (multi ? LBS_MULTIPLESEL : 0),
           WS_EX_CLIENTEDGE, "", lid);
+
+    if (ruledlines && cp->hwnd) {
+        /*
+         * A ruled list uses a larger font than the rest of the panel,
+         * so its rows are taller too. Set both explicitly: the row
+         * height must be measured from the font actually in use, or
+         * the text gets clipped.
+         */
+        HFONT bigfont = ruledlist_getfont((HFONT)cp->font);
+        HDC hdc;
+        HFONT oldfont;
+        TEXTMETRIC tm;
+        int rowheight;
+
+        if (bigfont)
+            SendDlgItemMessage(cp->hwnd, lid, WM_SETFONT,
+                               (WPARAM)bigfont, MAKELPARAM(true, 0));
+
+        hdc = GetDC(cp->hwnd);
+        oldfont = SelectObject(hdc, bigfont ? bigfont
+                                  : (HFONT)cp->font);
+        GetTextMetrics(hdc, &tm);
+        SelectObject(hdc, oldfont);
+        ReleaseDC(cp->hwnd, hdc);
+
+        /*
+         * Keep the row tight: the box height comes from the dialog
+         * layout and cannot grow, so any padding here costs a whole
+         * extra row at the bottom. The text is centred in the row by
+         * DrawText, so no padding is needed for it to look right.
+         */
+        rowheight = tm.tmHeight + tm.tmExternalLeading;
+        if (rowheight < 1)
+            rowheight = 1;
+        SendDlgItemMessage(cp->hwnd, lid, LB_SETITEMHEIGHT, 0,
+                           (LPARAM)rowheight);
+    }
 }
 
 /*
@@ -1798,7 +1867,8 @@ void winctrl_layout(struct dlgparam *dp, struct winctrls *wc,
             } else {
                 /* Ordinary list. */
                 listbox(&pos, escaped, base_id, base_id+1,
-                        ctrl->listbox.height, ctrl->listbox.multisel);
+                        ctrl->listbox.height, ctrl->listbox.multisel,
+                        ctrl->listbox.ruledlines);
             }
             if (ctrl->listbox.ncols) {
                 /*
@@ -2091,10 +2161,82 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
         return false;                  /* we have nothing to do */
 
     if (msg == WM_DRAWITEM) {
+        LPDRAWITEMSTRUCT di = (LPDRAWITEMSTRUCT) lParam;
+
+        if (di->CtlType == ODT_LISTBOX) {
+            /*
+             * Owner-drawn list box: draw the entry text ourselves and
+             * rule a thin line under each row, so the list reads like
+             * a table.
+             */
+            HDC hdc = di->hDC;
+            RECT r = di->rcItem;
+            COLORREF bgcol, fgcol;
+            HBRUSH bg;
+            char *text;
+            int len;
+
+            if (di->itemID == (UINT)-1)
+                return true;           /* nothing to draw */
+
+            len = (int)SendMessage(di->hwndItem, LB_GETTEXTLEN,
+                                   di->itemID, 0);
+            if (len < 0)
+                return true;
+            text = snewn(len + 1, char);
+            SendMessage(di->hwndItem, LB_GETTEXT, di->itemID,
+                        (LPARAM)text);
+
+            if (di->itemState & ODS_SELECTED) {
+                bgcol = GetSysColor(COLOR_HIGHLIGHT);
+                fgcol = GetSysColor(COLOR_HIGHLIGHTTEXT);
+            } else {
+                bgcol = GetSysColor(COLOR_WINDOW);
+                fgcol = GetSysColor(COLOR_WINDOWTEXT);
+            }
+
+            bg = CreateSolidBrush(bgcol);
+            FillRect(hdc, &r, bg);
+            DeleteObject(bg);
+
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, fgcol);
+
+            /*
+             * Entries may use tabs to separate columns; expand them
+             * the way the list box's tab stops would.
+             */
+            {
+                RECT tr = r;
+                tr.left += 2;
+                tr.right -= 2;
+                DrawText(hdc, text, len, &tr,
+                         DT_LEFT | DT_VCENTER | DT_SINGLELINE |
+                         DT_EXPANDTABS | DT_NOPREFIX);
+            }
+            sfree(text);
+
+            /*
+             * The rule itself: one pixel at the bottom of the row,
+             * in a light grey that reads as a table divider without
+             * competing with the text. Skip it on the selected row so
+             * the highlight stays clean.
+             */
+            if (!(di->itemState & ODS_SELECTED)) {
+                HPEN pen = CreatePen(PS_SOLID, 1, RGB(208, 208, 208));
+                HPEN oldpen = SelectObject(hdc, pen);
+                MoveToEx(hdc, r.left, r.bottom - 1, NULL);
+                LineTo(hdc, r.right, r.bottom - 1);
+                SelectObject(hdc, oldpen);
+                DeleteObject(pen);
+            }
+
+            return true;
+        }
+
         /*
          * Owner-draw request for a panel title.
          */
-        LPDRAWITEMSTRUCT di = (LPDRAWITEMSTRUCT) lParam;
         HDC hdc = di->hDC;
         RECT r = di->rcItem;
         SIZE s;
