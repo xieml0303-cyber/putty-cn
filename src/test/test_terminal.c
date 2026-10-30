@@ -706,6 +706,73 @@ static void test_reflow(Mock *mk)
     mk->term->wrap = true;
 }
 
+/*
+ * A serial console has no local line editor: the device does its own
+ * echoing, and when the user presses Backspace it sends back DEL
+ * (0x7F). So the terminal itself has to perform the destructive
+ * backspace, and it has to be able to walk back over a soft line
+ * break, or a long input line cannot be edited past the wrap point.
+ */
+static void test_del_backspace(Mock *mk)
+{
+    mk->ucsdata->line_codepage = CP_UTF8;
+
+    /* ---- DEL crosses a soft wrap back into the previous line ---- */
+    reset(mk);
+    term_size(mk->term, 24, 80, 100);
+    mk->term->wrap = true;
+    /* 161 characters fill two lines and start a third, leaving the
+     * cursor at column 0: the position where DEL used to get stuck. */
+    reflow_print_filled(mk, 161, 'a');
+    IEQUAL(mk->term->curs.y, 2);
+    IEQUAL(mk->term->curs.x, 1);
+    IEQUAL(get_lineattr(mk->term, 1) & LATTR_WRAPPED, LATTR_WRAPPED);
+
+    /* the first DEL just steps back within the third line */
+    term_datapl(mk->term, PTRLEN_LITERAL("\177"));
+    IEQUAL(mk->term->curs.y, 2);
+    IEQUAL(mk->term->curs.x, 0);
+    IEQUAL(reflow_count_chars(mk), 160);
+
+    /* the second DEL has to cross back into line 1 */
+    term_datapl(mk->term, PTRLEN_LITERAL("\177"));
+    IEQUAL(mk->term->curs.y, 1);
+    IEQUAL(mk->term->curs.x, 79);
+    /* the erased cell is the 160th 'a', in column 79 of line 1 */
+    IEQUAL(get_termchar(mk->term, 79, 1).chr, CSET_ASCII | ' ');
+    /* the 159 characters before it are untouched */
+    IEQUAL(get_termchar(mk->term, 78, 1).chr, CSET_ASCII | 'a');
+    IEQUAL(reflow_count_chars(mk), 159);
+
+    /* ---- DEL stays put at the start of a hard-wrapped line ---- */
+    reset(mk);
+    term_size(mk->term, 24, 80, 100);
+    mk->term->wrap = true;
+    term_datapl(mk->term, PTRLEN_LITERAL("prompt>"));
+    term_datapl(mk->term, PTRLEN_LITERAL("\r\n"));
+    IEQUAL(mk->term->curs.y, 1);
+    IEQUAL(mk->term->curs.x, 0);
+    IEQUAL(get_lineattr(mk->term, 0) & LATTR_WRAPPED, 0);
+
+    term_datapl(mk->term, PTRLEN_LITERAL("\177"));
+    /* no movement, and crucially the prompt is not damaged */
+    IEQUAL(mk->term->curs.y, 1);
+    IEQUAL(mk->term->curs.x, 0);
+    IEQUAL(get_termchar(mk->term, 6, 0).chr, CSET_ASCII | '>');
+
+    /* ---- BS keeps its unconditional cross-line behaviour ---- */
+    reset(mk);
+    term_size(mk->term, 24, 80, 100);
+    mk->term->wrap = true;
+    term_datapl(mk->term, PTRLEN_LITERAL("abc\r\n"));
+    IEQUAL(mk->term->curs.x, 0);
+    term_datapl(mk->term, PTRLEN_LITERAL("\b"));
+    IEQUAL(mk->term->curs.y, 0);
+    /* BS lands on the last column of the line above, wrapped2 aside */
+    IEQUAL(mk->term->curs.x, 79);
+    IEQUAL(get_termchar(mk->term, 2, 0).chr, CSET_ASCII | 'c');
+}
+
 int main(void)
 {
     Mock *mk = mock_new();
@@ -716,6 +783,7 @@ int main(void)
     test_nonwrap(mk);
     test_wintitle(mk);
     test_reflow(mk);
+    test_del_backspace(mk);
 
     bool failed = mk->any_test_failed;
     mock_free(mk);

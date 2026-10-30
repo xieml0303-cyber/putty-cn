@@ -3228,6 +3228,58 @@ static void check_boundary(Terminal *term, int x, int y)
 }
 
 /*
+ * Move the cursor back one character, as for a backspace control
+ * character.
+ *
+ * If require_wrapped is true, the move only crosses a line boundary
+ * when the line above is a soft-wrapped continuation (LATTR_WRAPPED),
+ * so that destructive backspace over wrapped text stays on the same
+ * logical line without reaching back over a genuine hard line break.
+ *
+ * Returns true if the cursor actually moved.
+ */
+static bool term_cursor_backspace(Terminal *term, bool require_wrapped)
+{
+    if (term->wrapnext) {
+        term->wrapnext = false;
+        return false;
+    }
+    if (term->curs.x == 0) {
+        if (term->curs.y == 0 || !term->wrap)
+            return false;
+
+        termline *above = scrlineptr(term->curs.y - 1);
+        if (require_wrapped && !(above->lattr & LATTR_WRAPPED))
+            return false;
+
+        term->curs.x = term->cols - 1, term->curs.y--;
+
+        /*
+         * If the line we've just wrapped back on to had the
+         * LATTR_WRAPPED2 flag set, it means that the line wrapped
+         * because a double-width character was printed with the
+         * cursor in the rightmost column, and the best handling
+         * available was to leave that column empty and move the
+         * whole character to the next line. In that situation,
+         * backspacing needs to put the cursor on the previous
+         * _logical_ character, i.e. skip the empty space left by
+         * the wrapping. This arranges that if an application
+         * unaware of the terminal width or cursor position prints
+         * a number of printing characters and then tries to return
+         * to a particular one of them by emitting the right number
+         * of backspaces, it's still the right number even if a
+         * line break appeared in a maximally awkward position.
+         */
+        termline *ldata = scrlineptr(term->curs.y);
+        if (term->curs.x > 0 && (ldata->lattr & LATTR_WRAPPED2))
+            term->curs.x--;
+        return true;
+    }
+    term->curs.x--;
+    return true;
+}
+
+/*
  * Erase a large portion of the screen: the whole screen, or the
  * whole line, or parts thereof.
  */
@@ -4250,9 +4302,18 @@ static void term_out(Terminal *term, bool called_from_term_data)
 
         /* Or the GL control. */
         if (c == '\177' && term->termstate < DO_CTRLS && has_compat(OTHER)) {
-            if (term->curs.x && !term->wrapnext)
-                term->curs.x--;
-            term->wrapnext = false;
+            /*
+             * DEL is a destructive backspace: move back one character,
+             * then erase it. The move has to cross a soft line break,
+             * otherwise a serial console (where the device echoes DEL
+             * for the Backspace key, and the terminal does the line
+             * editing on its behalf) gets stuck in column 0 of the
+             * continuation line instead of walking back into the line
+             * above. It must not cross a hard line break, though: after
+             * a real newline the previous line is finished output, and
+             * erasing its last character would corrupt it.
+             */
+            term_cursor_backspace(term, true);
             /* destructive backspace might be disabled */
             if (!term->no_dbackspace) {
                 check_boundary(term, term->curs.x, term->curs.y);
@@ -4360,36 +4421,7 @@ static void term_out(Terminal *term, bool called_from_term_data)
                 break;
               }
               case '\b':              /* BS: Back space */
-                if (term->wrapnext) {
-                    term->wrapnext = false;
-                } else if (term->curs.x == 0 &&
-                           (term->curs.y == 0 || !term->wrap)) {
-                    /* do nothing */
-                } else if (term->curs.x == 0 && term->curs.y > 0) {
-                    term->curs.x = term->cols - 1, term->curs.y--;
-
-                    /*
-                     * If the line we've just wrapped back on to had the
-                     * LATTR_WRAPPED2 flag set, it means that the line wrapped
-                     * because a double-width character was printed with the
-                     * cursor in the rightmost column, and the best handling
-                     * available was to leave that column empty and move the
-                     * whole character to the next line. In that situation,
-                     * backspacing needs to put the cursor on the previous
-                     * _logical_ character, i.e. skip the empty space left by
-                     * the wrapping. This arranges that if an application
-                     * unaware of the terminal width or cursor position prints
-                     * a number of printing characters and then tries to return
-                     * to a particular one of them by emitting the right number
-                     * of backspaces, it's still the right number even if a
-                     * line break appeared in a maximally awkward position.
-                     */
-                    termline *ldata = scrlineptr(term->curs.y);
-                    if (term->curs.x > 0 && (ldata->lattr & LATTR_WRAPPED2))
-                        term->curs.x--;
-                } else {
-                    term->curs.x--;
-                }
+                term_cursor_backspace(term, false);
                 seen_disp_event(term);
                 break;
               case '\016':            /* LS1: Locking-shift one */
