@@ -658,6 +658,9 @@ bool dlg_is_visible(dlgcontrol *ctrl, dlgparam *dp);
 void dlg_beep(dlgparam *dp);
 void dlg_error_msg(dlgparam *dp, const char *msg);
 void dlg_info_msg(dlgparam *dp, const char *msg);
+/* Reset the serial-port auto-fallback bookkeeping at config-dialog
+ * entry (defined in config.c; see the H3 note there). */
+void serial_fallback_reset(void);
 /*
  * This function signals to the front end that the dialog's
  * processing is completed, and passes an integer value (typically

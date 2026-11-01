@@ -231,6 +231,8 @@ if(GTK_FOUND)
   target_link_libraries(test_lineedit
     guiterminal settings eventloop utils ${platform_libraries})
 
+  add_test(NAME test_lineedit COMMAND test_lineedit)
+
   add_executable(test_terminal
     ${CMAKE_SOURCE_DIR}/test/test_terminal.c
     ${CMAKE_SOURCE_DIR}/stubs/no-gss.c
@@ -238,6 +240,8 @@ if(GTK_FOUND)
     ${CMAKE_SOURCE_DIR}/stubs/no-timing.c)
   target_link_libraries(test_terminal
     guiterminal settings eventloop utils ${platform_libraries})
+
+  add_test(NAME test_terminal COMMAND test_terminal)
 endif()
 
 # Pageant is built whether we have GTK or not; in its absence we

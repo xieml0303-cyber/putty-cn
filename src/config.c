@@ -208,6 +208,31 @@ static void strip_port_suffix(char *s)
         *p = '\0';
 }
 
+/*
+ * Serial-port auto-fallback bookkeeping (H3). When
+ * fill_serial_port_list() rewrites CONF_serline because the saved
+ * port is absent, or because a physical lead displaced a Bluetooth
+ * virtual one, we remember the value the user actually had saved and
+ * whether the user has since picked a port by hand. Saving must keep
+ * the user's value; only an explicit user choice may be persisted.
+ *
+ * The startup config dialog is modal and one per process, so these
+ * file-scope statics live exactly as long as one config dialog use
+ * (same lifetime argument as the M1/M2 serial_ui analysis); they are
+ * reset at every dialog entry via serial_fallback_reset().
+ */
+static char *serial_fallback_original = NULL;
+static bool serial_fallback_active = false;
+static bool serial_user_picked = false;
+
+void serial_fallback_reset(void)
+{
+    sfree(serial_fallback_original);
+    serial_fallback_original = NULL;
+    serial_fallback_active = false;
+    serial_user_picked = false;
+}
+
 static void fill_serial_port_list(dlgcontrol *ctrl, dlgparam *dlg,
                                   Conf *conf, const char *current)
 {
@@ -232,6 +257,15 @@ static void fill_serial_port_list(dlgcontrol *ctrl, dlgparam *dlg,
         }
     }
     if (!present && nports > 0) {
+        if (!serial_fallback_active) {
+            /*
+             * First auto-fallback in this dialog's lifetime: remember
+             * the user's saved value so that saving keeps it instead
+             * of baking in our substitution (H3).
+             */
+            serial_fallback_original = saved ? dupstr(saved) : dupstr("");
+            serial_fallback_active = true;
+        }
         sfree(saved);
         saved = dupstr(ports[0]);
         conf_set_str(conf, CONF_serline, saved);
@@ -246,6 +280,11 @@ static void fill_serial_port_list(dlgcontrol *ctrl, dlgparam *dlg,
          */
         for (i = 0; i < nports; i++) {
             if (!serial_port_is_bluetooth(ports[i])) {
+                if (!serial_fallback_active) {
+                    serial_fallback_original =
+                        saved ? dupstr(saved) : dupstr("");
+                    serial_fallback_active = true;
+                }
                 sfree(saved);
                 saved = dupstr(ports[i]);
                 conf_set_str(conf, CONF_serline, saved);
@@ -263,9 +302,13 @@ static void fill_serial_port_list(dlgcontrol *ctrl, dlgparam *dlg,
     if (selected >= 0)
         dlg_listbox_select(ctrl, dlg, selected);
     if (saved && saved[0]) {
-        char display[64];
-        snprintf(display, sizeof(display), "%s（%s）", saved,
-                 serial_port_is_bluetooth(saved) ? "蓝牙" : "物理");
+        char display[96];
+        if (serial_fallback_active && !serial_user_picked)
+            snprintf(display, sizeof(display), "%s（%s，自动匹配）", saved,
+                     serial_port_is_bluetooth(saved) ? "蓝牙" : "物理");
+        else
+            snprintf(display, sizeof(display), "%s（%s）", saved,
+                     serial_port_is_bluetooth(saved) ? "蓝牙" : "物理");
         dlg_editbox_set(ctrl, dlg, display);
     } else {
         dlg_editbox_set(ctrl, dlg, "");
@@ -321,6 +364,8 @@ static void config_host_handler(dlgcontrol *ctrl, dlgparam *dlg,
              */
             strip_port_suffix(s);
             conf_set_str(conf, CONF_serline, s);
+            serial_user_picked = true;
+            serial_fallback_active = false; /* the user's choice wins */
         } else {
             conf_set_str(conf, CONF_host, s);
         }
@@ -1062,7 +1107,25 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
             {
                 /* 全局只保留「默认设置」一个保存目录：候选框里的地址
                  * 只是连接目标，不再被当成会话名建目录。 */
+                /*
+                 * H3: the auto-fallback port must not be baked into the
+                 * registry. If a fallback happened and the user has not
+                 * picked a port by hand since, persist the originally
+                 * saved value instead, then restore the runtime value
+                 * so that "Open" still uses the substituted port.
+                 */
+                char *runtime_port = NULL;
+                if (serial_fallback_active && !serial_user_picked &&
+                    serial_fallback_original) {
+                    runtime_port = dupstr(conf_get_str(conf, CONF_serline));
+                    conf_set_str(conf, CONF_serline,
+                                 serial_fallback_original);
+                }
                 char *errmsg = save_settings("", conf);
+                if (runtime_port) {
+                    conf_set_str(conf, CONF_serline, runtime_port);
+                    sfree(runtime_port);
+                }
                 if (errmsg) {
                     dlg_error_msg(dlg, errmsg);
                     sfree(errmsg);

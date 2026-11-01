@@ -830,6 +830,7 @@ bool do_config(Conf *conf)
     bool ret;
     PortableDialogStuff *pds = pds_new(2);
 
+    serial_fallback_reset();
     setup_config_box(pds->ctrlbox, false, 0, 0);
     win_setup_config_box(pds->ctrlbox, &pds->dp->hwnd, has_help(), false, 0);
 
@@ -877,6 +878,7 @@ bool do_reconfig(HWND hwnd, Conf *conf, int protcfginfo,
     PortableDialogStuff *pds = pds_new(2);
     struct reconfig_apply_ctx actx;
 
+    serial_fallback_reset();
     backup_conf = conf_copy(conf);
 
     actx.cb = apply_cb;

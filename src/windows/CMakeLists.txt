@@ -196,6 +196,8 @@ add_executable(test_lineedit
 target_link_libraries(test_lineedit
   guiterminal settings eventloop utils ${platform_libraries})
 
+add_test(NAME test_lineedit COMMAND test_lineedit)
+
 add_executable(test_terminal
   ${CMAKE_SOURCE_DIR}/test/test_terminal.c
   ${CMAKE_SOURCE_DIR}/stubs/no-gss.c
@@ -204,5 +206,7 @@ add_executable(test_terminal
   no-jump-list.c)
 target_link_libraries(test_terminal
   guiterminal settings eventloop utils ${platform_libraries})
+
+add_test(NAME test_terminal COMMAND test_terminal)
 
 add_sources_from_current_dir(test_conf no-jump-list.c handle-wait.c)

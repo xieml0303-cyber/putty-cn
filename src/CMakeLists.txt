@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.7...3.28)
 project(putty LANGUAGES C)
 
+# Wire the test_* unit tests into ctest (14 test targets existed with
+# zero add_test registrations before 2026-11-01).
+enable_testing()
+
 set(CMAKE_C_STANDARD 99)
 
 include(cmake/setup.cmake)
@@ -94,15 +98,21 @@ add_executable(test_bpp
 target_link_libraries(test_bpp
   sshclient crypto network utils ${platform_libraries})
 
+add_test(NAME test_bpp COMMAND test_bpp)
+
 add_executable(test_host_strfoo
   utils/host_strchr_internal.c)
 target_compile_definitions(test_host_strfoo PRIVATE TEST)
 target_link_libraries(test_host_strfoo utils ${platform_libraries})
 
+add_test(NAME test_host_strfoo COMMAND test_host_strfoo)
+
 add_executable(test_decode_utf8
   utils/decode_utf8.c)
 target_compile_definitions(test_decode_utf8 PRIVATE TEST)
 target_link_libraries(test_decode_utf8 utils ${platform_libraries})
+
+add_test(NAME test_decode_utf8 COMMAND test_decode_utf8)
 
 add_executable(test_unicode_norm
   utils/unicode-norm.c)
@@ -114,15 +124,21 @@ add_executable(test_tree234
 target_compile_definitions(test_tree234 PRIVATE TEST)
 target_link_libraries(test_tree234 utils ${platform_libraries})
 
+add_test(NAME test_tree234 COMMAND test_tree234)
+
 add_executable(test_wildcard
   utils/wildcard.c)
 target_compile_definitions(test_wildcard PRIVATE TEST)
 target_link_libraries(test_wildcard utils ${platform_libraries})
 
+add_test(NAME test_wildcard COMMAND test_wildcard)
+
 add_executable(test_cert_expr
   utils/cert-expr.c)
 target_compile_definitions(test_cert_expr PRIVATE TEST)
 target_link_libraries(test_cert_expr utils ${platform_libraries})
+
+add_test(NAME test_cert_expr COMMAND test_cert_expr)
 
 add_executable(bidi_gettype
   terminal/bidi_gettype.c)
@@ -186,6 +202,8 @@ add_executable(test_conf
 )
 be_list(test_conf TestConf SSH SERIAL OTHERBACKENDS)
 target_link_libraries(test_conf sshclient otherbackends settings network crypto utils ${platform_libraries})
+
+add_test(NAME test_conf COMMAND test_conf)
 
 foreach(subdir ${platform} ${extra_dirs})
   add_subdirectory(${subdir})

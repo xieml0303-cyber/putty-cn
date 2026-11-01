@@ -685,7 +685,8 @@ void test_simple(void)
                         ADDRTYPE_IPV6, 2, -1);
     test_bool_simple(CONF_warn_on_close, "WarnOnClose", true);
     test_bool_simple(CONF_tcp_nodelay, "TCPNoDelay", true);
-    test_bool_simple(CONF_tcp_keepalives, "TCPKeepalives", false);
+    /* cn change: TCP keepalives on by default (2b95c76 串口配置与终端体验改造). */
+    test_bool_simple(CONF_tcp_keepalives, "TCPKeepalives", true);
     test_str_simple(CONF_loghost, "LogHost", "");
     test_str_simple(CONF_proxy_exclude_list, "ProxyExcludeList", "");
     test_bool_simple(CONF_even_proxy_localhost, "ProxyLocalhost", false);
@@ -729,7 +730,8 @@ void test_simple(void)
     test_int_translated(CONF_serparity, "SerialParity", SER_PAR_NONE,
                         SER_PAR_NONE, 0, SER_PAR_ODD, 1, SER_PAR_EVEN, 2,
                         SER_PAR_MARK, 3, SER_PAR_SPACE, 4, -1);
-    test_int_translated(CONF_serflow, "SerialFlowControl", SER_FLOW_XONXOFF,
+    /* cn change: no flow control by default (华为/华三 Console 标准). */
+    test_int_translated(CONF_serflow, "SerialFlowControl", SER_FLOW_NONE,
                         SER_FLOW_NONE, 0, SER_FLOW_XONXOFF, 1,
                         SER_FLOW_RTSCTS, 2, SER_FLOW_DSRDTR, 3, -1);
     test_str_simple(CONF_supdup_location, "SUPDUPLocation", "The Internet");
@@ -742,7 +744,8 @@ void test_simple(void)
     test_bool_simple(CONF_supdup_scroll, "SUPDUPScrolling", false);
     test_bool_simple(CONF_bksp_is_delete, "BackspaceIsDelete", true);
     test_bool_simple(CONF_rxvt_homeend, "RXVTHomeEnd", false);
-    test_int_translated(CONF_funky_type, "LinuxFunctionKeys", FUNKY_TILDE,
+    /* cn change: xterm-style function keys by default. */
+    test_int_translated(CONF_funky_type, "LinuxFunctionKeys", FUNKY_XTERM,
                         FUNKY_TILDE, 0, FUNKY_LINUX, 1, FUNKY_XTERM, 2,
                         FUNKY_VT400, 3, FUNKY_VT100P, 4, FUNKY_SCO, 5,
                         FUNKY_XTERM_216, 6, -1);
@@ -750,7 +753,8 @@ void test_simple(void)
                         SHARROW_APPLICATION,
                         SHARROW_APPLICATION, 0, SHARROW_BITMAP, 1, -1);
     test_bool_simple(CONF_no_applic_c, "NoApplicationCursors", false);
-    test_bool_simple(CONF_no_applic_k, "NoApplicationKeys", false);
+    /* cn change: application keys disabled by default. */
+    test_bool_simple(CONF_no_applic_k, "NoApplicationKeys", true);
     test_bool_simple(CONF_no_mouse_rep, "NoMouseReporting", false);
     test_bool_simple(CONF_no_remote_resize, "NoRemoteResize", false);
     test_bool_simple(CONF_no_alt_screen, "NoAltScreen", false);
@@ -779,7 +783,8 @@ void test_simple(void)
     test_bool_simple(CONF_compose_key, "ComposeKey", false);
     test_bool_simple(CONF_ctrlaltkeys, "CtrlAltKeys", true);
     test_str_simple(CONF_wintitle, "WinTitle", "");
-    test_int_simple(CONF_savelines, "ScrollbackLines", 2000);
+    /* cn change: larger scrollback for device consoles. */
+    test_int_simple(CONF_savelines, "ScrollbackLines", 9999);
     test_bool_simple(CONF_dec_om, "DECOriginMode", false);
     test_bool_simple(CONF_wrap_mode, "AutoWrapMode", true);
     test_bool_simple(CONF_lfhascr, "LFImpliesCR", false);
