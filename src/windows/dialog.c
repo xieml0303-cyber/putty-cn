@@ -240,6 +240,88 @@ static INT_PTR CALLBACK SaveChangesProc(HWND hwnd, UINT msg,
     return FALSE;
 }
 
+/*
+ * cn: restyle the Delete and 设置初始化 buttons of the startup config
+ * box — smaller font (so 设置初始化 fits on one line), shorter
+ * buttons, and the pair pinned to the bottom edge of the history
+ * list box.
+ */
+static void cn_style_snapshot_buttons(HWND hwnd)
+{
+    HWND hdel = NULL, hinit = NULL, hlist = NULL;
+    HWND h = 0;
+    while (true) {
+        h = FindWindowEx(hwnd, h, "Button", NULL);
+        if (!h)
+            break;
+        char text[64];
+        GetWindowText(h, text, sizeof(text));
+        if (strncmp(text, "删除", 6) == 0)
+            hdel = h;
+        else if (strncmp(text, "设置初始化", 12) == 0)
+            hinit = h;
+    }
+    if (!hdel || !hinit)
+        return;
+
+    h = 0;
+    while (true) {
+        h = FindWindowEx(hwnd, h, "ListBox", NULL);
+        if (!h)
+            break;
+        LONG style = GetWindowLong(h, GWL_STYLE);
+        if (style & LBS_NOTIFY) {
+            hlist = h;
+            break;
+        }
+    }
+
+    /* Smaller font, derived from the current one. */
+    HWND btns[2] = { hdel, hinit };
+    for (int i = 0; i < 2; i++) {
+        HFONT f = (HFONT)SendMessage(btns[i], WM_GETFONT, 0, 0);
+        LOGFONT lf;
+        if (f && GetObject(f, sizeof(lf), &lf)) {
+            lf.lfHeight = (LONG)(lf.lfHeight * 0.72);
+            lf.lfWidth = (LONG)(lf.lfWidth * 0.72);
+            HFONT small = CreateFontIndirect(&lf);
+            if (small)
+                SendMessage(btns[i], WM_SETFONT, (WPARAM)small,
+                            MAKELPARAM(true, 0));
+        }
+        /* Shorter and slightly wider buttons: the small font fits
+         * 设置初始化 on one line only with a little extra width;
+         * shift left 3 px so the wider buttons stay inside the group
+         * frame. */
+        RECT r;
+        GetWindowRect(btns[i], &r);
+        POINT tl = { r.left, r.top }, br = { r.right, r.bottom };
+        ScreenToClient(hwnd, &tl);
+        ScreenToClient(hwnd, &br);
+        SetWindowPos(btns[i], NULL, tl.x - 3, tl.y, br.x - tl.x + 13,
+                     br.y - tl.y - 6, SWP_NOZORDER);
+    }
+
+    /* Pin the pair to the bottom of the history list box. */
+    if (hlist) {
+        RECT rl, rd, ri;
+        GetWindowRect(hlist, &rl);
+        GetWindowRect(hdel, &rd);
+        GetWindowRect(hinit, &ri);
+        int target = rl.bottom - (ri.bottom - ri.top);
+        int dy = target - ri.top;
+        if (dy > 0) {
+            POINT p1 = { rd.left, rd.top }, p2 = { ri.left, ri.top };
+            ScreenToClient(hwnd, &p1);
+            ScreenToClient(hwnd, &p2);
+            SetWindowPos(hdel, NULL, p1.x, p1.y + dy, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER);
+            SetWindowPos(hinit, NULL, p2.x, p2.y + dy, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER);
+        }
+    }
+}
+
 static int ask_save_changes(HWND hwnd, const char *changelog)
 {
     INT_PTR ret = DialogBoxParam(hinst, MAKEINTRESOURCE(IDD_SAVECHANGES),
@@ -257,6 +339,18 @@ bool dlg_confirm_save(dlgparam *dp)
     int mbret = message_box(dp->hwnd, changes, "确认保存",
                             MB_OKCANCEL | MB_ICONQUESTION, true, 0);
     sfree(changes);
+    return mbret == IDOK;
+}
+
+/*
+ * cn: generic change-list confirmation with a caller-supplied title
+ * and list (used by the settings-snapshot restore).
+ */
+bool dlg_confirm_changes(dlgparam *dp, const char *title,
+                         const char *changes)
+{
+    int mbret = message_box(dp->hwnd, changes, title,
+                            MB_OKCANCEL | MB_ICONQUESTION, true, 0);
     return mbret == IDOK;
 }
 
@@ -405,6 +499,10 @@ static void pds_initdialog_finish(PortableDialogStuff *pds)
      * flicker.
      */
     dlg_update_apply_buttons(pds->dp);
+    /* cn: startup box — shrink the Delete / 设置初始化 buttons and pin
+     * them to the bottom of the session list box. */
+    if (!pds->dp->apply_cb)
+        cn_style_snapshot_buttons(pds->dp->hwnd);
     ShowWindow(pds->dp->hwnd, SW_SHOWNORMAL);
 
     pds->initialised = true;
@@ -981,6 +1079,14 @@ bool do_config(Conf *conf)
     pds->dp->track_changes = true;
     pds->dp->baseline = conf_copy(conf);
     pds->dp->ctrlbox = pds->ctrlbox;
+    /* cn: ensure the settings-initialization snapshot exists, taking
+     * the configuration at first open as the baseline. */
+    {
+        Conf *snap = conf_new();
+        if (!load_settings("SettingsSnapshot", snap))
+            save_settings("SettingsSnapshot", conf);
+        conf_free(snap);
+    }
     setup_config_box(pds->ctrlbox, false, 0, 0);
     win_setup_config_box(pds->ctrlbox, &pds->dp->hwnd, has_help(), false, 0);
 

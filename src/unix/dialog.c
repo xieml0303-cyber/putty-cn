@@ -1142,9 +1142,15 @@ void dlg_info_msg(dlgparam *dp, const char *msg)
 /*
  * cn: not wired up on Unix yet; assume the user confirms. The change
  * list itself (conf_describe_changes) is cross-platform and lives in
- * settings.c.
+ * utils/conf_data.c.
  */
 bool dlg_confirm_save(dlgparam *dp)
+{
+    return true;
+}
+
+bool dlg_confirm_changes(dlgparam *dp, const char *title,
+                         const char *changes)
 {
     return true;
 }

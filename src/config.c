@@ -883,6 +883,7 @@ struct sessionsaver_data {
     dlgcontrol *portbox;        /* 旁边「端口」输入框，随历史条目一起回填 */
     dlgcontrol *listbox;
     dlgcontrol *savebutton, *delbutton;
+    dlgcontrol *initbutton;     /* cn: 恢复到设置初始化快照 */
     dlgcontrol *okbutton, *cancelbutton;
     struct recent_conn *history; /* recent connections, newest first */
     int nhistory;
@@ -1073,6 +1074,30 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                     dlg_mark_clean(dlg);
                 }
             }
+        } else if (ssd->initbutton && ctrl == ssd->initbutton) {
+            /*
+             * cn: 恢复到「设置初始化快照」。快照在配置框每次打开时
+             * 自动确保存在（首次以当时的配置为基准），点击恢复需要
+             * 二次确认，并展示将回退的内容清单。
+             */
+            Conf *snap = conf_new();
+            char *changes = NULL;
+            bool go = false;
+            load_settings("SettingsSnapshot", snap);
+            if (!conf_equal(conf, snap))
+                changes = conf_describe_changes(conf, snap);
+            if (!changes) {
+                dlg_info_msg(dlg, "当前设置已与初始化快照一致。");
+            } else if (dlg_confirm_changes(dlg, "确认恢复", changes)) {
+                go = true;
+            }
+            if (go) {
+                conf_copy_into(conf, snap);
+                dlg_refresh(NULL, dlg);
+                dlg_mark_clean(dlg);
+            }
+            sfree(changes);
+            conf_free(snap);
         } else if (!ssd->midsession &&
                    ssd->delbutton && ctrl == ssd->delbutton) {
             int i = dlg_listbox_index(ssd->listbox, dlg);
@@ -2257,6 +2282,11 @@ void setup_config_box(struct controlbox *b, bool midsession,
                                          HELPCTX(session_saved),
                                          sessionsaver_handler, P(ssd));
         ssd->delbutton->column = 1;
+        /* cn: 一键恢复到设置初始化快照（快照由配置框打开时自动建立）。 */
+        ssd->initbutton = ctrl_pushbutton(s, "设置初始化", NO_SHORTCUT,
+                                          HELPCTX(no_help),
+                                          sessionsaver_handler, P(ssd));
+        ssd->initbutton->column = 1;
     } else {
         /* Disable the Delete button mid-session too, for UI consistency. */
         ssd->delbutton = NULL;

@@ -665,6 +665,14 @@ void dlg_info_msg(dlgparam *dp, const char *msg);
  * assume yes.
  */
 bool dlg_confirm_save(dlgparam *dp);
+/*
+ * cn: generic change-list confirmation prompt. 'changes' is a
+ * caller-owned line list (keyword: old → new); returns true if the
+ * user confirmed. Windows shows a message box titled 'title'; other
+ * platforms assume yes.
+ */
+bool dlg_confirm_changes(dlgparam *dp, const char *title,
+                         const char *changes);
 /* Reset the serial-port auto-fallback bookkeeping at config-dialog
  * entry (defined in config.c; see the H3 note there). */
 void serial_fallback_reset(void);
