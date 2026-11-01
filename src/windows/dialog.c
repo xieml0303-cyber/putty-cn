@@ -1003,6 +1003,12 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
             InvalidateRect (hwnd, NULL, true);
 
             SetFocus(((LPNMHDR) lParam)->hwndFrom);     /* ensure focus stays */
+
+            /* cn: a page switch destroys and recreates the panel
+             * controls, which resets the snapshot-button styling —
+             * reapply it whenever we land back on the Session page. */
+            if (!pds->dp->apply_cb)
+                cn_style_snapshot_buttons(hwnd);
         }
         return 0;
 
