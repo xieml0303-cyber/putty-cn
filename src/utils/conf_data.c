@@ -444,9 +444,15 @@ bool conf_equal(const Conf *a, const Conf *b)
 
 /*
  * cn: Describe the differences between two configurations, one line
- * per changed option, formatted as "关键字: 旧值 → 新值". Used by the
- * save-confirmation and close prompts so the user can see exactly
+ * per changed option, formatted as "【关键字】 旧值 → 新值". Used by
+ * the save-confirmation and close prompts so the user can see exactly
  * what is about to be persisted.
+ *
+ * The option name is wrapped in full-width brackets so it reads as a
+ * heading and visually separates from the value that follows; these
+ * prompts use plain-text controls that cannot carry per-character
+ * styling (bold or underline), so the distinction has to come from
+ * the characters themselves.
  *
  * CONF_protocol is special-cased to display protocol names rather
  * than raw enum numbers.
@@ -470,7 +476,8 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
             const char *a = conf_get_str(baseline, key);
             const char *b = conf_get_str(current, key);
             if (strcmp(a, b) != 0) {
-                put_fmt(sb, "%s: %s → %s\r\n", cn_option_display_name(key),
+                put_fmt(sb, "【%s】 %s → %s\r\n",
+                        cn_option_display_name(key),
                         *a ? a : "(空)", *b ? b : "(空)");
                 nchanges++;
             }
@@ -481,7 +488,8 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
             const char *a = conf_get_str_ambi(baseline, key, &a_utf8);
             const char *b = conf_get_str_ambi(current, key, &b_utf8);
             if (strcmp(a, b) != 0) {
-                put_fmt(sb, "%s: %s → %s\r\n", cn_option_display_name(key),
+                put_fmt(sb, "【%s】 %s → %s\r\n",
+                        cn_option_display_name(key),
                         *a ? a : "(空)", *b ? b : "(空)");
                 nchanges++;
             }
@@ -494,10 +502,10 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
                 const char *an = cn_enum_display_name(info, a);
                 const char *bn = cn_enum_display_name(info, b);
                 if (an && bn)
-                    put_fmt(sb, "%s: %s → %s\r\n",
+                    put_fmt(sb, "【%s】 %s → %s\r\n",
                             cn_option_display_name(key), an, bn);
                 else
-                    put_fmt(sb, "%s: %d → %d\r\n",
+                    put_fmt(sb, "【%s】 %d → %d\r\n",
                             cn_option_display_name(key), a, b);
                 nchanges++;
             }
@@ -506,7 +514,8 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
           case CONF_TYPE_BOOL:
             if (conf_get_bool(baseline, key) !=
                 conf_get_bool(current, key)) {
-                put_fmt(sb, "%s: %s → %s\r\n", cn_option_display_name(key),
+                put_fmt(sb, "【%s】 %s → %s\r\n",
+                        cn_option_display_name(key),
                         conf_get_bool(baseline, key) ? "开" : "关",
                         conf_get_bool(current, key) ? "开" : "关");
                 nchanges++;
@@ -516,7 +525,8 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
             const Filename *a = conf_get_filename(baseline, key);
             const Filename *b = conf_get_filename(current, key);
             if (strcmp(a->utf8path, b->utf8path) != 0) {
-                put_fmt(sb, "%s: %s → %s\r\n", cn_option_display_name(key),
+                put_fmt(sb, "【%s】 %s → %s\r\n",
+                        cn_option_display_name(key),
                         *a->utf8path ? a->utf8path : "(空)",
                         *b->utf8path ? b->utf8path : "(空)");
                 nchanges++;
@@ -527,7 +537,7 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
             const FontSpec *a = conf_get_fontspec(baseline, key);
             const FontSpec *b = conf_get_fontspec(current, key);
             if (strcmp(a->name, b->name) != 0 || a->height != b->height) {
-                put_fmt(sb, "%s: %s %d → %s %d\r\n",
+                put_fmt(sb, "【%s】 %s %d → %s %d\r\n",
                         cn_option_display_name(key),
                         a->name, a->height, b->name, b->height);
                 nchanges++;
