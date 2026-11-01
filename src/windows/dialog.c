@@ -276,49 +276,36 @@ static void cn_style_snapshot_buttons(HWND hwnd)
         }
     }
 
-    /* Smaller font, derived from the current one. */
+    /* Original font; widen the buttons as far as the layout allows so
+     * 设置初始化 fits on one line, and keep them short. */
     HWND btns[2] = { hdel, hinit };
     for (int i = 0; i < 2; i++) {
-        HFONT f = (HFONT)SendMessage(btns[i], WM_GETFONT, 0, 0);
-        LOGFONT lf;
-        if (f && GetObject(f, sizeof(lf), &lf)) {
-            lf.lfHeight = (LONG)(lf.lfHeight * 0.72);
-            lf.lfWidth = (LONG)(lf.lfWidth * 0.72);
-            HFONT small = CreateFontIndirect(&lf);
-            if (small)
-                SendMessage(btns[i], WM_SETFONT, (WPARAM)small,
-                            MAKELPARAM(true, 0));
-        }
-        /* Shorter and slightly wider buttons: the small font fits
-         * 设置初始化 on one line only with a little extra width;
-         * shift left 3 px so the wider buttons stay inside the group
-         * frame. */
         RECT r;
         GetWindowRect(btns[i], &r);
         POINT tl = { r.left, r.top }, br = { r.right, r.bottom };
         ScreenToClient(hwnd, &tl);
         ScreenToClient(hwnd, &br);
-        SetWindowPos(btns[i], NULL, tl.x - 3, tl.y, br.x - tl.x + 13,
+        SetWindowPos(btns[i], NULL, tl.x - 6, tl.y, br.x - tl.x + 18,
                      br.y - tl.y - 6, SWP_NOZORDER);
     }
 
-    /* Pin the pair to the bottom of the history list box. */
+    /* Pin 删除 to the top of the history list box (next to the
+     * entries it acts on), 设置初始化 to the bottom. */
     if (hlist) {
         RECT rl, rd, ri;
         GetWindowRect(hlist, &rl);
         GetWindowRect(hdel, &rd);
         GetWindowRect(hinit, &ri);
-        int target = rl.bottom - (ri.bottom - ri.top);
-        int dy = target - ri.top;
-        if (dy > 0) {
-            POINT p1 = { rd.left, rd.top }, p2 = { ri.left, ri.top };
-            ScreenToClient(hwnd, &p1);
-            ScreenToClient(hwnd, &p2);
-            SetWindowPos(hdel, NULL, p1.x, p1.y + dy, 0, 0,
+        POINT p1 = { rd.left, rd.top }, p2 = { ri.left, ri.top };
+        ScreenToClient(hwnd, &p1);
+        ScreenToClient(hwnd, &p2);
+        int dy_top = rl.top - rd.top;
+        SetWindowPos(hdel, NULL, p1.x, p1.y + dy_top, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER);
+        int dy_bottom = rl.bottom - (ri.bottom - ri.top) - ri.top;
+        if (dy_bottom > 0)
+            SetWindowPos(hinit, NULL, p2.x, p2.y + dy_bottom, 0, 0,
                          SWP_NOSIZE | SWP_NOZORDER);
-            SetWindowPos(hinit, NULL, p2.x, p2.y + dy, 0, 0,
-                         SWP_NOSIZE | SWP_NOZORDER);
-        }
     }
 }
 
