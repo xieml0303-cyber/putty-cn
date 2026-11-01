@@ -324,8 +324,10 @@ static int ask_save_changes(HWND hwnd, const char *changelog)
 bool dlg_confirm_save(dlgparam *dp)
 {
     char *changes = conf_describe_changes(dp->baseline, dp->data);
-    int mbret = message_box(dp->hwnd, changes, "确认保存",
+    char *text = dupprintf("以下为尚未保存的改动内容：\r\n\r\n%s", changes);
+    int mbret = message_box(dp->hwnd, text, "确认保存",
                             MB_OKCANCEL | MB_ICONQUESTION, true, 0);
+    sfree(text);
     sfree(changes);
     return mbret == IDOK;
 }
