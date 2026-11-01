@@ -130,6 +130,156 @@ static const char *cn_option_display_name(size_t key)
 }
 
 /*
+ * cn: Chinese display names for enumerated (multi-choice) settings.
+ * One table per storage enum, mapping each internal value to the
+ * option text shown in the UI. Looked up via the ConfKeyInfo's
+ * storage_enum pointer; options whose enum is absent here fall back
+ * to the raw number.
+ */
+typedef struct { int v; const char *name; } CnValueName;
+
+static const CnValueName cnvals_addressfamily[] = {
+    { ADDRTYPE_UNSPEC, "自动" }, { ADDRTYPE_IPV4, "IPv4" },
+    { ADDRTYPE_IPV6, "IPv6" },
+};
+static const CnValueName cnvals_on_off_auto[] = {
+    { FORCE_ON, "开" }, { FORCE_OFF, "关" }, { AUTO, "自动" },
+};
+static const CnValueName cnvals_off_auto_on[] = {
+    { FORCE_OFF, "关" }, { AUTO, "自动" }, { FORCE_ON, "开" },
+};
+static const CnValueName cnvals_auto_off_on[] = {
+    { AUTO, "自动" }, { FORCE_OFF, "关" }, { FORCE_ON, "开" },
+};
+static const CnValueName cnvals_off1_on2[] = {
+    { FORCE_OFF, "关" }, { FORCE_ON, "开" },
+};
+static const CnValueName cnvals_ssh_protocol[] = {
+    { 0, "SSH-2" }, { 3, "SSH-1" },
+};
+static const CnValueName cnvals_serparity[] = {
+    { SER_PAR_NONE, "无" }, { SER_PAR_ODD, "奇" },
+    { SER_PAR_EVEN, "偶" }, { SER_PAR_MARK, "标记" },
+    { SER_PAR_SPACE, "空格" },
+};
+static const CnValueName cnvals_serflow[] = {
+    { SER_FLOW_NONE, "无" }, { SER_FLOW_XONXOFF, "XON/XOFF" },
+    { SER_FLOW_RTSCTS, "RTS/CTS" }, { SER_FLOW_DSRDTR, "DSR/DTR" },
+};
+static const CnValueName cnvals_proxy_type[] = {
+    { PROXY_NONE, "无" }, { PROXY_SOCKS4, "SOCKS 4" },
+    { PROXY_SOCKS5, "SOCKS 5" }, { PROXY_HTTP, "HTTP" },
+    { PROXY_TELNET, "Telnet" }, { PROXY_CMD, "本地命令" },
+    { PROXY_SSH_TCPIP, "SSH TCPIP" }, { PROXY_SSH_EXEC, "SSH exec" },
+    { PROXY_SSH_SUBSYSTEM, "SSH subsystem" },
+};
+static const CnValueName cnvals_funky_type[] = {
+    { FUNKY_TILDE, "Shift+3" }, { FUNKY_LINUX, "Linux" },
+    { FUNKY_XTERM, "xterm" }, { FUNKY_VT400, "VT400+" },
+    { FUNKY_VT100P, "VT100+" }, { FUNKY_SCO, "SCO" },
+    { FUNKY_XTERM_216, "xterm 216" },
+};
+static const CnValueName cnvals_sharrow_type[] = {
+    { SHARROW_APPLICATION, "应用序列" }, { SHARROW_BITMAP, "位图序列" },
+};
+static const CnValueName cnvals_remote_qtitle_action[] = {
+    { TITLE_NONE, "无" }, { TITLE_EMPTY, "空标题" },
+    { TITLE_REAL, "真实标题" },
+};
+static const CnValueName cnvals_cursor_type[] = {
+    { CURSOR_BLOCK, "块状" }, { CURSOR_UNDERLINE, "下划线" },
+    { CURSOR_VERTICAL_LINE, "竖线" },
+};
+static const CnValueName cnvals_beep[] = {
+    { BELL_DISABLED, "禁用" }, { BELL_DEFAULT, "默认" },
+    { BELL_VISUAL, "可视化" }, { BELL_WAVEFILE, "波形文件" },
+    { BELL_PCSPEAKER, "机箱喇叭" },
+};
+static const CnValueName cnvals_beep_indication[] = {
+    { B_IND_DISABLED, "禁用" }, { B_IND_FLASH, "闪烁" },
+    { B_IND_STEADY, "常亮" },
+};
+static const CnValueName cnvals_resize_effect[] = {
+    { RESIZE_TERM, "改变终端尺寸" }, { RESIZE_DISABLED, "禁止" },
+    { RESIZE_FONT, "改变字体" }, { RESIZE_EITHER, "二者" },
+};
+static const CnValueName cnvals_font_quality[] = {
+    { FQ_DEFAULT, "默认" }, { FQ_ANTIALIASED, "平滑" },
+    { FQ_NONANTIALIASED, "不平滑" }, { FQ_CLEARTYPE, "ClearType" },
+};
+static const CnValueName cnvals_log_type[] = {
+    { LGTYP_NONE, "无" }, { LGTYP_ASCII, "可打印输出" },
+    { LGTYP_DEBUG, "所有会话输出" }, { LGTYP_PACKETS, "SSH 包" },
+    { LGTYP_SSHRAW, "SSH 包和 RAW 数据" },
+};
+static const CnValueName cnvals_log_to_existing_file[] = {
+    { LGXF_OVR, "覆盖" }, { LGXF_APN, "追加" }, { LGXF_ASK, "每次询问" },
+};
+static const CnValueName cnvals_bold_style[] = {
+    { BOLD_STYLE_FONT, "粗体字体" }, { BOLD_STYLE_COLOUR, "粗体颜色" },
+    { BOLD_STYLE_FONT | BOLD_STYLE_COLOUR, "字体加颜色" },
+};
+static const CnValueName cnvals_mouse_buttons[] = {
+    { MOUSE_COMPROMISE, "折中" }, { MOUSE_XTERM, "xterm" },
+    { MOUSE_WINDOWS, "Windows" },
+};
+static const CnValueName cnvals_line_drawing[] = {
+    { VT_XWINDOWS, "Unicode" }, { VT_OEMANSI, "OEM ANSI" },
+    { VT_OEMONLY, "仅 OEM" }, { VT_POORMAN, "简化绘制" },
+    { VT_UNICODE, "Unicode 全部" },
+};
+static const CnValueName cnvals_x11_auth[] = {
+    { X11_NO_AUTH, "无" }, { X11_MIT, "MIT-Magic-Cookie" },
+    { X11_XDM, "XDM-Authorization" },
+};
+
+static const struct {
+    const ConfSaveEnumType *etype;
+    const CnValueName *values;
+    int n;
+} cn_enum_display[] = {
+    { &conf_enum_addressfamily, cnvals_addressfamily, 3 },
+    { &conf_enum_on_off_auto, cnvals_on_off_auto, 3 },
+    { &conf_enum_off_auto_on, cnvals_off_auto_on, 3 },
+    { &conf_enum_auto_off_on, cnvals_auto_off_on, 3 },
+    { &conf_enum_off1_on2, cnvals_off1_on2, 2 },
+    { &conf_enum_ssh_protocol, cnvals_ssh_protocol, 2 },
+    { &conf_enum_serparity, cnvals_serparity, 5 },
+    { &conf_enum_serflow, cnvals_serflow, 4 },
+    { &conf_enum_proxy_type, cnvals_proxy_type, 9 },
+    { &conf_enum_funky_type, cnvals_funky_type, 7 },
+    { &conf_enum_sharrow_type, cnvals_sharrow_type, 2 },
+    { &conf_enum_remote_qtitle_action, cnvals_remote_qtitle_action, 3 },
+    { &conf_enum_cursor_type, cnvals_cursor_type, 3 },
+    { &conf_enum_beep, cnvals_beep, 5 },
+    { &conf_enum_beep_indication, cnvals_beep_indication, 3 },
+    { &conf_enum_resize_effect, cnvals_resize_effect, 4 },
+    { &conf_enum_font_quality, cnvals_font_quality, 4 },
+    { &conf_enum_log_type, cnvals_log_type, 5 },
+    { &conf_enum_log_to_existing_file, cnvals_log_to_existing_file, 3 },
+    { &conf_enum_bold_style, cnvals_bold_style, 3 },
+    { &conf_enum_mouse_buttons, cnvals_mouse_buttons, 3 },
+    { &conf_enum_line_drawing, cnvals_line_drawing, 5 },
+    { &conf_enum_x11_auth, cnvals_x11_auth, 3 },
+};
+
+/*
+ * cn: display name for an enumerated int option value; NULL if the
+ * option has no display table or the value is not mapped.
+ */
+static const char *cn_enum_display_name(const ConfKeyInfo *info, int val)
+{
+    if (!info->storage_enum)
+        return NULL;
+    for (size_t i = 0; i < lenof(cn_enum_display); i++)
+        if (cn_enum_display[i].etype == info->storage_enum)
+            for (int j = 0; j < cn_enum_display[i].n; j++)
+                if (cn_enum_display[i].values[j].v == val)
+                    return cn_enum_display[i].values[j].name;
+    return NULL;
+}
+
+/*
  * cn: Compare two configurations field by field over conf_key_info.
  * Skips options that are never persisted (not_saved, save_custom,
  * mappings with subkeys) and the connection targets. Returns true if
@@ -238,8 +388,14 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
             int a = conf_get_int(baseline, key);
             int b = conf_get_int(current, key);
             if (a != b) {
-                put_fmt(sb, "%s: %d → %d\r\n", cn_option_display_name(key),
-                        a, b);
+                const char *an = cn_enum_display_name(info, a);
+                const char *bn = cn_enum_display_name(info, b);
+                if (an && bn)
+                    put_fmt(sb, "%s: %s → %s\r\n",
+                            cn_option_display_name(key), an, bn);
+                else
+                    put_fmt(sb, "%s: %d → %d\r\n",
+                            cn_option_display_name(key), a, b);
                 nchanges++;
             }
             break;
