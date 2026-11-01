@@ -108,20 +108,129 @@ static INT_PTR CALLBACK SaveChangesProc(HWND hwnd, UINT msg,
 {
     switch (msg) {
       case WM_INITDIALOG:
-        if (lParam)
-            SetDlgItemText(hwnd, IDC_CHANGE_LIST, (LPCTSTR)lParam);
+        if (lParam) {
+            const char *text = (const char *)lParam;
+            SetDlgItemText(hwnd, IDC_CHANGE_LIST, text);
+            /*
+             * cn: size the change-list area (and the dialog itself)
+             * to the actual number of lines, capped at the template
+             * height so very long lists keep scrolling.
+             */
+            {
+                int lines = 1;
+                for (const char *p = text; *p; p++)
+                    if (*p == '\n')
+                        lines++;
+                if (lines > 12)
+                    lines = 12;
+                /* Full template = 12 lines of list (height 100 dlg
+                 * units). Each missing line shrinks the dialog by
+                 * 8 dlg units of height. */
+                int missing = 12 - lines;
+                if (missing > 0) {
+                    RECT r;
+                    r.left = r.top = r.right = 0;
+                    r.bottom = missing * 8;
+                    MapDialogRect(hwnd, &r);
+                    int dy = r.bottom;
+                    HWND he = GetDlgItem(hwnd, IDC_CHANGE_LIST);
+                    HWND hn = GetDlgItem(hwnd, IDC_CHANGE_NOTE);
+                    HWND h1 = GetDlgItem(hwnd, IDC_DISCARD_EXIT);
+                    HWND h2 = GetDlgItem(hwnd, IDCANCEL);
+                    HWND h3 = GetDlgItem(hwnd, IDC_SAVE_EXIT);
+                    RECT re;
+                    GetWindowRect(he, &re);
+                    POINT pt = { re.left, re.bottom };
+                    ScreenToClient(hwnd, &pt);
+                    /* shrink the list area */
+                    SetWindowPos(he, NULL, 0, 0, re.right - re.left,
+                                 re.bottom - re.top - dy,
+                                 SWP_NOMOVE | SWP_NOZORDER);
+                    /* shift the trailing controls up, keeping their x */
+                    HWND moves[] = { hn, h1, h2, h3 };
+                    for (int i = 0; i < 4; i++) {
+                        RECT r2;
+                        GetWindowRect(moves[i], &r2);
+                        POINT p2 = { r2.left, r2.top };
+                        ScreenToClient(hwnd, &p2);
+                        SetWindowPos(moves[i], NULL, p2.x, p2.y - dy,
+                                     0, 0, SWP_NOSIZE | SWP_NOZORDER);
+                    }
+                    RECT rw;
+                    GetWindowRect(hwnd, &rw);
+                    SetWindowPos(hwnd, NULL, 0, 0,
+                                 rw.right - rw.left, rw.bottom - rw.top - dy,
+                                 SWP_NOMOVE | SWP_NOZORDER);
+                }
+            }
+        }
         return TRUE;
+      case WM_DRAWITEM: {
+        /*
+         * cn: render the "直接退出" button with a red frame and red
+         * text, signalling the destructive choice.
+         */
+        DRAWITEMSTRUCT *dis = (DRAWITEMSTRUCT *)lParam;
+        if (dis->CtlID != IDC_DISCARD_EXIT)
+            break;
+        COLORREF red = RGB(0xC0, 0x1E, 0x1E);
+        HPEN pen = CreatePen(PS_SOLID, 2, red);
+        HPEN oldpen = SelectObject(dis->hDC, pen);
+        bool selected = (dis->itemState & ODS_SELECTED) != 0;
+        HBRUSH bg = selected
+            ? CreateSolidBrush(RGB(0xF5, 0xD0, 0xD0))
+            : GetSysColorBrush(COLOR_BTNFACE);
+        RECT rc = dis->rcItem;
+        FillRect(dis->hDC, &rc, bg);
+        SelectObject(dis->hDC, oldpen);
+        HBRUSH redb = CreateSolidBrush(red);
+        FrameRect(dis->hDC, &rc, redb);
+        DeleteObject(redb);
+        SetBkMode(dis->hDC, TRANSPARENT);
+        SetTextColor(dis->hDC, red);
+        char text[64];
+        GetWindowText(dis->hwndItem, text, sizeof(text));
+        DrawText(dis->hDC, text, -1, &rc,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DeleteObject(pen);
+        if (selected)
+            DeleteObject(bg);
+        return TRUE;
+      }
       case WM_COMMAND:
         switch (LOWORD(wParam)) {
           case IDC_SAVE_EXIT:
             EndDialog(hwnd, 1);
             return TRUE;
-          case IDC_DISCARD_EXIT:
+          case IDC_DISCARD_EXIT: {
+            /*
+             * cn: second confirmation for the destructive choice.
+             */
+            int mb = message_box(hwnd,
+                                 "确定不保存直接退出吗？\n未保存的修改将丢失。",
+                                 "确认直接退出",
+                                 MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2,
+                                 true, 0);
+            if (mb != IDYES)
+                return TRUE;
             EndDialog(hwnd, 2);
             return TRUE;
+          }
           case IDCANCEL:
             EndDialog(hwnd, 0);
             return TRUE;
+        }
+        break;
+      case WM_CTLCOLORSTATIC:
+        /*
+         * cn: the read-only change list should look like plain text
+         * on the dialog background, not a grayed-out edit control.
+         */
+        if (GetDlgItem(hwnd, IDC_CHANGE_LIST) == (HWND)lParam) {
+            HDC hdc = (HDC)wParam;
+            SetBkColor(hdc, GetSysColor(COLOR_BTNFACE));
+            SetTextColor(hdc, GetSysColor(COLOR_WINDOWTEXT));
+            return (INT_PTR)GetSysColorBrush(COLOR_BTNFACE);
         }
         break;
       case WM_CLOSE:

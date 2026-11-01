@@ -35,6 +35,7 @@
 #define IDC_SAVE_EXIT    1007
 #define IDC_DISCARD_EXIT 1008
 #define IDC_CHANGE_LIST  1009
+#define IDC_CHANGE_NOTE  1010
 
 #define IDC_HK_ICON       98
 #define IDC_HK_TITLE      99
