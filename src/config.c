@@ -1068,10 +1068,9 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                     dlg_error_msg(dlg, errmsg);
                     sfree(errmsg);
                 } else {
+                    /* cn: no success popup — the save button going
+                     * dark again is the visible confirmation. */
                     dlg_mark_clean(dlg);
-                    dlg_info_msg(dlg, "保存成功！\n\n其他设置已保存到「默认设置」；"
-                                 "主机名与端口不保存，下次启动为默认的"
-                                 "SSH、端口 22。");
                 }
             }
         } else if (!ssd->midsession &&
