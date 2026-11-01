@@ -240,21 +240,31 @@ def serial_port_count():
 
 
 def serial_ports():
-    """本机全部串口名（SERIALCOMM 值数据）。"""
+    """本机全部串口名，按 PuTTY 的排序规则（get_serial_ports）：蓝牙后置、
+    组内按端口号数字序——期望值计算必须与被测逻辑一致。"""
     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
                         r"HARDWARE\DEVICEMAP\SERIALCOMM", 0,
                         winreg.KEY_READ) as k:
         n = winreg.QueryInfoKey(k)[1]
-        out = []
+        raw = []
         for i in range(n):
-            _, val, _ = winreg.EnumValue(k, i)
-            out.append(val)
-    return out
+            name, val, _ = winreg.EnumValue(k, i)
+            raw.append((val, "BthModem" in name))
+    phys = sorted((v for v, bt in raw if not bt),
+                  key=lambda s: int(s[3:]))
+    blue = sorted((v for v, bt in raw if bt),
+                  key=lambda s: int(s[3:]))
+    return phys + blue
 
 
 def first_real_port():
     """列表第 0 项（fill_serial_port_list 的回退目标）= 用户真实点击可选的端口。"""
     return serial_ports()[0]
+
+
+def second_port():
+    """列表第 1 项：键盘 Down 一次到达的端口（用户选择场景的目标）。"""
+    return serial_ports()[1]
 
 
 def find_dropdown_popup(combo_rect):
@@ -307,7 +317,7 @@ def pick_port_by_mouse(index):
         raise RuntimeError("CB_GETCURSEL=%s，选择未生效" % sel)
     ln = _sm(combo, 0x0149, sel, 0)  # CB_GETLBTEXTLEN
     buf = ctypes.create_string_buffer(ln + 2)
-    _sm(combo, 0x0148, sel, ctypes.cast(buf, ctypes.c_ssize_t))  # CB_GETLBTEXT
+    _sm(combo, 0x0148, sel, ctypes.addressof(buf))  # CB_GETLBTEXT
     text = buf.value.decode("utf-8", "replace")
     print("选中项确认:", text)
     return text
@@ -362,7 +372,7 @@ def main():
         run_scene("场景A 回退不落盘", "COM1", "COM1",
                   shot=SHOT)
         run_scene("场景B 用户选择落盘", "COM1",
-                  first_real_port(), do_pick=True)
+                  second_port(), do_pick=True)
         run_scene("场景C 蓝牙换物理保留原值", "COM4", "COM4")
         run_scene("场景D 正常路径回归", "COM3", "COM3")
     finally:
