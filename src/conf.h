@@ -459,11 +459,6 @@ CONF_OPTION(username_from_env,
     DEFAULT_BOOL(false),
     SAVE_KEYWORD("UserNameFromEnvironment"),
 )
-CONF_OPTION(localusername,
-    VALUE_TYPE(STR),
-    DEFAULT_STR(""),
-    SAVE_KEYWORD("LocalUserName"),
-)
 CONF_OPTION(rfc_environ,
     VALUE_TYPE(BOOL),
     DEFAULT_BOOL(false),
@@ -507,29 +502,6 @@ CONF_OPTION(serflow,
     DEFAULT_INT(SER_FLOW_NONE),
     SAVE_KEYWORD("SerialFlowControl"),
     STORAGE_ENUM(serflow),
-)
-
-/* SUPDUP options */
-CONF_OPTION(supdup_location,
-    VALUE_TYPE(STR),
-    DEFAULT_STR("The Internet"),
-    SAVE_KEYWORD("SUPDUPLocation"),
-)
-CONF_OPTION(supdup_ascii_set,
-    VALUE_TYPE(INT),
-    DEFAULT_INT(SUPDUP_CHARSET_ASCII),
-    SAVE_KEYWORD("SUPDUPCharset"),
-    STORAGE_ENUM(supdup_charset),
-)
-CONF_OPTION(supdup_more,
-    VALUE_TYPE(BOOL),
-    DEFAULT_BOOL(false),
-    SAVE_KEYWORD("SUPDUPMoreProcessing"),
-)
-CONF_OPTION(supdup_scroll,
-    VALUE_TYPE(BOOL),
-    DEFAULT_BOOL(false),
-    SAVE_KEYWORD("SUPDUPScrolling"),
 )
 
 /* Keyboard options */

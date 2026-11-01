@@ -414,7 +414,7 @@ static void config_port_handler(dlgcontrol *ctrl, dlgparam *dlg,
 }
 
 struct hostport {
-    dlgcontrol *host, *port, *protradio, *protlist;
+    dlgcontrol *host, *port, *protradio;
     bool mid_refresh;
 };
 
@@ -428,26 +428,6 @@ struct hostport {
  * the button group itself rather than hardcoded, since which protocols
  * get a button depends on which backends were compiled in.
  */
-static void config_protocols_setdim(struct hostport *hp, dlgparam *dlg,
-                                    Conf *conf)
-{
-    int proto = conf_get_int(conf, CONF_protocol);
-    bool on_button = false;
-    int i;
-
-    if (!hp->protradio || !hp->protlist)
-        return;
-
-    for (i = 0; i < hp->protradio->radio.nbuttons; i++) {
-        if (hp->protradio->radio.buttondata[i].i == proto) {
-            on_button = true;
-            break;
-        }
-    }
-
-    dlg_listbox_setdim(hp->protlist, dlg, on_button);
-}
-
 /*
  * Shared handler for protocol radio-button and drop-list controls.
  * Handles the interaction of those two controls, and also changes
@@ -482,66 +462,24 @@ static void config_protocols_handler(dlgcontrol *ctrl, dlgparam *dlg,
         if (ctrl == hp->protradio) {
             /* Available buttons were set up when control was created.
              * Just select one of them, possibly. */
+            int hit = -1;
             for (int button = 0; button < ctrl->radio.nbuttons; button++)
-                /* The final button is "Other:". If we reach that one, the
-                 * current protocol must be in the drop list, so we should
-                 * select the "Other:" button. */
-                if (curproto == ctrl->radio.buttondata[button].i ||
-                    button == ctrl->radio.nbuttons-1) {
-                    dlg_radiobutton_set(ctrl, dlg, button);
+                if (curproto == ctrl->radio.buttondata[button].i) {
+                    hit = button;
                     break;
                 }
-        } else if (ctrl == hp->protlist) {
-            int curentry = -1;
-            dlg_update_start(ctrl, dlg);
-            dlg_listbox_clear(ctrl, dlg);
-            assert(n_ui_backends > 0 && n_ui_backends < PROTOCOL_LIMIT);
-            for (size_t i = n_ui_backends;
-                 i < PROTOCOL_LIMIT && backends[i]; i++) {
-                dlg_listbox_addwithid(ctrl, dlg,
-                                      backends[i]->displayname_tc,
-                                      backends[i]->protocol);
-                if (backends[i]->protocol == curproto)
-                    curentry = i - n_ui_backends;
-            }
-            if (curentry > 0) {
+            if (hit < 0) {
                 /*
-                 * The currently configured protocol is one of the
-                 * list-box ones, so select it in protlist.
-                 *
-                 * (The corresponding refresh event for protradio
-                 * should have selected the "Other:" radio button, to
-                 * keep things consistent.)
+                 * The saved protocol no longer exists (e.g. sessions
+                 * saved when Rlogin or SUPDUP were still offered).
+                 * Fall back to SSH, and make the Conf agree so the
+                 * port box follows.
                  */
-                dlg_listbox_select(ctrl, dlg, curentry);
-            } else {
-                /*
-                 * If the currently configured protocol is one of the
-                 * radio buttons, we must still ensure *something* is
-                 * selected in the list box. The sensible default is
-                 * the first list element, which be_*.c ought to have
-                 * arranged to be the 'runner-up' in protocol
-                 * popularity out of the ones relegated to the list
-                 * box.
-                 *
-                 * We don't make much effort to retain the state of
-                 * the list box when it doesn't correspond to an
-                 * actual protocol. So it's easy for this case to be
-                 * reached as a side effect of other actions, e.g.
-                 * loading a saved session that has a radio-button
-                 * protocol configured.
-                 */
-                dlg_listbox_select(ctrl, dlg, 0);
+                hit = 0;
+                conf_set_int(conf, CONF_protocol, PROT_SSH);
             }
-            dlg_update_done(ctrl, dlg);
+            dlg_radiobutton_set(ctrl, dlg, hit);
         }
-
-        /*
-         * Refreshing either control can change which type is in force,
-         * and the list's appearance follows that.
-         */
-        if (ctrl == hp->protradio || ctrl == hp->protlist)
-            config_protocols_setdim(hp, dlg, conf);
 
         hp->mid_refresh = false;
     } else if (!hp->mid_refresh) {
@@ -553,35 +491,7 @@ static void config_protocols_handler(dlgcontrol *ctrl, dlgparam *dlg,
         if (event == EVENT_VALCHANGE && ctrl == hp->protradio) {
             int button = dlg_radiobutton_get(ctrl, dlg);
             assert(button >= 0 && button < ctrl->radio.nbuttons);
-            if (ctrl->radio.buttondata[button].i == -1) {
-                /*
-                 * The 'Other' radio button was selected, which means we
-                 * have to set CONF_protocol based on the currently
-                 * selected list box entry.
-                 *
-                 * (We conditionalise this on there _being_ a selected
-                 * list box entry. I hope the case where nothing is
-                 * selected can't actually come up except during
-                 * initialisation, and I also hope that hp->mid_session
-                 * will prevent that case from getting here. But as a
-                 * last-ditch fallback, this if statement should at least
-                 * guarantee that we don't pass a nonsense value to
-                 * dlg_listbox_getid.)
-                 */
-                int i = dlg_listbox_index(hp->protlist, dlg);
-                if (i >= 0)
-                    newproto = dlg_listbox_getid(hp->protlist, dlg, i);
-            } else {
-                newproto = ctrl->radio.buttondata[button].i;
-            }
-        } else if (event == EVENT_SELCHANGE && ctrl == hp->protlist) {
-            int i = dlg_listbox_index(ctrl, dlg);
-            if (i >= 0) {
-                newproto = dlg_listbox_getid(ctrl, dlg, i);
-                /* Select the "Other" radio button, too */
-                dlg_radiobutton_set(hp->protradio, dlg,
-                                    hp->protradio->radio.nbuttons-1);
-            }
+            newproto = ctrl->radio.buttondata[button].i;
         }
 
         if (newproto != curproto) {
@@ -612,15 +522,6 @@ static void config_protocols_handler(dlgcontrol *ctrl, dlgparam *dlg,
             dlg_refresh(hp->host, dlg);
             dlg_refresh(hp->port, dlg);
         }
-
-        /*
-         * Either control can change which type is in force - the radio
-         * buttons directly, and the list by moving the choice to
-         * "Other:" - so bring the list's appearance back in step
-         * whenever one of them reports a change.
-         */
-        if (ctrl == hp->protradio || ctrl == hp->protlist)
-            config_protocols_setdim(hp, dlg, conf);
     }
 }
 
@@ -2270,11 +2171,11 @@ void setup_config_box(struct controlbox *b, bool midsession,
 
         ctrl_columns(s, 1, 100);
         c = ctrl_text(s, "连接类型：", HELPCTX(session_hostname));
-        ctrl_columns(s, 2, 62, 38);
+        /* cn change: full-width row; the three buttons are spread
+         * evenly across it by radioline_common's nacross logic. */
         c = ctrl_radiobuttons(s, NULL, NO_SHORTCUT, 3,
                               HELPCTX(session_hostname),
                               config_protocols_handler, P(hp));
-        c->column = 0;
         hp->protradio = c;
         c->radio.buttons = sresize(c->radio.buttons, PROTOCOL_LIMIT, char *);
         c->radio.shortcuts = sresize(c->radio.shortcuts, PROTOCOL_LIMIT, char);
@@ -2299,22 +2200,10 @@ void setup_config_box(struct controlbox *b, bool midsession,
         /* UI design assumes there exists at least one droplist entry */
         assert(backends[c->radio.nbuttons]);
 
-        c->radio.buttons[c->radio.nbuttons] = dupstr("其他：");
+        c->radio.buttons[c->radio.nbuttons] = dupstr("Telnet");
         c->radio.shortcuts[c->radio.nbuttons] = 't';
-        c->radio.buttondata[c->radio.nbuttons] = I(-1);
+        c->radio.buttondata[c->radio.nbuttons] = I(PROT_TELNET);
         c->radio.nbuttons++;
-
-        c = ctrl_droplist(s, NULL, NO_SHORTCUT, 100,
-                          HELPCTX(session_hostname),
-                          config_protocols_handler, P(hp));
-        hp->protlist = c;
-        /* droplist is populated in config_protocols_handler */
-        c->column = 1;
-
-        /* Vertically centre the two protocol controls w.r.t. each other */
-        hp->protlist->align_next_to = hp->protradio;
-
-        ctrl_columns(s, 1, 100);
     }
 
     /*
@@ -3702,53 +3591,5 @@ void setup_config_box(struct controlbox *b, bool midsession,
                       'm', HELPCTX(telnet_newline),
                       conf_checkbox_handler,
                       I(CONF_telnet_newline));
-    }
-
-    if (DISPLAY_NON_RECONFIGURABLE_PROTOCOL(PROT_RLOGIN)) {
-        /*
-         * The Connection/Rlogin panel.
-         */
-        ctrl_settitle(b, "连接/Rlogin",
-                      "Rlogin 连接设置");
-
-        s = ctrl_getset(b, "连接/Rlogin", "data",
-                        "传送到服务器的数据");
-        ctrl_editbox(s, "本地用户名(L)：", 'l', 50,
-                     HELPCTX(rlogin_localuser),
-                     conf_editbox_handler, I(CONF_localusername), ED_STR);
-
-    }
-
-    if (DISPLAY_NON_RECONFIGURABLE_PROTOCOL(PROT_SUPDUP)) {
-        /*
-         * The Connection/SUPDUP panel.
-         */
-        ctrl_settitle(b, "连接/SUPDUP",
-                      "设置 SUPDUP 连接的选项");
-
-        s = ctrl_getset(b, "连接/SUPDUP", "main", NULL);
-
-        ctrl_editbox(s, "位置字符串(L)", 'l', 70,
-                     HELPCTX(supdup_location),
-                     conf_editbox_handler, I(CONF_supdup_location),
-                     ED_STR);
-
-        ctrl_radiobuttons(s, "扩展的 ASCII 字符集(E)：", 'e', 4,
-                          HELPCTX(supdup_ascii),
-                          conf_radiobutton_handler,
-                          I(CONF_supdup_ascii_set),
-                          "无", I(SUPDUP_CHARSET_ASCII),
-                          "ITS", I(SUPDUP_CHARSET_ITS),
-                          "WAITS", I(SUPDUP_CHARSET_WAITS));
-
-        ctrl_checkbox(s, "**MORE** 提示处理(M)", 'm',
-                      HELPCTX(supdup_more),
-                      conf_checkbox_handler,
-                      I(CONF_supdup_more));
-
-        ctrl_checkbox(s, "终端滚动(S)", 's',
-                      HELPCTX(supdup_scroll),
-                      conf_checkbox_handler,
-                      I(CONF_supdup_scroll));
     }
 }

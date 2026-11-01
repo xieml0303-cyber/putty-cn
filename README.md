@@ -26,6 +26,7 @@
 | `config.c` | 会话页改版：历史连接记录列表、「打开(L)」按钮、保存提示弹窗；串行口改为本机真实端口下拉框；会话列表高度与滚动条；配置页标题灰底白字加粗；未选中会话时「保存」直接写入「默认设置」 |
 | `windows/config.c` | 删除「关于/帮助」按钮，调整底部按钮布局 |
 | `windows/controls.c` | 新增 `dlg_info_msg()` 信息弹窗；助记符冲突由断言改为计数；只读组合框点击任意位置展开列表；面板标题自绘样式 |
+| `be_list.c`、`config.c` | 连接类型为三个均匀分布的单选（SSH / 串口 / Telnet），协议下拉框移除；Rlogin、SUPDUP 协议及其专属设置页整体删除（Raw 与裸 ssh 连接保留代码供命令行与 SSH 内部机制使用，不在界面出现） |
 | `windows/storage.c` | 历史连接记录读写（注册表 `RecentHosts`）；串口枚举（注册表 `SERIALCOMM`，真实串口优先、蓝牙虚拟口后排） |
 | `storage.h`、`dialog.h`、`windows/platform.h` | 新增串口枚举、信息弹窗、只读编辑框等接口声明 |
 | `unix/storage.c`、`unix/dialog.c` | 对应接口的非 Windows 实现 |

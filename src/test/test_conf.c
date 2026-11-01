@@ -720,7 +720,6 @@ void test_simple(void)
     test_str_simple(CONF_termspeed, "TerminalSpeed", "38400,38400");
     test_str_ambi_simple(CONF_username, "UserName", "", false);
     test_bool_simple(CONF_username_from_env, "UserNameFromEnvironment", false);
-    test_str_simple(CONF_localusername, "LocalUserName", "");
     test_bool_simple(CONF_rfc_environ, "RFCEnviron", false);
     test_bool_simple(CONF_passive_telnet, "PassiveTelnet", false);
     test_str_simple(CONF_serline, "SerialLine", "");
@@ -734,14 +733,6 @@ void test_simple(void)
     test_int_translated(CONF_serflow, "SerialFlowControl", SER_FLOW_NONE,
                         SER_FLOW_NONE, 0, SER_FLOW_XONXOFF, 1,
                         SER_FLOW_RTSCTS, 2, SER_FLOW_DSRDTR, 3, -1);
-    test_str_simple(CONF_supdup_location, "SUPDUPLocation", "The Internet");
-    test_int_translated(CONF_supdup_ascii_set, "SUPDUPCharset",
-                        SUPDUP_CHARSET_ASCII,
-                        SUPDUP_CHARSET_ASCII, 0,
-                        SUPDUP_CHARSET_ITS, 1,
-                        SUPDUP_CHARSET_WAITS, 2, -1);
-    test_bool_simple(CONF_supdup_more, "SUPDUPMoreProcessing", false);
-    test_bool_simple(CONF_supdup_scroll, "SUPDUPScrolling", false);
     test_bool_simple(CONF_bksp_is_delete, "BackspaceIsDelete", true);
     test_bool_simple(CONF_rxvt_homeend, "RXVTHomeEnd", false);
     /* cn change: xterm-style function keys by default. */

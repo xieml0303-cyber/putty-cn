@@ -439,12 +439,10 @@ enum {
 
 enum {
     /* Protocol back ends. (CONF_protocol) */
-    PROT_RAW, PROT_TELNET, PROT_RLOGIN, PROT_SSH, PROT_SSHCONN,
+    PROT_RAW, PROT_TELNET, PROT_SSH, PROT_SSHCONN,
     /* PROT_SERIAL is supported on a subset of platforms, but it doesn't
      * hurt to define it globally. */
     PROT_SERIAL,
-    /* PROT_SUPDUP is the historical RFC 734 protocol. */
-    PROT_SUPDUP,
     PROTOCOL_LIMIT, /* upper bound on number of protocols */
 };
 
@@ -2184,12 +2182,6 @@ extern const struct BackendVtable loop_backend;
 extern const struct BackendVtable raw_backend;
 
 /*
- * Exports from rlogin.c.
- */
-
-extern const struct BackendVtable rlogin_backend;
-
-/*
  * Exports from telnet.c.
  */
 
@@ -2200,11 +2192,6 @@ extern const struct BackendVtable telnet_backend;
  */
 extern const struct BackendVtable ssh_backend;
 extern const struct BackendVtable sshconn_backend;
-
-/*
- * Exports from supdup.c.
- */
-extern const struct BackendVtable supdup_backend;
 
 /*
  * Exports from ldisc.c.

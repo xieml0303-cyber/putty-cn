@@ -76,14 +76,19 @@ const struct BackendVtable *const backends[] = {
 
     /*
      * After that come the remaining network protocols: Telnet if it
-     * hasn't already appeared above, and Rlogin, SUPDUP and Raw.
+     * hasn't already appeared above, and Raw.
+     *
+     * Raw and bare-ssh-connection are deliberately kept in this list
+     * (they are still reachable via "putty -raw" etc. and the bare
+     * ssh-connection mechanism is used internally by SSH proxying and
+     * connection sharing), but they get no radio button and the
+     * config UI no longer has a dropdown, so they are not selectable
+     * in the graphical interface.
      */
 #if OTHERBACKENDS && SSH
     &telnet_backend,         /* only if SSH displaced it at the top  */
 #endif
 #if OTHERBACKENDS
-    &rlogin_backend,
-    &supdup_backend,
     &raw_backend,
 #endif
 
