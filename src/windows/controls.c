@@ -2062,13 +2062,20 @@ void dlg_update_apply_buttons(dlgparam *dp)
     if (!dp->ctrlbox || !dp->track_changes)
         return;
 
-    dlg_set_ctrl_enabled(dp, dp->ctrlbox->apply_button, dp->dirty);
+    /* cn: the button reflects a live comparison against the baseline
+     * snapshot, so undoing a change (or re-typing the original value)
+     * disables it again. */
+    bool changed = dp->baseline && !conf_equal(dp->baseline, dp->data);
+    dlg_set_ctrl_enabled(dp, dp->ctrlbox->apply_button, changed);
     dlg_set_ctrl_enabled(dp, dp->ctrlbox->undo_button, dp->nundo > 0);
 }
 
 bool dlg_has_unsaved_changes(dlgparam *dp)
 {
-    return dp->track_changes && dp->dirty;
+    /* cn: live comparison as well, so closing after reverting every
+     * change does not prompt. */
+    return dp->track_changes && dp->baseline &&
+        !conf_equal(dp->baseline, dp->data);
 }
 
 void dlg_mark_clean(dlgparam *dp)
@@ -2078,6 +2085,12 @@ void dlg_mark_clean(dlgparam *dp)
     dp->nundo = 0;
     dp->dirty = false;
     dp->last_change_ctrl = NULL;
+    /* cn: rebase the pristine snapshot, so the next change list is
+     * relative to what was just saved. */
+    if (dp->baseline) {
+        conf_free(dp->baseline);
+        dp->baseline = conf_copy((Conf *)dp->data);
+    }
     dlg_update_apply_buttons(dp);
 }
 
@@ -2119,7 +2132,6 @@ static void dlg_note_change(dlgparam *dp, dlgcontrol *ctrl)
 
     dp->last_change_ctrl = ctrl;
     dp->dirty = true;
-    dlg_update_apply_buttons(dp);
 }
 
 static void dlg_send_event(dlgcontrol *ctrl, dlgparam *dp, int event)
@@ -2127,6 +2139,10 @@ static void dlg_send_event(dlgcontrol *ctrl, dlgparam *dp, int event)
     if (event == EVENT_VALCHANGE)
         dlg_note_change(dp, ctrl);
     ctrl->handler(ctrl, dp, dp->data, event);
+    /* cn: recompute the dirty-gated buttons AFTER the handler has
+     * applied the change to the Conf, so the live comparison is not
+     * one step behind. */
+    dlg_update_apply_buttons(dp);
 }
 
 bool winctrl_handle_command(struct dlgparam *dp, UINT msg,

@@ -51,3 +51,180 @@ bool conf_enum_map_from_storage(const ConfSaveEnumType *etype,
 const ConfKeyInfo conf_key_info[] = {
     #include "conf.h"
 };
+
+/*
+ * cn: Compare two configurations field by field over conf_key_info.
+ * Skips options that are never persisted (not_saved, save_custom,
+ * mappings with subkeys). Returns true if identical.
+ */
+bool conf_equal(const Conf *a, const Conf *b)
+{
+    for (size_t key = 0; key < N_CONFIG_OPTIONS; key++) {
+        const ConfKeyInfo *info = &conf_key_info[key];
+        if (info->save_custom || info->not_saved)
+            continue;
+        if (info->subkey_type != CONF_TYPE_NONE)
+            continue;
+
+        if (key == CONF_protocol) {
+            if (conf_get_int(a, key) != conf_get_int(b, key))
+                return false;
+            continue;
+        }
+
+        switch (info->value_type) {
+          case CONF_TYPE_STR: {
+            const char *sa = conf_get_str(a, key);
+            const char *sb = conf_get_str(b, key);
+            if (strcmp(sa, sb) != 0)
+                return false;
+            break;
+          }
+          case CONF_TYPE_STR_AMBI: {
+            bool a_utf8, b_utf8;
+            const char *sa = conf_get_str_ambi(a, key, &a_utf8);
+            const char *sb2 = conf_get_str_ambi(b, key, &b_utf8);
+            if (strcmp(sa, sb2) != 0)
+                return false;
+            break;
+          }
+          case CONF_TYPE_INT:
+            if (conf_get_int(a, key) != conf_get_int(b, key))
+                return false;
+            break;
+          case CONF_TYPE_BOOL:
+            if (conf_get_bool(a, key) != conf_get_bool(b, key))
+                return false;
+            break;
+          case CONF_TYPE_FILENAME:
+            if (strcmp(conf_get_filename(a, key)->utf8path,
+                       conf_get_filename(b, key)->utf8path) != 0)
+                return false;
+            break;
+          case CONF_TYPE_FONT:
+            if (strcmp(conf_get_fontspec(a, key)->name,
+                       conf_get_fontspec(b, key)->name) != 0 ||
+                conf_get_fontspec(a, key)->height !=
+                conf_get_fontspec(b, key)->height)
+                return false;
+            break;
+          default:
+            break;
+        }
+    }
+    return true;
+}
+
+/*
+ * cn: Describe the differences between two configurations, one line
+ * per changed option, formatted as "关键字: 旧值 → 新值". Used by the
+ * save-confirmation and close prompts so the user can see exactly
+ * what is about to be persisted.
+ *
+ * CONF_protocol is special-cased to display protocol names rather
+ * than raw enum numbers.
+ */
+char *conf_describe_changes(const Conf *baseline, const Conf *current)
+{
+    strbuf *sb = strbuf_new();
+    int nchanges = 0;
+
+    for (size_t key = 0; key < N_CONFIG_OPTIONS; key++) {
+        const ConfKeyInfo *info = &conf_key_info[key];
+        if (info->save_custom || info->not_saved)
+            continue;
+        if (info->subkey_type != CONF_TYPE_NONE)
+            continue;
+
+        if (key == CONF_protocol) {
+            static const struct { int v; const char *name; } protos[] = {
+                { PROT_SSH, "SSH" }, { PROT_SERIAL, "串口" },
+                { PROT_TELNET, "Telnet" }, { PROT_RAW, "Raw" },
+                { PROT_SSHCONN, "裸 ssh 连接" },
+            };
+            int a = conf_get_int(baseline, key);
+            int b = conf_get_int(current, key);
+            if (a != b) {
+                const char *an = "未知", *bn = "未知";
+                for (size_t i = 0; i < lenof(protos); i++) {
+                    if (protos[i].v == a) an = protos[i].name;
+                    if (protos[i].v == b) bn = protos[i].name;
+                }
+                put_fmt(sb, "%s: %s → %s\r\n", info->save_keyword,
+                        an, bn);
+                nchanges++;
+            }
+            continue;
+        }
+
+        switch (info->value_type) {
+          case CONF_TYPE_STR: {
+            const char *a = conf_get_str(baseline, key);
+            const char *b = conf_get_str(current, key);
+            if (strcmp(a, b) != 0) {
+                put_fmt(sb, "%s: %s → %s\r\n", info->save_keyword,
+                        *a ? a : "(空)", *b ? b : "(空)");
+                nchanges++;
+            }
+            break;
+          }
+          case CONF_TYPE_STR_AMBI: {
+            bool a_utf8, b_utf8;
+            const char *a = conf_get_str_ambi(baseline, key, &a_utf8);
+            const char *b = conf_get_str_ambi(current, key, &b_utf8);
+            if (strcmp(a, b) != 0) {
+                put_fmt(sb, "%s: %s → %s\r\n", info->save_keyword,
+                        *a ? a : "(空)", *b ? b : "(空)");
+                nchanges++;
+            }
+            break;
+          }
+          case CONF_TYPE_INT: {
+            int a = conf_get_int(baseline, key);
+            int b = conf_get_int(current, key);
+            if (a != b) {
+                put_fmt(sb, "%s: %d → %d\r\n", info->save_keyword, a, b);
+                nchanges++;
+            }
+            break;
+          }
+          case CONF_TYPE_BOOL:
+            if (conf_get_bool(baseline, key) !=
+                conf_get_bool(current, key)) {
+                put_fmt(sb, "%s: %s → %s\r\n", info->save_keyword,
+                        conf_get_bool(baseline, key) ? "开" : "关",
+                        conf_get_bool(current, key) ? "开" : "关");
+                nchanges++;
+            }
+            break;
+          case CONF_TYPE_FILENAME: {
+            const Filename *a = conf_get_filename(baseline, key);
+            const Filename *b = conf_get_filename(current, key);
+            if (strcmp(a->utf8path, b->utf8path) != 0) {
+                put_fmt(sb, "%s: %s → %s\r\n", info->save_keyword,
+                        *a->utf8path ? a->utf8path : "(空)",
+                        *b->utf8path ? b->utf8path : "(空)");
+                nchanges++;
+            }
+            break;
+          }
+          case CONF_TYPE_FONT: {
+            const FontSpec *a = conf_get_fontspec(baseline, key);
+            const FontSpec *b = conf_get_fontspec(current, key);
+            if (strcmp(a->name, b->name) != 0 || a->height != b->height) {
+                put_fmt(sb, "%s: %s %d → %s %d\r\n", info->save_keyword,
+                        a->name, a->height, b->name, b->height);
+                nchanges++;
+            }
+            break;
+          }
+          default:
+            break;
+        }
+    }
+
+    if (nchanges == 0)
+        return dupstr("(无可见改动)");
+
+    return strbuf_to_str(sb);
+}

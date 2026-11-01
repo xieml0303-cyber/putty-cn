@@ -507,6 +507,12 @@ struct dlgparam {
     dlgcontrol *last_change_ctrl;      /* merge repeated edits of one control */
     struct conf_tag **undo_stack;
     int nundo, undosize;
+    /*
+     * cn: pristine configuration snapshot taken at dialog open (and
+     * refreshed after each successful save); used to generate the
+     * change list shown by the save-confirmation and close prompts.
+     */
+    Conf *baseline;
 };
 
 /*

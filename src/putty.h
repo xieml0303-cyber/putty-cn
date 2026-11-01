@@ -1976,6 +1976,13 @@ const struct BackendVtable *backend_vt_from_name(const char *name);
 const struct BackendVtable *backend_vt_from_proto(int proto);
 char *get_remote_username(Conf *conf); /* dynamically allocated */
 char *save_settings(const char *section, Conf *conf);
+/* cn: one line per changed option ("keyword: old → new"); caller frees. */
+char *conf_describe_changes(const Conf *baseline, const Conf *current);
+/* cn: field-by-field equality, same traversal as the change list. */
+bool conf_equal(const Conf *a, const Conf *b);
+/* cn: persist "默认设置" with H3 and connection-target protections;
+ * returns NULL on success, else the error text (caller frees). */
+char *cn_persist_default_settings(Conf *conf);
 void save_open_settings(settings_w *sesskey, Conf *conf);
 bool load_settings(const char *section, Conf *conf);
 void load_open_settings(settings_r *sesskey, Conf *conf);

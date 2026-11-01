@@ -34,16 +34,19 @@ CLASS "PuTTYConfigBox"
 BEGIN
 END
 
-/* 会话设置窗口关闭时的未保存修改提示 */
-IDD_SAVECHANGES DIALOG DISCARDABLE 0, 0, 250, 96
+/* 会话设置窗口关闭时的未保存修改提示（附改动清单） */
+IDD_SAVECHANGES DIALOG DISCARDABLE 0, 0, 250, 196
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "PuTTY 会话设置"
 FONT 8, "MS Shell Dlg"
 BEGIN
-    LTEXT "当前设置尚未保存。是否保存修改后退出？", -1, 18, 16, 214, 30
-    DEFPUSHBUTTON "保存后退出(&S)", IDC_SAVE_EXIT, 20, 68, 64, 14
-    PUSHBUTTON "不保存并退出(&N)", IDC_DISCARD_EXIT, 90, 68, 76, 14
-    PUSHBUTTON "取消", IDCANCEL, 172, 68, 52, 14
+    LTEXT "以下为尚未保存的改动内容：", -1, 18, 8, 214, 8
+    EDITTEXT IDC_CHANGE_LIST, 18, 18, 214, 130, ES_MULTILINE | \
+        ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP
+    LTEXT "是否保存修改后退出？", -1, 18, 156, 214, 8
+    DEFPUSHBUTTON "保存并退出(&S)", IDC_SAVE_EXIT, 20, 170, 64, 14
+    PUSHBUTTON "直接退出(&N)", IDC_DISCARD_EXIT, 90, 170, 76, 14
+    PUSHBUTTON "取消", IDCANCEL, 172, 170, 52, 14
 END
 
 /* Accelerators used: co */

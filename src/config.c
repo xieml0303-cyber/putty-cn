@@ -986,6 +986,54 @@ static void config_coe_handler(dlgcontrol *ctrl, dlgparam *dlg,
     }
 }
 
+/*
+ * cn: Persist the "默认设置" session with the same protections as the
+ * save button: the auto-fallback serial port is not baked in (H3),
+ * and the connection targets (host/port/protocol) are written as the
+ * pristine defaults. Used by the save button and by "save and exit"
+ * in the close prompt. Returns NULL on success, else the error text
+ * (caller frees).
+ */
+char *cn_persist_default_settings(Conf *conf)
+{
+    /*
+     * H3: the auto-fallback port must not be baked into the registry.
+     * If a fallback happened and the user has not picked a port by
+     * hand since, persist the originally saved value instead, then
+     * restore the runtime value so that "Open" still uses the
+     * substituted port.
+     */
+    char *runtime_port = NULL;
+    if (serial_fallback_active && !serial_user_picked &&
+        serial_fallback_original) {
+        runtime_port = dupstr(conf_get_str(conf, CONF_serline));
+        conf_set_str(conf, CONF_serline, serial_fallback_original);
+    }
+    /*
+     * The host name, port and protocol are connection targets, not
+     * settings: persist the pristine startup defaults (empty host,
+     * SSH / 22) so that the next launch starts clean, then restore
+     * what the user is currently editing so "Open" still works right
+     * after saving.
+     */
+    char *runtime_host = dupstr(conf_get_str(conf, CONF_host));
+    int runtime_portnum = conf_get_int(conf, CONF_port);
+    int runtime_proto = conf_get_int(conf, CONF_protocol);
+    conf_set_str(conf, CONF_host, "");
+    conf_set_int(conf, CONF_port, 22);
+    conf_set_int(conf, CONF_protocol, PROT_SSH);
+    char *errmsg = save_settings("", conf);
+    conf_set_str(conf, CONF_host, runtime_host);
+    conf_set_int(conf, CONF_port, runtime_portnum);
+    conf_set_int(conf, CONF_protocol, runtime_proto);
+    sfree(runtime_host);
+    if (runtime_port) {
+        conf_set_str(conf, CONF_serline, runtime_port);
+        sfree(runtime_port);
+    }
+    return errmsg;
+}
+
 static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                                  void *data, int event)
 {
@@ -1009,46 +1057,18 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                 /* 全局只保留「默认设置」一个保存目录：候选框里的地址
                  * 只是连接目标，不再被当成会话名建目录。 */
                 /*
-                 * H3: the auto-fallback port must not be baked into the
-                 * registry. If a fallback happened and the user has not
-                 * picked a port by hand since, persist the originally
-                 * saved value instead, then restore the runtime value
-                 * so that "Open" still uses the substituted port.
+                 * Confirm with a list of what is about to be saved.
+                 * The button is only clickable when dirty, so the
+                 * list is never empty here.
                  */
-                char *runtime_port = NULL;
-                if (serial_fallback_active && !serial_user_picked &&
-                    serial_fallback_original) {
-                    runtime_port = dupstr(conf_get_str(conf, CONF_serline));
-                    conf_set_str(conf, CONF_serline,
-                                 serial_fallback_original);
-                }
-                /*
-                 * The host name, port and protocol are connection
-                 * targets, not settings: persist the pristine startup
-                 * defaults (empty host, SSH / 22) so that the next
-                 * launch starts clean, then restore what the user is
-                 * currently editing so "Open" still works right after
-                 * saving.
-                 */
-                char *runtime_host = dupstr(conf_get_str(conf, CONF_host));
-                int runtime_portnum = conf_get_int(conf, CONF_port);
-                int runtime_proto = conf_get_int(conf, CONF_protocol);
-                conf_set_str(conf, CONF_host, "");
-                conf_set_int(conf, CONF_port, 22);
-                conf_set_int(conf, CONF_protocol, PROT_SSH);
-                char *errmsg = save_settings("", conf);
-                conf_set_str(conf, CONF_host, runtime_host);
-                conf_set_int(conf, CONF_port, runtime_portnum);
-                conf_set_int(conf, CONF_protocol, runtime_proto);
-                sfree(runtime_host);
-                if (runtime_port) {
-                    conf_set_str(conf, CONF_serline, runtime_port);
-                    sfree(runtime_port);
-                }
+                if (!dlg_confirm_save(dlg))
+                    return;
+                char *errmsg = cn_persist_default_settings(conf);
                 if (errmsg) {
                     dlg_error_msg(dlg, errmsg);
                     sfree(errmsg);
                 } else {
+                    dlg_mark_clean(dlg);
                     dlg_info_msg(dlg, "保存成功！\n\n其他设置已保存到「默认设置」；"
                                  "主机名与端口不保存，下次启动为默认的"
                                  "SSH、端口 22。");
@@ -2137,6 +2157,11 @@ void setup_config_box(struct controlbox *b, bool midsession,
         /* 会话设置窗口：应用/撤销按钮的置灰状态由修改历史驱动。 */
         b->apply_button = ssd->okbutton;
         b->undo_button = ssd->cancelbutton;
+    } else if (ssd->savebutton) {
+        /* cn: the startup box's save button is dirty-gated the same
+         * way (disabled until the settings change, rebased after each
+         * successful save). */
+        b->apply_button = ssd->savebutton;
     }
     /* We carefully don't close the 5-column part, so that platform-
      * specific add-ons can put extra buttons alongside Open and Cancel. */

@@ -658,6 +658,13 @@ bool dlg_is_visible(dlgcontrol *ctrl, dlgparam *dp);
 void dlg_beep(dlgparam *dp);
 void dlg_error_msg(dlgparam *dp, const char *msg);
 void dlg_info_msg(dlgparam *dp, const char *msg);
+/*
+ * cn: ask the user to confirm a save, showing the list of changes
+ * (baseline vs current). Returns true if the user confirmed.
+ * Windows implementation shows a message box; other platforms
+ * assume yes.
+ */
+bool dlg_confirm_save(dlgparam *dp);
 /* Reset the serial-port auto-fallback bookkeeping at config-dialog
  * entry (defined in config.c; see the H3 note there). */
 void serial_fallback_reset(void);

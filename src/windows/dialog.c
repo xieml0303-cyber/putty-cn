@@ -108,6 +108,8 @@ static INT_PTR CALLBACK SaveChangesProc(HWND hwnd, UINT msg,
 {
     switch (msg) {
       case WM_INITDIALOG:
+        if (lParam)
+            SetDlgItemText(hwnd, IDC_CHANGE_LIST, (LPCTSTR)lParam);
         return TRUE;
       case WM_COMMAND:
         switch (LOWORD(wParam)) {
@@ -129,11 +131,24 @@ static INT_PTR CALLBACK SaveChangesProc(HWND hwnd, UINT msg,
     return FALSE;
 }
 
-static int ask_save_changes(HWND hwnd)
+static int ask_save_changes(HWND hwnd, const char *changelog)
 {
-    INT_PTR ret = DialogBox(hinst, MAKEINTRESOURCE(IDD_SAVECHANGES),
-                            hwnd, SaveChangesProc);
+    INT_PTR ret = DialogBoxParam(hinst, MAKEINTRESOURCE(IDD_SAVECHANGES),
+                                 hwnd, SaveChangesProc, (LPARAM)changelog);
     return (ret == 1 || ret == 2) ? (int)ret : 0;
+}
+
+/*
+ * cn: Save-confirmation prompt for the save button, showing the list
+ * of changes about to be persisted. Returns true to go ahead.
+ */
+bool dlg_confirm_save(dlgparam *dp)
+{
+    char *changes = conf_describe_changes(dp->baseline, dp->data);
+    int mbret = message_box(dp->hwnd, changes, "确认保存",
+                            MB_OKCANCEL | MB_ICONQUESTION, true, 0);
+    sfree(changes);
+    return mbret == IDOK;
 }
 
 static INT_PTR pds_default_dlgproc(PortableDialogStuff *pds, HWND hwnd,
@@ -171,15 +186,35 @@ static INT_PTR pds_default_dlgproc(PortableDialogStuff *pds, HWND hwnd,
         break;
       case WM_CLOSE:
         if (dlg_has_unsaved_changes(pds->dp)) {
-            int choice = ask_save_changes(hwnd);
+            char *changes = conf_describe_changes(pds->dp->baseline,
+                                                  pds->dp->data);
+            int choice = ask_save_changes(hwnd, changes);
+            sfree(changes);
             if (choice == 0)
-                return 0;              /* stay in the box */
+                return TRUE;           /* stay in the box */
             quit_help(hwnd);
-            if (choice == 1 && dlg_apply_config(pds->dp))
-                ShinyEndDialog(hwnd, 1);   /* saved, then exit */
-            else
+            if (choice == 1) {
+                if (pds->dp->apply_cb) {
+                    /* Mid-session box: apply the settings in place. */
+                    if (dlg_apply_config(pds->dp))
+                        ShinyEndDialog(hwnd, 1);
+                    else
+                        return TRUE;
+                } else {
+                    /* Startup box: persist to the registry, using the
+                     * same protections as the save button. */
+                    char *errmsg = cn_persist_default_settings(
+                        (Conf *)pds->dp->data);
+                    if (errmsg) {
+                        sfree(errmsg);
+                        return TRUE;   /* stay so the user can retry */
+                    }
+                    ShinyEndDialog(hwnd, 1);
+                }
+            } else {
                 ShinyEndDialog(hwnd, 0);   /* discard, then exit */
-            return 0;
+            }
+            return TRUE;
         }
         quit_help(hwnd);
         ShinyEndDialog(hwnd, 0);
@@ -831,6 +866,12 @@ bool do_config(Conf *conf)
     PortableDialogStuff *pds = pds_new(2);
 
     serial_fallback_reset();
+    /* cn: enable unsaved-changes tracking for the startup config box,
+     * so the save button is dirty-gated and closing prompts with the
+     * change list. */
+    pds->dp->track_changes = true;
+    pds->dp->baseline = conf_copy(conf);
+    pds->dp->ctrlbox = pds->ctrlbox;
     setup_config_box(pds->ctrlbox, false, 0, 0);
     win_setup_config_box(pds->ctrlbox, &pds->dp->hwnd, has_help(), false, 0);
 
@@ -879,6 +920,7 @@ bool do_reconfig(HWND hwnd, Conf *conf, int protcfginfo,
     struct reconfig_apply_ctx actx;
 
     serial_fallback_reset();
+    pds->dp->baseline = conf_copy(conf);
     backup_conf = conf_copy(conf);
 
     actx.cb = apply_cb;

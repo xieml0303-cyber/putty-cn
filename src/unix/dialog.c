@@ -1140,6 +1140,16 @@ void dlg_info_msg(dlgparam *dp, const char *msg)
 }
 
 /*
+ * cn: not wired up on Unix yet; assume the user confirms. The change
+ * list itself (conf_describe_changes) is cross-platform and lives in
+ * settings.c.
+ */
+bool dlg_confirm_save(dlgparam *dp)
+{
+    return true;
+}
+
+/*
  * This function signals to the front end that the dialog's
  * processing is completed, and passes an integer value (typically
  * a success status).
