@@ -26,7 +26,10 @@ jobs:
         shell: msys2 {0}
         run: |
           cd src
-          cmake --build build --target putty puttygen plink pscp psftp pageant puttytel
+          cmake --build build
+        # no --target: build everything, including the test_* binaries
+        # that ctest needs (a target list of the seven deliverables
+        # left ctest with "Not Run" for all nine tests).
       - name: Test
         shell: msys2 {0}
         run: |
