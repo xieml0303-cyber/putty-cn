@@ -276,8 +276,9 @@ static void cn_style_snapshot_buttons(HWND hwnd)
         }
     }
 
-    /* Original font; widen the buttons as far as the layout allows so
-     * 设置初始化 fits on one line, and keep them short. */
+    /* Balanced button size: a touch wider than the layout default so
+     * 设置初始化 fits on one line (68 px), a touch shorter than the
+     * standard height, and safely inside the group frame. */
     HWND btns[2] = { hdel, hinit };
     for (int i = 0; i < 2; i++) {
         RECT r;
@@ -285,8 +286,8 @@ static void cn_style_snapshot_buttons(HWND hwnd)
         POINT tl = { r.left, r.top }, br = { r.right, r.bottom };
         ScreenToClient(hwnd, &tl);
         ScreenToClient(hwnd, &br);
-        SetWindowPos(btns[i], NULL, tl.x - 6, tl.y, br.x - tl.x + 18,
-                     br.y - tl.y - 6, SWP_NOZORDER);
+        SetWindowPos(btns[i], NULL, tl.x, tl.y, br.x - tl.x + 5,
+                     br.y - tl.y - 2, SWP_NOZORDER);
     }
 
     /* Pin 删除 to the top of the history list box (next to the
