@@ -53,9 +53,23 @@ const ConfKeyInfo conf_key_info[] = {
 };
 
 /*
+ * cn: The connection targets (host, port, protocol) are deliberately
+ * NOT persisted by the save button — they are written as pristine
+ * defaults (empty host, SSH / 22) and the startup box resets them.
+ * They therefore do not count as "unsaved changes": neither the
+ * dirty gate nor the change list takes them into account.
+ */
+static bool cn_is_connection_target(size_t key)
+{
+    return key == CONF_host || key == CONF_port ||
+        key == CONF_protocol;
+}
+
+/*
  * cn: Compare two configurations field by field over conf_key_info.
  * Skips options that are never persisted (not_saved, save_custom,
- * mappings with subkeys). Returns true if identical.
+ * mappings with subkeys) and the connection targets. Returns true if
+ * identical.
  */
 bool conf_equal(const Conf *a, const Conf *b)
 {
@@ -65,12 +79,8 @@ bool conf_equal(const Conf *a, const Conf *b)
             continue;
         if (info->subkey_type != CONF_TYPE_NONE)
             continue;
-
-        if (key == CONF_protocol) {
-            if (conf_get_int(a, key) != conf_get_int(b, key))
-                return false;
+        if (cn_is_connection_target(key))
             continue;
-        }
 
         switch (info->value_type) {
           case CONF_TYPE_STR: {
@@ -135,27 +145,8 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
             continue;
         if (info->subkey_type != CONF_TYPE_NONE)
             continue;
-
-        if (key == CONF_protocol) {
-            static const struct { int v; const char *name; } protos[] = {
-                { PROT_SSH, "SSH" }, { PROT_SERIAL, "串口" },
-                { PROT_TELNET, "Telnet" }, { PROT_RAW, "Raw" },
-                { PROT_SSHCONN, "裸 ssh 连接" },
-            };
-            int a = conf_get_int(baseline, key);
-            int b = conf_get_int(current, key);
-            if (a != b) {
-                const char *an = "未知", *bn = "未知";
-                for (size_t i = 0; i < lenof(protos); i++) {
-                    if (protos[i].v == a) an = protos[i].name;
-                    if (protos[i].v == b) bn = protos[i].name;
-                }
-                put_fmt(sb, "%s: %s → %s\r\n", info->save_keyword,
-                        an, bn);
-                nchanges++;
-            }
+        if (cn_is_connection_target(key))
             continue;
-        }
 
         switch (info->value_type) {
           case CONF_TYPE_STR: {
