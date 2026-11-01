@@ -34,5 +34,8 @@ reports/__pycache__/
 backup/*.exe*
 backup/*.bak
 
+# ZCode 插件指针（会话工具生成，与项目无关）
+.v2c/
+
 # 旧报告目录名（2026-10-18 已更名为 reports/），保留忽略规则防止误建
 .workbuddy/
