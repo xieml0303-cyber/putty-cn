@@ -1121,7 +1121,25 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                     conf_set_str(conf, CONF_serline,
                                  serial_fallback_original);
                 }
+                /*
+                 * The host name, port and protocol are connection
+                 * targets, not settings: persist the pristine startup
+                 * defaults (empty host, SSH / 22) so that the next
+                 * launch starts clean, then restore what the user is
+                 * currently editing so "Open" still works right after
+                 * saving.
+                 */
+                char *runtime_host = dupstr(conf_get_str(conf, CONF_host));
+                int runtime_portnum = conf_get_int(conf, CONF_port);
+                int runtime_proto = conf_get_int(conf, CONF_protocol);
+                conf_set_str(conf, CONF_host, "");
+                conf_set_int(conf, CONF_port, 22);
+                conf_set_int(conf, CONF_protocol, PROT_SSH);
                 char *errmsg = save_settings("", conf);
+                conf_set_str(conf, CONF_host, runtime_host);
+                conf_set_int(conf, CONF_port, runtime_portnum);
+                conf_set_int(conf, CONF_protocol, runtime_proto);
+                sfree(runtime_host);
                 if (runtime_port) {
                     conf_set_str(conf, CONF_serline, runtime_port);
                     sfree(runtime_port);
@@ -1130,8 +1148,9 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                     dlg_error_msg(dlg, errmsg);
                     sfree(errmsg);
                 } else {
-                    dlg_info_msg(dlg, "保存成功！\n\n配置已保存到「默认设置」，"
-                                 "下次启动自动沿用。");
+                    dlg_info_msg(dlg, "保存成功！\n\n其他设置已保存到「默认设置」；"
+                                 "主机名与端口不保存，下次启动为默认的"
+                                 "SSH、端口 22。");
                 }
             }
         } else if (!ssd->midsession &&

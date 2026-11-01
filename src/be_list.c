@@ -42,7 +42,10 @@ const char *const appname = STR(APPNAME);
  * need this variable anyway, so just set it to -1.
  */
 #if SSH
-const int be_default_protocol = PROT_SERIAL;
+/* cn change: launch with a clean SSH target (host empty, port 22) by
+ * default; serial is one click away and its parameters are still
+ * preset for Huawei/H3C console use. */
+const int be_default_protocol = PROT_SSH;
 #elif OTHERBACKENDS
 const int be_default_protocol = PROT_TELNET;
 #else

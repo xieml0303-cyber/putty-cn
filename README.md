@@ -2,7 +2,7 @@
 
 基于 [larryli/PuTTY](https://github.com/larryli/PuTTY)（原 Google Code `puttycn` 项目）的中文翻译源码，使用 MSYS2 + MinGW-w64 + CMake 在本地编译生成的 `putty.exe`、`puttygen.exe`、`plink.exe`、`pscp.exe`、`psftp.exe`、`pageant.exe`、`puttytel.exe`。
 
-在汉化基线之上，本仓库针对国内网络设备运维场景做了界面与交互改造：启动即串口模式、串口线自动匹配本机真实端口、会话页历史连接记录、配置页标题样式统一等。
+在汉化基线之上，本仓库针对国内网络设备运维场景做了界面与交互改造：默认 SSH 连接（主机名留空、端口 22）、「保存」不携带连接目标、串口一键切换且串口线自动匹配本机真实端口、会话页历史连接记录、配置页标题样式统一等。
 
 > 这不是 PuTTY 官方构建，与 Simon Tatham 及 PuTTY 官方项目无关。官方 PuTTY 从未提供中文界面。
 
@@ -29,7 +29,7 @@
 | `windows/storage.c` | 历史连接记录读写（注册表 `RecentHosts`）；串口枚举（注册表 `SERIALCOMM`，真实串口优先、蓝牙虚拟口后排） |
 | `storage.h`、`dialog.h`、`windows/platform.h` | 新增串口枚举、信息弹窗、只读编辑框等接口声明 |
 | `unix/storage.c`、`unix/dialog.c` | 对应接口的非 Windows 实现 |
-| `conf.h`、`be_list.c` | 默认连接方式改为串口；波特率 9600、8 数据位、1 停止位、无校验、无流控；串口线默认留空，由界面按本机端口自动匹配 |
+| `conf.h`、`be_list.c` | 默认连接方式 SSH（主机名留空、端口 22），「保存」不携带连接目标；串口参数按华为、华三网络设备 Console 口的标准预置（9600、8 数据位、1 停止位、无校验、无流控）；串口线默认留空，由界面按本机端口自动匹配 |
 | `version.h`、`LATEST.VER` | 版本号递增为 0.85-cn3（`TEXTVER`、`SSHVER`、`BINARY_VERSION` 同步） |
 | `pscp.c`、`psftp.c`、`cmdgen.c`、`windows/puttygen.c`、`windows/plink.c` | 命令行工具错误提示与 usage 汉化；plink 错误提示补行尾换行 |
 | `terminal/terminal.c` | 终端体验改造：窗口尺寸记忆与拖动实时重排（reflow）、内容贴屏边、串口 DEL(0x7F) 退格可跨软换行、窗口标题含端口/串口号 |
@@ -80,7 +80,7 @@
 | 校验 | 无 (None) |
 | 流控 | 无 (None) |
 
-打开程序即处于串口模式。「串行口(N)」是从注册表 `HKLM\HARDWARE\DEVICEMAP\SERIALCOMM` 枚举出的本机端口下拉框：
+打开程序默认为 SSH 连接；需要串口时点选「串口」单选按钮，连接参数即按下表预置。「串行口(N)」是从注册表 `HKLM\HARDWARE\DEVICEMAP\SERIALCOMM` 枚举出的本机端口下拉框：
 
 - 当前配置的端口不存在时（例如从别的机器带过来的 `COM1`），会自动回退到列表第一项，不会显示一个打不开的端口；
 - 下拉框为只读，只能从列表选择，避免手输出错；
