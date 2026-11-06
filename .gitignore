@@ -1,0 +1,60 @@
+# 测试运行产生的敏感/临时文件
+tests/node_modules/
+tests/package-lock.json
+tests/fingerprint.txt
+tests/host_ed25519.pem
+tests/host_ed25519.pub
+tests/id_ed25519
+tests/id_ed25519.ppk
+tests/id_rsa
+tests/id_rsa_pem
+tests/authorized_keys
+tests/log-*.txt
+tests/cmd.txt
+
+# 构建产物
+# dist/ 的二进制不进版本库：每次重建都会产生新的 PE 时间戳，同一份源码两次
+# 构建的哈希必然不同，入库等于每改一次就多存一份 1.8MB 且永远无法复用的
+# 对象。发布走 GitHub Release 挂安装包，仓库只保留源码与 README 里的哈希表。
+*.o
+build/
+build*/
+installer/output/
+dist/deploy-result.txt
+dist/*.exe
+
+# 本地安全扫描器会话状态
+**/.mimosa/
+
+# reports 下的本地诊断脚本与临时截图（只保留 Markdown 报告）
+# 递归覆盖子目录：reports/_workbuddy/ 里有探针脚本、截图和临时 exe，
+# 旧的 reports/*.ext 只匹配一层，子目录内容会被 git add -A 一起带进来。
+# 「忽略一切 -> 放开目录 -> 再放开 md」是 gitignore 的固定写法：父目录
+# 必须先被放开，否则里面的 ! 例外规则不生效。
+reports/**
+!reports/**/
+!reports/**/*.md
+reports/__pycache__/
+
+# 本地二进制备份（不进版本库，仅保留 .reg 文本快照）
+backup/*.exe*
+backup/*.bak
+
+# ZCode 插件指针（会话工具生成，与项目无关）
+.v2c/
+
+# 旧报告目录名（2026-10-18 已更名为 reports/），保留忽略规则防止误建
+.workbuddy/
+
+# 调试截图与测试桩运行日志（2026-11-05 新增）：都是本地排查时临时产出，
+# 文件名带 shot- 前缀便于识别，没必要入库。图标资源 icon_list_*.ico 例外，
+# 那是正式界面资源，要跟源码一起提交。
+tests/shot-*.png
+tests/srv-out.log
+tests/server-run.log
+
+# 本地资料夹：报告/文档/备份/测试脚本，留存本地不入库（2026-11-07 隔离）
+workspace/
+
+# MCP 工具批处理审计残留（不入库）
+.dsh-ops/

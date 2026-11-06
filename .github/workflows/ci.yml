@@ -1,0 +1,37 @@
+# Minimal CI: build the seven deliverables and run the unit tests.
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+      - name: Configure
+        shell: msys2 {0}
+        run: |
+          cd src
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -B build
+      - name: Build
+        shell: msys2 {0}
+        run: |
+          cd src
+          cmake --build build
+        # no --target: build everything, including the test_* binaries
+        # that ctest needs (a target list of the seven deliverables
+        # left ctest with "Not Run" for all nine tests).
+      - name: Test
+        shell: msys2 {0}
+        run: |
+          cd src/build
+          ctest --output-on-failure

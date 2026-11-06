@@ -1,0 +1,22 @@
+#include "rcstuff.h"
+#include "putty-rc.h"
+
+#define APPNAME "PuTTY"
+#define APPDESC "SSH、Telnet、Rlogin 和 SUPDUP 客户端"
+
+IDI_MAINICON ICON "putty.ico"
+IDI_CFGICON ICON "puttycfg.ico"
+/* cn: 文件传输窗口图标（文件夹 + 双向箭头） */
+IDI_SFTPXFER ICON "sftpxfer.ico"
+/* cn: 文件传输列表里目录 / 文件两种行图标 */
+IDI_LISTDIR ICON "icon_list_dir.ico"
+IDI_LISTFILE ICON "icon_list_file.ico"
+/* cn: 自建模态弹窗的问号图标 */
+IDI_QHELP ICON "icon_question.ico"
+
+#include "help.rc2"
+#include "putty-common.rc2"
+
+#ifndef NO_MANIFESTS
+1 RT_MANIFEST "putty.mft"
+#endif /* NO_MANIFESTS */
