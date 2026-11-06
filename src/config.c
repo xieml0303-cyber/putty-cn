@@ -2905,9 +2905,14 @@ void setup_config_box(struct controlbox *b, bool midsession,
         s = ctrl_getset(b, "会话", "hostport",
                         "填写要连接的目标地址");
         ctrl_columns(s, 2, 75, 25);
-        c = ctrl_combobox(s, HOST_BOX_TITLE, 'n', 100,
-                          HELPCTX(session_hostname),
-                          config_host_handler, I(0), I(0));
+        /*
+         * cn: 原为 ctrl_combobox（带历史下拉列表与系统下拉箭头）。
+         * 主人定夺：箭头与下拉列表一并删除，主机名框退化为纯输入框；
+         * 历史连接的选择走下方会话列表（双击回填主机与端口）。
+         */
+        c = ctrl_editbox(s, HOST_BOX_TITLE, 'n', 100,
+                         HELPCTX(session_hostname),
+                         config_host_handler, I(0), I(0));
         c->column = 0;
         hp->host = c;
         ssd->hostbox = c;

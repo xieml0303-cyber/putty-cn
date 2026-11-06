@@ -463,80 +463,6 @@ static void pds_initdialog_start(PortableDialogStuff *pds, HWND hwnd)
     }
 }
 
-/* ----------------------------------------------------------------------
- * cn: 会话页「主机名称」下拉框隐藏系统下拉箭头。
- *
- * 交互不变：点击原箭头区域（以及框内任意处）仍展开历史列表——系统
- * 命中测试未动，只是箭头像素被窗口背景色盖掉。COMBOBOX 的下拉按钮
- * 不是独立子窗口而是系统自绘，无法单独隐藏，只能子类化后在默认
- * 绘制完成之后用 COLOR_WINDOW 把 rcButton 区域盖住；主题会随鼠标
- * 悬停/焦点变化重画按钮，所以这些消息在默认处理后都要再补一次盖绘。
- */
-
-#define CN_HOSTBOX_SUBCLASS_ID 20261107
-
-static void cn_hostbox_cover_arrow(HWND hcmb)
-{
-    COMBOBOXINFO cbi;
-    HDC hdc;
-    RECT rc;
-
-    memset(&cbi, 0, sizeof(cbi));
-    cbi.cbSize = sizeof(cbi);
-    if (!GetComboBoxInfo(hcmb, &cbi))
-        return;
-    hdc = GetDC(hcmb);
-    if (!hdc)
-        return;
-    rc = cbi.rcButton;                  /* 客户区坐标 */
-    rc.left -= 2;                       /* 吃掉按钮左侧的分隔竖线 */
-    FillRect(hdc, &rc, GetSysColorBrush(COLOR_WINDOW));
-    ReleaseDC(hcmb, hdc);
-}
-
-static LRESULT CALLBACK cn_hostbox_subproc(HWND hwnd, UINT msg,
-                                           WPARAM wp, LPARAM lp,
-                                           UINT_PTR id, DWORD_PTR ref)
-{
-    LRESULT r = DefSubclassProc(hwnd, msg, wp, lp);
-
-    /*
-     * 默认绘制完成后再盖一次箭头：主题会在悬停/焦点变化时重画
-     * 按钮，不补盖的话箭头会在鼠标划过时闪现。
-     */
-    switch (msg) {
-      case WM_PAINT:
-      case WM_MOUSEMOVE:
-      case WM_SETFOCUS:
-      case WM_KILLFOCUS:
-      case WM_THEMECHANGED:
-        cn_hostbox_cover_arrow(hwnd);
-        break;
-    }
-    return r;
-}
-
-static void cn_hostbox_subclass_tree(PortableDialogStuff *pds, size_t tree)
-{
-    struct winctrl *c;
-
-    for (int i = 0; (c = winctrl_findbyindex(&pds->ctrltrees[tree], i)) != NULL;
-         i++) {
-        HWND hcmb;
-
-        if (!c->ctrl || c->ctrl->type != CTRL_EDITBOX ||
-            !c->ctrl->editbox.has_list)
-            continue;
-        hcmb = GetDlgItem(pds->dp->hwnd, c->base_id + 1);
-        if (!hcmb || GetPropW(hcmb, L"cn_hostbox_arrow_hidden"))
-            continue;
-        SetWindowSubclass(hcmb, cn_hostbox_subproc,
-                          CN_HOSTBOX_SUBCLASS_ID, 0);
-        SetPropW(hcmb, L"cn_hostbox_arrow_hidden", (HANDLE)1);
-        cn_hostbox_cover_arrow(hcmb);
-    }
-}
-
 /*
  * Create the panelfuls of controls in the configuration box.
  */
@@ -983,7 +909,6 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
         pds_initdialog_start(pds, hwnd);
 
         pds_create_controls(pds, TREE_BASE, IDCX_STDBASE, 3, 3, 235, "");
-        cn_hostbox_subclass_tree(pds, TREE_BASE);
 
         SendMessage(hwnd, WM_SETICON, (WPARAM) ICON_BIG,
                     (LPARAM) LoadIcon(hinst, MAKEINTRESOURCE(IDI_CFGICON)));
@@ -1166,7 +1091,6 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
                                 100, 3, 13, (char *)item.lParam);
 
             dlg_refresh(NULL, pds->dp);    /* set up control values */
-            cn_hostbox_subclass_tree(pds, TREE_PANEL);
 
             SendMessage (hwnd, WM_SETREDRAW, true, 0);
             InvalidateRect (hwnd, NULL, true);
@@ -1874,7 +1798,6 @@ static INT_PTR CAConfigProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
 
         pds_create_controls(pds, 0, IDCX_PANELBASE, 3, 3, 3, "Main");
         pds_create_controls(pds, 0, IDCX_STDBASE, 3, 3, 243, "");
-        cn_hostbox_subclass_tree(pds, 0);
         dlg_refresh(NULL, pds->dp);    /* and set up control values */
 
         pds_initdialog_finish(pds);
