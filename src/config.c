@@ -475,6 +475,11 @@ static void config_host_handler(dlgcontrol *ctrl, dlgparam *dlg,
              * 控件本体是 ctrl_combobox（has_list=true），列表操作
              * 合法；断言只在控件被换成无列表 editbox 时才会炸。
              */
+            /*
+             * cn: 标签必须同步恢复——串口分支把它改成了「串口(N)」，
+             * 漏掉这行的话 SSH/Telnet 切回来标签就停在「串口」。
+             */
+            dlg_label_change(ctrl, dlg, HOST_BOX_TITLE);
             dlg_update_start(ctrl, dlg);
             dlg_listbox_clear(ctrl, dlg);
             dlg_editbox_set(ctrl, dlg, conf_get_str(conf, CONF_host));
