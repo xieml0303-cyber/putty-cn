@@ -3090,6 +3090,14 @@ void setup_config_box(struct controlbox *b, bool midsession,
                                          HELPCTX(session_saved),
                                          sessionsaver_handler, P(ssd));
         ssd->delbutton->column = 1;
+        /* cn: 一键恢复到设置初始化快照（快照由配置框打开时自动建立）。
+         * 按钮贴历史列表框底边，尺寸与删除键一致；字体小一号保证
+         * 五个字完整显示。 */
+        ssd->initbutton = ctrl_pushbutton(s, "初始化设置", NO_SHORTCUT,
+                                          HELPCTX(no_help),
+                                          sessionsaver_handler, P(ssd));
+        ssd->initbutton->column = 1;
+        ssd->initbutton->button.cn_smallfont = true;
     } else {
         /* Disable the Delete button mid-session too, for UI consistency. */
         ssd->delbutton = NULL;
@@ -3099,14 +3107,6 @@ void setup_config_box(struct controlbox *b, bool midsession,
         /* 「退出时关闭窗口」固定显示「从不」，见 config_coe_handler。 */
         c = ctrl_droplist(s, "退出时关闭窗口(X)", 'x', 45,
                           HELPCTX(session_coe), config_coe_handler, I(0));
-        /*
-         * cn: 初始化按钮置底显示（会话页最下方），字体小一号保证
-         * 五个字完整显示。
-         */
-        ssd->initbutton = ctrl_pushbutton(s, "初始化设置", NO_SHORTCUT,
-                                          HELPCTX(no_help),
-                                          sessionsaver_handler, P(ssd));
-        ssd->initbutton->button.cn_smallfont = true;
     }
 
     /*

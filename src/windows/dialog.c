@@ -266,7 +266,7 @@ static void cn_style_snapshot_buttons(HWND hwnd)
         GetWindowText(h, text, sizeof(text));
         if (strncmp(text, "删除", 6) == 0)
             hdel = h;
-        else if (strncmp(text, "设置初始化", 12) == 0)
+        else if (strncmp(text, "初始化设置", 15) == 0)
             hinit = h;
     }
     if (!hdel || !hinit)
@@ -314,9 +314,8 @@ static void cn_style_snapshot_buttons(HWND hwnd)
         SetWindowPos(hdel, NULL, p1.x, p1.y + dy_top, 0, 0,
                      SWP_NOSIZE | SWP_NOZORDER);
         int dy_bottom = rl.bottom - (ri.bottom - ri.top) - ri.top;
-        if (dy_bottom > 0)
-            SetWindowPos(hinit, NULL, p2.x, p2.y + dy_bottom, 0, 0,
-                         SWP_NOSIZE | SWP_NOZORDER);
+        SetWindowPos(hinit, NULL, p2.x, p2.y + dy_bottom, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER);
 
         /*
          * cn: 「载入密钥」不再在这里定位。它现在由会话页的列布局摆到
