@@ -1582,19 +1582,35 @@ char *cn_persist_default_settings(Conf *conf)
     bool cn_user_utf8;
     char *runtime_username =
         dupstr(conf_get_str_ambi(conf, CONF_username, &cn_user_utf8));
+    /*
+     * cn: 私钥文件与独立证书同属连接凭据，不固化进全局默认 ——
+     * 保存时写成空，落盘后立刻还原运行值（同 host/username 机制）。
+     */
+    Filename *runtime_keyfile =
+        filename_copy(conf_get_filename(conf, CONF_keyfile));
+    Filename *runtime_cert =
+        filename_copy(conf_get_filename(conf, CONF_detached_cert));
     int runtime_portnum = conf_get_int(conf, CONF_port);
     int runtime_proto = conf_get_int(conf, CONF_protocol);
     conf_set_str(conf, CONF_host, "");
     conf_set_str(conf, CONF_username, "");
+    Filename *cn_empty_fn = filename_from_str("");
+    conf_set_filename(conf, CONF_keyfile, cn_empty_fn);
+    conf_set_filename(conf, CONF_detached_cert, cn_empty_fn);
+    filename_free(cn_empty_fn);
     conf_set_int(conf, CONF_port, 22);
     conf_set_int(conf, CONF_protocol, PROT_SSH);
     char *errmsg = save_settings("", conf);
     conf_set_str(conf, CONF_host, runtime_host);
     conf_set_str(conf, CONF_username, runtime_username);
+    conf_set_filename(conf, CONF_keyfile, runtime_keyfile);
+    conf_set_filename(conf, CONF_detached_cert, runtime_cert);
     conf_set_int(conf, CONF_port, runtime_portnum);
     conf_set_int(conf, CONF_protocol, runtime_proto);
     sfree(runtime_host);
     sfree(runtime_username);
+    filename_free(runtime_keyfile);
+    filename_free(runtime_cert);
     if (runtime_port) {
         conf_set_str(conf, CONF_serline, runtime_port);
         sfree(runtime_port);

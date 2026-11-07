@@ -53,17 +53,19 @@ const ConfKeyInfo conf_key_info[] = {
 };
 
 /*
- * cn: The connection targets (host, port, protocol, username) are
+ * cn: The connection targets (host, port, protocol, username) and the
+ * per-session credentials (private key file, detached certificate) are
  * deliberately NOT persisted by the save button — they are written as
- * pristine defaults (empty host, SSH / 22, empty username) and the
- * startup box resets them. They therefore do not count as "unsaved
- * changes": neither the dirty gate nor the change list takes them into
- * account.
+ * pristine defaults (empty host, SSH / 22, empty username, no key or
+ * certificate) and the startup box resets them. They therefore do not
+ * count as "unsaved changes": neither the dirty gate nor the change
+ * list takes them into account.
  */
 static bool cn_is_connection_target(size_t key)
 {
     return key == CONF_host || key == CONF_port ||
-        key == CONF_protocol || key == CONF_username;
+        key == CONF_protocol || key == CONF_username ||
+        key == CONF_keyfile || key == CONF_detached_cert;
 }
 
 /*
