@@ -554,7 +554,10 @@ CONF_OPTION(no_alt_screen, /* disable alternate screen */
 )
 CONF_OPTION(no_remote_wintitle, /* disable remote retitling */
     VALUE_TYPE(BOOL),
-    DEFAULT_BOOL(false),
+    /* cn: 默认禁用远端改标题——主人定夺标题栏恒为
+     * 「主机名/IP：端口号（在线/已离线）」格式，云服务器 bash 的
+     * user@host:~ 转义序列不得覆盖。配置页仍有开关可改。 */
+    DEFAULT_BOOL(true),
     SAVE_KEYWORD("NoRemoteWinTitle"),
 )
 CONF_OPTION(no_remote_clearscroll, /* disable ESC[3J */

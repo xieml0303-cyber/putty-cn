@@ -765,7 +765,9 @@ void test_simple(void)
     test_bool_simple(CONF_no_mouse_rep, "NoMouseReporting", false);
     test_bool_simple(CONF_no_remote_resize, "NoRemoteResize", false);
     test_bool_simple(CONF_no_alt_screen, "NoAltScreen", false);
-    test_bool_simple(CONF_no_remote_wintitle, "NoRemoteWinTitle", false);
+    /* cn: 默认 true——标题栏恒为「主机名/IP：端口号（在线/已离线）」，
+     * 云服务器 bash 的 user@host:~ 转义序列不得覆盖。 */
+    test_bool_simple(CONF_no_remote_wintitle, "NoRemoteWinTitle", true);
     test_bool_simple(CONF_no_remote_clearscroll, "NoRemoteClearScroll", false);
     test_bool_simple(CONF_no_dbackspace, "NoDBackspace", false);
     test_bool_simple(CONF_no_remote_charset, "NoRemoteCharset", false);
