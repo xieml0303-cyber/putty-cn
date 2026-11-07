@@ -355,6 +355,30 @@ static void cn_style_snapshot_buttons(HWND hwnd)
             int cn_h = (lb.y + 5) - gp.y;
             SetWindowPos(hgrp, NULL, gp.x, gp.y, gb.x - gp.x,
                          cn_h, SWP_NOZORDER);
+
+            /*
+             * cn: 底部标准按钮行（保存／文件传输／连接／退出）整体上移，
+             * 与组框底的空隙收到 10px（布局体系给的距离偏大）。绝对
+             * 定位（y = 组框底 + 10），重复调用幂等。
+             */
+            h = 0;
+            while ((h = FindWindowEx(hwnd, h, "Button", NULL)) != NULL) {
+                char text[64];
+                GetWindowText(h, text, sizeof(text));
+                if (strncmp(text, "保存", 6) == 0 ||
+                    strncmp(text, "文件传输", 12) == 0 ||
+                    strncmp(text, "连接", 6) == 0 ||
+                    strncmp(text, "退出", 6) == 0) {
+                    RECT rb;
+                    if (!GetWindowRect(h, &rb))
+                        continue;
+                    POINT bp = { rb.left, rb.top };
+                    ScreenToClient(hwnd, &bp);
+                    /* 组框底 = 列表底+5；按钮行 y = 组框底 + 10。 */
+                    SetWindowPos(h, NULL, bp.x, lb.y + 15, 0, 0,
+                                 SWP_NOSIZE | SWP_NOZORDER);
+                }
+            }
         }
 
         /*
