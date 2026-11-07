@@ -2477,6 +2477,258 @@ static int cn_confirm_batch(SftpWin *sw, ConflictItem *items, size_t n)
     return rc;
 }
 
+/*
+ * cn: 「确认保存」弹窗（配置框保存按钮用）——完全照「确认覆盖」弹窗
+ * 的画法：首行文案顶格（标题栏正下方），第二行起大问号图标 + 改动
+ * 清单，底部大按钮。返回 IDOK / IDCANCEL。
+ *
+ * 清单行数不定，窗口高度按行数自适应；超过 CN_CONFIRM_SAVE_MAX_LINES
+ * 的行由只读多行 EDITTEXT 滚动承接，样式仍保持无边框的清爽画法。
+ */
+#define CN_CONFIRM_SAVE_MAX_LINES 10
+
+typedef struct ConfirmSaveBox {
+    HWND dlg;
+    HWND b_ok, b_cancel;
+    int result;
+} ConfirmSaveBox;
+
+static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
+                                             WPARAM wParam, LPARAM lParam)
+{
+    ConfirmSaveBox *cb = (ConfirmSaveBox *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    if (!cb && msg == WM_CREATE) {
+        CREATESTRUCTW *cs = (CREATESTRUCTW *)lParam;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)cs->lpCreateParams);
+        return 0;
+    }
+    if (!cb)
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+
+    switch (msg) {
+      case WM_COMMAND:
+        if (LOWORD(wParam) == IDC_CNC_OVERWRITE) {   /* 确定复用该 ID */
+            cb->result = IDOK;
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            return 0;
+        }
+        if (LOWORD(wParam) == IDC_CNC_CANCEL) {
+            cb->result = IDCANCEL;
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            return 0;
+        }
+        break;
+      case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
+      case WM_NCDESTROY:
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+int cn_confirm_save_dialog(HWND parent, const char *changes)
+{
+    static const wchar_t classname[] = L"PuTTYSftpConfirmSave";
+    HINSTANCE inst = GetModuleHandle(NULL);
+    ConfirmSaveBox cb;
+    HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    HDC hdc;
+    TEXTMETRICW tm;
+    int m, lh, w, h, cw, ch, x, y;
+    int nlines, list_h, ytop;
+    POINT pt;
+    wchar_t *wtitle, *whead, *wlist;
+    char *head;
+
+    memset(&cb, 0, sizeof(cb));
+
+    {
+        WNDCLASSW wc;
+        if (!GetClassInfoW(hinst, classname, &wc)) {
+            wc.style = 0;
+            wc.lpfnWndProc = cn_confirm_save_proc;
+            wc.cbClsExtra = 0;
+            wc.cbWndExtra = 0;
+            wc.hInstance = inst;
+            wc.hIcon = NULL;
+            wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+            wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+            wc.lpszMenuName = NULL;
+            wc.lpszClassName = classname;
+            RegisterClassW(&wc);
+        }
+    }
+
+    /* 字体度量：行高与边距，与确认覆盖弹窗同一套口径。 */
+    hdc = GetDC(NULL);
+    SelectObject(hdc, font);
+    GetTextMetricsW(hdc, &tm);
+    SelectObject(hdc, GetStockObject(SYSTEM_FONT));
+    ReleaseDC(NULL, hdc);
+    lh = tm.tmHeight + tm.tmExternalLeading + cn_dpi(4);
+    m = cn_dpi(14);
+
+    /* 清单行数 → 窗口高度自适应。 */
+    nlines = 1;
+    for (const char *p = changes; *p; p++)
+        if (*p == '\n')
+            nlines++;
+    {
+        int vis = nlines > CN_CONFIRM_SAVE_MAX_LINES ?
+            CN_CONFIRM_SAVE_MAX_LINES : nlines;
+        list_h = vis * lh;
+    }
+
+    /* 首行 1 行 + 图标/清单区 + 按钮行，宽按内容保守取 340。 */
+    w = cn_dpi(340);
+    ytop = m + lh + cn_dpi(6);
+    h = ytop + list_h + cn_dpi(10) + cn_dpi(26) + m;
+    cw = w;
+    ch = h;
+    {
+        RECT fr;
+        fr.left = 0;
+        fr.top = 0;
+        fr.right = cw;
+        fr.bottom = ch;
+        AdjustWindowRectEx(&fr, WS_POPUP | WS_CAPTION | WS_SYSMENU,
+                           FALSE, WS_EX_DLGMODALFRAME);
+        w = fr.right - fr.left;
+        h = fr.bottom - fr.top;
+    }
+
+    if (!GetCursorPos(&pt))
+        pt.x = pt.y = 0;
+    cn_place_near(pt, w, h, &x, &y);
+
+    wtitle = dup_mb_to_wc(DEFAULT_CODEPAGE, "确认保存");
+    cb.dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, classname, wtitle,
+                             WS_POPUP | WS_CAPTION | WS_SYSMENU,
+                             x, y, w, h, parent, NULL, hinst, &cb);
+    sfree(wtitle);
+    if (!cb.dlg)
+        return IDCANCEL;
+    SetWindowLongPtrW(cb.dlg, GWLP_USERDATA, (LONG_PTR)&cb);
+
+    /* 首行：顶格说明。 */
+    head = "当前改动尚未保存，改动清单：";
+    whead = dup_mb_to_wc(DEFAULT_CODEPAGE, head);
+    CreateWindowExW(0, L"STATIC", whead,
+                    WS_CHILD | WS_VISIBLE | SS_LEFTNOWORDWRAP,
+                    m, m, cw - 2 * m, lh,
+                    cb.dlg, NULL, hinst, NULL);
+    sfree(whead);
+
+    /* 第二行：大问号图标 + 改动清单。 */
+    {
+        int icon = cn_dpi(40);
+        int lx = m + icon + cn_dpi(6);
+        HWND qicon;
+
+        wlist = dup_mb_to_wc(DEFAULT_CODEPAGE, changes);
+        CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", wlist,
+                        WS_CHILD | WS_VISIBLE | WS_VSCROLL |
+                        ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
+                        lx, ytop, cw - lx - m, list_h,
+                        cb.dlg, NULL, hinst, NULL);
+        sfree(wlist);
+
+        qicon = CreateWindowExW(0, L"STATIC", NULL,
+                                WS_CHILD | WS_VISIBLE | SS_ICON,
+                                m, ytop, icon, icon,
+                                cb.dlg, NULL, hinst, NULL);
+        SendMessageW(qicon, STM_SETICON,
+                     (WPARAM)cn_question_icon(icon), 0);
+    }
+
+    /* 按钮行：确定靠左，取消靠右，宽度按文字算。 */
+    {
+        int bh = cn_dpi(26);
+        int bw[2], by;
+        const wchar_t *cap[2] = { L"确定", L"取消" };
+
+        bw[0] = bw[1] = 0;
+        hdc = GetDC(NULL);
+        if (hdc) {
+            HFONT old = SelectObject(hdc, font);
+            for (int i = 0; i < 2; i++) {
+                SIZE s2;
+                GetTextExtentPoint32W(hdc, cap[i], (int)wcslen(cap[i]), &s2);
+                bw[i] = s2.cx + cn_dpi(24);
+                if (bw[i] < cn_dpi(72))
+                    bw[i] = cn_dpi(72);
+            }
+            SelectObject(hdc, old);
+            ReleaseDC(NULL, hdc);
+        }
+
+        by = ch - m - bh;
+        cb.b_ok = CreateWindowW(
+            L"BUTTON", cap[0],
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+            m, by, bw[0], bh, cb.dlg,
+            (HMENU)IDC_CNC_OVERWRITE, hinst, NULL);
+        cb.b_cancel = CreateWindowW(
+            L"BUTTON", cap[1],
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+            cw - m - bw[1], by, bw[1], bh, cb.dlg,
+            (HMENU)IDC_CNC_CANCEL, hinst, NULL);
+    }
+
+    {
+        HWND all[] = { cb.b_ok, cb.b_cancel };
+        for (size_t i = 0; i < lenof(all); i++)
+            SendMessageW(all[i], WM_SETFONT, (WPARAM)font, TRUE);
+    }
+
+    /* 标题栏问号小图标，与内容区同一份资源。 */
+    {
+        HICON ico = cn_question_icon(cn_dpi(16));
+        if (ico) {
+            SendMessageW(cb.dlg, WM_SETICON, ICON_SMALL, (LPARAM)ico);
+            SendMessageW(cb.dlg, WM_SETICON, ICON_BIG, (LPARAM)ico);
+        }
+    }
+
+    if (parent)
+        EnableWindow(parent, FALSE);
+    ShowWindow(cb.dlg, SW_SHOW);
+    SetForegroundWindow(cb.dlg);
+
+    /* 模态循环：Enter=确定、Esc=取消，其余消息照常派发。 */
+    {
+        MSG msg;
+        while (IsWindow(cb.dlg) && GetMessageW(&msg, NULL, 0, 0)) {
+            if ((msg.hwnd == cb.dlg || IsChild(cb.dlg, msg.hwnd)) &&
+                msg.message == WM_KEYDOWN) {
+                if (msg.wParam == VK_RETURN) {
+                    SendMessageW(cb.dlg, WM_COMMAND,
+                                 MAKEWPARAM(IDC_CNC_OVERWRITE, BN_CLICKED),
+                                 (LPARAM)cb.b_ok);
+                    continue;
+                }
+                if (msg.wParam == VK_ESCAPE) {
+                    SendMessageW(cb.dlg, WM_COMMAND,
+                                 MAKEWPARAM(IDC_CNC_CANCEL, BN_CLICKED),
+                                 (LPARAM)cb.b_cancel);
+                    continue;
+                }
+            }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+
+    if (parent) {
+        EnableWindow(parent, TRUE);
+        ShowWindow(parent, SW_RESTORE);
+        SetForegroundWindow(parent);
+    }
+    return cb.result;
+}
+
 /* 释放一批待传名单（names 逐项 + 三个数组）。空指针一律按空数组算。 */
 static void cn_free_entries(char **names, char **srcs, bool *dirs, size_t count)
 {

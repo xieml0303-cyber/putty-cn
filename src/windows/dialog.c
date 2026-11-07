@@ -429,8 +429,8 @@ static int ask_save_changes(HWND hwnd, const char *changelog)
 bool dlg_confirm_save(dlgparam *dp)
 {
     char *changes = conf_describe_changes(dp->baseline, dp->data);
-    int mbret = message_box(dp->hwnd, changes, "确认保存",
-                            MB_OKCANCEL | MB_ICONQUESTION, true, 0);
+    /* cn: 自绘弹窗（照「确认覆盖」画法），首行文案在模板内顶格。 */
+    int mbret = cn_confirm_save_dialog(dp->hwnd, changes);
     sfree(changes);
     return mbret == IDOK;
 }
@@ -1282,8 +1282,9 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
                 cn_style_snapshot_buttons(hwnd);
                 GetWindowRect(cn_list, &rl);
                 GetWindowRect(cn_init, &ri);
-                if (rl.bottom != ri.bottom && ri.bottom - rl.bottom < 100)
+                if (rl.bottom != ri.bottom && ri.bottom - rl.bottom < 100) {
                     SetTimer(hwnd, 1231, 50, NULL);
+                }
             }
             return 0;
         }

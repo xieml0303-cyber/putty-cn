@@ -3281,7 +3281,9 @@ int dlg_listbox_getid(dlgcontrol *ctrl, dlgparam *dp, int index)
 {
     struct winctrl *c = dlg_findbyctrl(dp, ctrl);
     int msg;
-    assert(c && c->ctrl->type == CTRL_LISTBOX);
+    /* cn: 同 dlg_listbox_index —— 控件不在当前面板时返回 -1。 */
+    if (!c || c->ctrl->type != CTRL_LISTBOX)
+        return -1;
     msg = (c->ctrl->listbox.height != 0 ? LB_GETITEMDATA : CB_GETITEMDATA);
     return
         SendDlgItemMessage(dp->hwnd, c->base_id+1, msg, index, 0);
@@ -3292,7 +3294,13 @@ int dlg_listbox_index(dlgcontrol *ctrl, dlgparam *dp)
 {
     struct winctrl *c = dlg_findbyctrl(dp, ctrl);
     int msg, ret;
-    assert(c && c->ctrl->type == CTRL_LISTBOX);
+    /*
+     * cn: 控件不在当前面板（winctrl 树里没有）时宽容返回 -1。
+     * 非会话页上触发「连接」会走到历史列表回填分支，此时历史列表
+     * 控件根本不存在 —— 原断言在这里必炸（主人实测踩中）。
+     */
+    if (!c || c->ctrl->type != CTRL_LISTBOX)
+        return -1;
     if (c->ctrl->listbox.multisel) {
         assert(c->ctrl->listbox.height != 0); /* not combo box */
         ret = SendDlgItemMessage(dp->hwnd, c->base_id+1, LB_GETSELCOUNT, 0, 0);

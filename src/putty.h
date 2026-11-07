@@ -1995,6 +1995,8 @@ bool cn_take_xfer_request(void);
 /* 返回 NULL 表示成功，否则为调用方须 sfree 的错误文案；内部不弹模态框。 */
 char *sftp_window_open(Conf *conf, HWND parent);
 bool sftp_window_is_open(void);
+/* cn: 「确认保存」自绘弹窗（照「确认覆盖」的画法）。返回 IDOK/IDCANCEL。 */
+int cn_confirm_save_dialog(HWND parent, const char *changes);
 void save_open_settings(settings_w *sesskey, Conf *conf);
 bool load_settings(const char *section, Conf *conf);
 void load_open_settings(settings_r *sesskey, Conf *conf);
