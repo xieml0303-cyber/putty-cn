@@ -207,7 +207,7 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
     s = ctrl_getset(b, "窗口/转换", "trans",
                     "接收数据时字符集转换");
     ctrl_text(s, "(列表中没有的 Windows 代码页，"
-              "比如指定 CP936 代码页，可以手工输入到列表)",
+              "例如 CP936，可以手动输入到列表)",
               HELPCTX(translation_codepage));
 
     /*
@@ -310,7 +310,7 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
         resize_forbidden = (backvt->flags & BACKEND_RESIZE_FORBIDDEN);
     if (!midsession || !resize_forbidden) {
         s = ctrl_getset(b, "窗口", "size", "设置窗口大小");
-        ctrl_radiobuttons(s, "当窗口大小被改变时(Z)：", 'z', 1,
+        ctrl_radiobuttons(s, "调整窗口大小时(Z)：", 'z', 1,
                           HELPCTX(window_resize),
                           conf_radiobutton_handler,
                           I(CONF_resize_action),
@@ -338,7 +338,7 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
     ctrl_checkbox(s, "窗口总在最上层(E)", 'e',
                   HELPCTX(behaviour_alwaysontop),
                   conf_checkbox_handler, I(CONF_alwaysontop));
-    ctrl_checkbox(s, "Alt+回车全屏(F)", 'f',
+    ctrl_checkbox(s, "按 Alt+Enter 进入全屏(F)", 'f',
                   HELPCTX(behaviour_altenter),
                   conf_checkbox_handler,
                   I(CONF_fullscreenonaltenter));
