@@ -210,6 +210,12 @@ struct dlgcontrol {
              * combination.
              */
             bool has_list;
+            /*
+             * cn: optional cue-banner text for the edit control.
+             * Shown as greyed placeholder text while the box is empty
+             * (and not focused). Static string, not freed.
+             */
+            const char *cn_cue;
         } editbox;
         struct { /* for CTRL_RADIO */
             /*

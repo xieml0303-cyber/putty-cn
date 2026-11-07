@@ -1906,6 +1906,19 @@ void winctrl_layout(struct dlgparam *dp, struct winctrls *wc,
                          ctrl->editbox.percentwidth);
                 }
             }
+            if (ctrl->editbox.cn_cue) {
+                /* cn: greyed placeholder for the edit control */
+                HWND cn_edit = GetDlgItem(pos.hwnd, base_id + 1);
+                if (cn_edit) {
+                    wchar_t cn_wbuf[128];
+                    int cn_n = MultiByteToWideChar(
+                        CP_UTF8, 0, ctrl->editbox.cn_cue, -1,
+                        cn_wbuf, (int)lenof(cn_wbuf));
+                    if (cn_n > 0)
+                        SendMessageW(cn_edit, EM_SETCUEBANNER, TRUE,
+                                     (LPARAM)cn_wbuf);
+                }
+            }
             sfree(escaped);
             break;
           case CTRL_RADIO: {

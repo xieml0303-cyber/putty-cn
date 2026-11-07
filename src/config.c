@@ -1574,7 +1574,14 @@ char *cn_persist_default_settings(Conf *conf)
      * 无需处理。
      */
     char *runtime_host = dupstr(conf_get_str(conf, CONF_host));
-    char *runtime_username = dupstr(conf_get_str(conf, CONF_username));
+    /*
+     * cn: CONF_username is STR_AMBI — conf_get_str() would trip its
+     * value_type assertion (crash dialog on every save). Use the
+     * ambi accessor; conf_set_str() below is fine for STR_AMBI.
+     */
+    bool cn_user_utf8;
+    char *runtime_username =
+        dupstr(conf_get_str_ambi(conf, CONF_username, &cn_user_utf8));
     int runtime_portnum = conf_get_int(conf, CONF_port);
     int runtime_proto = conf_get_int(conf, CONF_protocol);
     conf_set_str(conf, CONF_host, "");
@@ -3423,9 +3430,13 @@ void setup_config_box(struct controlbox *b, bool midsession,
 
     s = ctrl_getset(b, "窗口/行为", "title",
                     "调整窗口标题行为");
-    ctrl_editbox(s, "窗口标题(T)：", 't', 100,
-                 HELPCTX(appearance_title),
-                 conf_editbox_handler, I(CONF_wintitle), ED_STR);
+    {
+        dlgcontrol *cn_wt = ctrl_editbox(
+            s, "窗口标题(T)：", 't', 100,
+            HELPCTX(appearance_title),
+            conf_editbox_handler, I(CONF_wintitle), ED_STR);
+        cn_wt->editbox.cn_cue = "默认为：主机名/IP地址：端口号";
+    }
     ctrl_checkbox(s, "窗口标题与图标标题分别设置(I)", 'i',
                   HELPCTX(appearance_title),
                   conf_checkbox_handler,
