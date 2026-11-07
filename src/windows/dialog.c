@@ -382,6 +382,32 @@ static void cn_style_snapshot_buttons(HWND hwnd)
         }
 
         /*
+         * cn: 窗口底边收到「按钮行底 + 10px」——对话框模板给的高度
+         * 偏大，主人在按钮行上移后要求底部留白同步收窄。
+         */
+        {
+            HWND hsave = NULL;
+            h = 0;
+            while ((h = FindWindowEx(hwnd, h, "Button", NULL)) != NULL) {
+                char text[64];
+                GetWindowText(h, text, sizeof(text));
+                if (strncmp(text, "保存", 6) == 0) {
+                    hsave = h;
+                    break;
+                }
+            }
+            if (hsave) {
+                RECT rb, rw;
+                GetWindowRect(hsave, &rb);
+                GetWindowRect(hwnd, &rw);
+                int cn_newh = (rb.bottom + 10) - rw.top;
+                if (rw.bottom - rw.top > cn_newh)
+                    SetWindowPos(hwnd, NULL, 0, 0, rw.right - rw.left,
+                                 cn_newh, SWP_NOMOVE | SWP_NOZORDER);
+            }
+        }
+
+        /*
          * cn: 「载入密钥」不再在这里定位。它现在由会话页的列布局摆到
          * 「凭据（密码）」框右侧，属于那一个 controlset 的成员；从这个
          * 函数里再动它会把两套定位打架，按钮会跑到老位置上。
@@ -1134,7 +1160,9 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
             r.left = 3;
             r.right = r.left + 95;
             r.top = 13;
-            r.bottom = r.top + 219;
+            /* cn: 高度 219→202，树底不与左下的「保存(V)」按钮重叠
+             * （按钮行已上移到组框底+10，树需同步让位）。 */
+            r.bottom = r.top + 202;
             MapDialogRect(hwnd, &r);
             treeview = CreateWindowEx(WS_EX_CLIENTEDGE, WC_TREEVIEW, "",
                                       WS_CHILD | WS_VISIBLE |
@@ -1274,6 +1302,21 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
         return 0;
 
       case WM_NOTIFY:
+        if (LOWORD(wParam) == IDCX_TREEVIEW &&
+            ((LPNMHDR) lParam)->code == TVN_ITEMEXPANDED) {
+            /*
+             * cn: 展开分类节点后把滚动条拉到最底，让新展开的子项
+             * 立即可见（主人反馈：展开后滚动条不自动跟随）。
+             */
+            LPNMTREEVIEW nmtv = (LPNMTREEVIEW)lParam;
+            if (nmtv->action & TVE_EXPAND) {
+                HTREEITEM last = TreeView_GetNextItem(
+                    nmtv->hdr.hwndFrom, NULL, TVGN_LASTVISIBLE);
+                if (last)
+                    TreeView_EnsureVisible(nmtv->hdr.hwndFrom, last);
+            }
+            return 0;
+        }
         if (LOWORD(wParam) == IDCX_TREEVIEW &&
             ((LPNMHDR) lParam)->code == TVN_SELCHANGED) {
             /*
