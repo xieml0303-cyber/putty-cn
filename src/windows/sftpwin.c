@@ -60,6 +60,7 @@
  */
 #define IDC_BTN_UP       1010
 #define IDC_BTN_UP_LOCAL 1017
+#define IDC_BTN_DESKTOP  1018
 #define IDC_BTN_TO_REMOTE 1012
 #define IDC_BTN_TO_LOCAL  1013
 #define IDC_PROGRESS     1020
@@ -94,6 +95,7 @@ typedef struct SftpWin {
     HWND progress, status;
     HWND btn_up, btn_to_remote, btn_to_local;
     HWND btn_up_local;
+    HWND btn_desktop_local;     /* cn: 本地栏「桌面」快捷键 */
     HWND btn_pause, btn_stop;   /* 暂停 / 续传（同一个按钮切换文字）、终止 */
 
     SftpXfer *sx;
@@ -3757,6 +3759,16 @@ static void cn_layout(SftpWin *sw)
     MoveWindow(sw->btn_up, left_x, margin, btnw, btnh, TRUE);
     MoveWindow(sw->btn_up_local, right_x + list_w - btnw, margin, btnw,
                btnh, TRUE);
+    /*
+     * cn: 「桌面」键在「↑ 返回」左侧，与返回键同行等高，右缘与返回
+     * 键左缘之间留 6px 间距。空间不够时（极窄窗口）让位给返回键。
+     */
+    if (list_w > btnw * 2 + cn_dpi(6))
+        MoveWindow(sw->btn_desktop_local,
+                   right_x + list_w - btnw * 2 - cn_dpi(6), margin,
+                   btnw, btnh, TRUE);
+    else
+        MoveWindow(sw->btn_desktop_local, right_x, margin, 0, 0, TRUE);
 
     /* 路径行：各栏上方对齐各自列表（远端在左，本地在右） */
     {
@@ -5510,6 +5522,13 @@ static void cn_init_controls(SftpWin *sw)
                                       WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                       0, 0, 0, 0, sw->hwnd,
                                       (HMENU)IDC_BTN_UP_LOCAL, inst, NULL);
+    /* cn: 本地栏「桌面」快捷键，放在「↑ 返回」左侧。 */
+    sw->btn_desktop_local = CreateWindowW(L"BUTTON", L"桌面",
+                                           WS_CHILD | WS_VISIBLE |
+                                           BS_PUSHBUTTON,
+                                           0, 0, 0, 0, sw->hwnd,
+                                           (HMENU)IDC_BTN_DESKTOP, inst,
+                                           NULL);
     /* 远端在左：上传方向从右往左，下载从左往右，箭头跟着方位走。 */
     sw->btn_to_remote = CreateWindowW(L"BUTTON", L"← 上传",
                                        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
@@ -5582,7 +5601,7 @@ static void cn_init_controls(SftpWin *sw)
     {
         HWND all[] = { sw->local_path, sw->remote_path, sw->local_list,
                        sw->remote_list, sw->btn_up,
-                       sw->btn_up_local,
+                       sw->btn_up_local, sw->btn_desktop_local,
                        sw->btn_to_remote, sw->btn_to_local,
                        sw->btn_pause, sw->btn_stop,
                        sw->status };
@@ -5670,6 +5689,29 @@ static LRESULT CALLBACK cn_wndproc(HWND hwnd, UINT msg, WPARAM wparam,
           case IDC_BTN_UP_LOCAL:
             cn_go_up(sw, false);
             break;
+          case IDC_BTN_DESKTOP: {
+            /*
+             * cn: 跳到当前用户的桌面目录。本地路径串是 CP_ACP 编码
+             * （sftp_local_list / sftp_local_fopen 都按 ACP 转宽字符），
+             * 这里转码必须同码页，中文用户名才不会乱码。
+             */
+            PWSTR wdesktop = NULL;
+            char *desktop;
+            if (FAILED(SHGetKnownFolderPath(&FOLDERID_Desktop, 0, NULL,
+                                            &wdesktop)))
+                break;
+            desktop = dup_wc_to_mb(CP_ACP, wdesktop, "?");
+            CoTaskMemFree(wdesktop);
+            if (sw->localdir && strcmp(sw->localdir, desktop) == 0) {
+                sfree(desktop);
+                break;                  /* 已在桌面，不重复刷新 */
+            }
+            sfree(sw->localdir);
+            sw->localdir = desktop;
+            cn_refresh_local(sw);
+            break;
+          }
+
           case IDC_BTN_TO_REMOTE:
             cn_do_transfer(sw, true);
             break;
@@ -6623,6 +6665,7 @@ void sftp_selftest_window(Conf *conf)
         SW_CHECK(sw->btn_to_local != NULL, "下载按钮");
         SW_CHECK(sw->btn_up != NULL, "远端返回按钮");
         SW_CHECK(sw->btn_up_local != NULL, "本地返回按钮");
+        SW_CHECK(sw->btn_desktop_local != NULL, "本地桌面按钮");
         SW_CHECK(sw->btn_pause != NULL, "暂停/续传按钮");
         SW_CHECK(sw->btn_stop != NULL, "终止按钮");
         SW_CHECK(sw->progress != NULL, "进度条");
@@ -6771,6 +6814,13 @@ void sftp_selftest_window(Conf *conf)
                          "两侧返回按钮等宽");
                 SW_CHECK(bl.right == lp.right,
                          "[本地]返回按钮右缘与路径框右缘齐平");
+                {
+                    RECT bd = sw_child_rect(sw->btn_desktop_local);
+                    SW_CHECK(bd.right + cn_dpi(6) == bl.left,
+                             "[本地]桌面键右缘与返回键左缘间距 6px");
+                    SW_CHECK(bd.bottom - bd.top == bl.bottom - bl.top,
+                             "[本地]桌面键与返回键等高");
+                }
                 SW_CHECK(bl.right == ll.right,
                          "[本地]返回按钮右缘与列表右缘齐平");
                 SW_CHECK(bu.left == rp.left,
