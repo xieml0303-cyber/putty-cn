@@ -28,9 +28,9 @@
 #include "help.h"
 
 #if defined _M_IX86 || defined _M_AMD64
-#define BUILDINFO_PLATFORM "x86 Windows"
+#define BUILDINFO_PLATFORM "x86 版 Windows"
 #elif defined _M_ARM || defined _M_ARM64
-#define BUILDINFO_PLATFORM "Arm Windows"
+#define BUILDINFO_PLATFORM "Arm 版 Windows"
 #else
 #define BUILDINFO_PLATFORM "Windows"
 #endif
@@ -93,7 +93,7 @@ struct FontSpec *fontspec_new(
                            * wchar_t strings with environment */
 
 #define PLATFORM_CLIPBOARDS(X)                      \
-    X(CLIP_SYSTEM, "system clipboard")              \
+    X(CLIP_SYSTEM, "系统剪贴板")              \
     /* end of list */
 
 /*

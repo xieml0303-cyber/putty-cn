@@ -415,7 +415,7 @@ static void authplugin_bad_packet(struct ssh2_userauth_state *s,
     strbuf *msg = strbuf_new();
     switch (type) {
       case PLUGIN_EOF:
-        put_dataz(msg, "Unexpected end of file from auth helper plugin");
+        put_dataz(msg, "读取认证辅助插件输出时文件意外结束");
         break;
       case PLUGIN_NOTYPE:
         put_dataz(msg, "Received malformed packet from auth helper plugin "
@@ -486,7 +486,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                               &s->publickey_comment, &error)) {
                 s->privatekey_available = (keytype == SSH_KEYTYPE_SSH2);
                 if (!s->privatekey_available)
-                    ppl_logevent("Key file contains public key only");
+                    ppl_logevent("密钥文件只含公钥");
                 s->privatekey_encrypted = ppk_encrypted_f(s->keyfile, NULL);
             } else {
                 ppl_logevent("Unable to load key (%s)", error);
@@ -598,7 +598,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 get_string(s->asrc);   /* blob */
                 get_string(s->asrc);   /* comment */
                 if (get_err(s->asrc)) {
-                    ppl_logevent("Pageant's response was truncated");
+                    ppl_logevent("Pageant 的应答被截断");
                     goto done_agent_query;
                 }
             }
@@ -620,7 +620,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     ptrlen_from_strbuf(s->agent_keys[i].blob));
             }
 
-            ppl_logevent("Pageant has %"SIZEu" SSH-2 keys", nkeys);
+            ppl_logevent("Pageant has %"SIZEu"个 SSH-2 密钥", nkeys);
 
             if (s->publickey_blob) {
                 /*
@@ -639,11 +639,11 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
 
                 if (i < nkeys) {
                     ppl_logevent("Pageant key #%"SIZEu" matches "
-                                 "configured key file", i);
+                                 "已配置的密钥文件", i);
                     s->agent_key_index = i;
                     s->agent_key_limit = i+1;
                 } else {
-                    ppl_logevent("Configured key file not in Pageant");
+                    ppl_logevent("已配置的密钥文件不在 Pageant 中");
                     s->agent_key_index = 0;
                     s->agent_key_limit = 0;
                 }
@@ -655,7 +655,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 s->agent_key_limit = nkeys;
             }
         } else {
-            ppl_logevent("Failed to get reply from Pageant");
+            ppl_logevent("未能从 Pageant 获得应答");
         }
       done_agent_query:;
     }
@@ -690,7 +690,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 return;
             }
             if (s->authplugin_version > PLUGIN_PROTOCOL_MAX_VERSION) {
-                ssh_sw_abort(s->ppl.ssh, "Auth helper plugin announced "
+                ssh_sw_abort(s->ppl.ssh, "认证辅助插件声明了"
                              "unsupported version number %"PRIu32,
                              s->authplugin_version);
                 return;
@@ -767,7 +767,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
             s->cur_prompt->utf8 = true;
             s->cur_prompt->to_server = true;
             s->cur_prompt->from_server = false;
-            s->cur_prompt->name = dupstr("SSH login name");
+            s->cur_prompt->name = dupstr("SSH 登录名");
             add_prompt(s->cur_prompt, dupstr("login as: "), true);
             s->spr = seat_get_userpass_input(
                 ppl_get_iseat(&s->ppl), s->cur_prompt);
@@ -783,7 +783,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                  */
                 free_prompts(s->cur_prompt);
                 s->cur_prompt = NULL;
-                ssh_spr_close(s->ppl.ssh, s->spr, "username prompt");
+                ssh_spr_close(s->ppl.ssh, s->spr, "用户名提示");
                 return;
             }
             sfree(s->locally_allocated_username); /* for change_username */
@@ -847,7 +847,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
             ssh2_userauth_print_banner(s);
 
             if (pktin && pktin->type == SSH2_MSG_USERAUTH_SUCCESS) {
-                ppl_logevent("Access granted");
+                ppl_logevent("已授予访问权限");
                 goto userauth_success;
             }
 
@@ -901,14 +901,14 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                                s->type == AUTH_TYPE_PUBLICKEY_OFFER_QUIET) {
                         if (s->type == AUTH_TYPE_PUBLICKEY_OFFER_LOUD)
                             ppl_printf("Server refused our key\r\n");
-                        ppl_logevent("Server refused our key");
+                        ppl_logevent("服务器拒绝了本客户端提供的密钥");
                     } else if (s->type == AUTH_TYPE_PUBLICKEY) {
                         /* This _shouldn't_ happen except by a
                          * protocol bug causing client and server to
                          * disagree on what is a correct signature. */
-                        ppl_printf("Server refused public-key signature"
+                        ppl_printf("服务器拒绝了公钥签名"
                                    " despite accepting key!\r\n");
-                        ppl_logevent("Server refused public-key signature"
+                        ppl_logevent("服务器拒绝了公钥签名"
                                      " despite accepting key!");
                     } else if (s->type==AUTH_TYPE_KEYBOARD_INTERACTIVE_QUIET) {
                         /* quiet, so no ppl_printf */
@@ -919,12 +919,12 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                         /* also, the code down in the GSSAPI block has
                          * already logged this in the Event Log */
                     } else if (s->type == AUTH_TYPE_KEYBOARD_INTERACTIVE) {
-                        ppl_logevent("Keyboard-interactive authentication "
+                        ppl_logevent("键盘交互认证"
                                      "failed");
                         ppl_printf("Access denied\r\n");
                     } else {
                         assert(s->type == AUTH_TYPE_PASSWORD);
-                        ppl_logevent("Password authentication failed");
+                        ppl_logevent("密码认证失败");
                         ppl_printf("Access denied\r\n");
 
                         if (s->change_username) {
@@ -935,7 +935,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     }
                 } else {
                     ppl_printf("Further authentication required\r\n");
-                    ppl_logevent("Further authentication required");
+                    ppl_logevent("还需进一步认证");
                 }
 
                 /*
@@ -1096,7 +1096,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                         get_uint32(src); /* skip length field */
                         if (get_byte(src) == SSH2_AGENT_SIGN_RESPONSE &&
                             (sigblob = get_string(src), !get_err(src))) {
-                            ppl_logevent("Sending Pageant's response");
+                            ppl_logevent("正在发送 Pageant 的应答");
                             ssh2_userauth_add_sigblob(
                                 s, s->pktout,
                                 ptrlen_from_strbuf(
@@ -1106,15 +1106,15 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                             s->type = AUTH_TYPE_PUBLICKEY;
                             s->is_trivial_auth = false;
                         } else {
-                            ppl_logevent("Pageant refused signing request");
+                            ppl_logevent("Pageant 拒绝了签名请求");
                             ppl_printf("Pageant failed to "
                                        "provide a signature\r\n");
                             s->suppress_wait_for_response_packet = true;
                             ssh_free_pktout(s->pktout);
                         }
                     } else {
-                        ppl_logevent("Pageant failed to respond to "
-                                     "signing request");
+                        ppl_logevent("Pageant 未能应答"
+                                     "签名请求");
                         ppl_printf("Pageant failed to "
                                    "respond to signing request\r\n");
                         s->suppress_wait_for_response_packet = true;
@@ -1162,7 +1162,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     s, s->pktout, ptrlen_from_asciz(s->publickey_algorithm),
                     ptrlen_from_strbuf(s->publickey_blob));
                 pq_push(s->ppl.out_pq, s->pktout);
-                ppl_logevent("Offered public key");
+                ppl_logevent("已提供公钥");
 
                 crMaybeWaitUntilV((pktin = ssh2_userauth_pop(s)) != NULL);
                 if (pktin->type != SSH2_MSG_USERAUTH_PK_OK) {
@@ -1171,7 +1171,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     s->type = AUTH_TYPE_PUBLICKEY_OFFER_LOUD;
                     continue; /* process this new message */
                 }
-                ppl_logevent("Offer of public key accepted");
+                ppl_logevent("公钥提议已被接受");
 
                 /*
                  * Actually attempt a serious authentication using
@@ -1191,7 +1191,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                         s->cur_prompt = ssh_ppl_new_prompts(&s->ppl);
                         s->cur_prompt->to_server = false;
                         s->cur_prompt->from_server = false;
-                        s->cur_prompt->name = dupstr("SSH key passphrase");
+                        s->cur_prompt->name = dupstr("SSH 密钥口令");
                         add_prompt(s->cur_prompt,
                                    dupprintf("Passphrase for key \"%s\": ",
                                              s->publickey_comment),
@@ -1208,10 +1208,10 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                             free_prompts(s->cur_prompt);
                             s->cur_prompt = NULL;
                             ssh_bpp_queue_disconnect(
-                                s->ppl.bpp, "Unable to authenticate",
+                                s->ppl.bpp, "无法完成认证",
                                 SSH2_DISCONNECT_AUTH_CANCELLED_BY_USER);
                             ssh_spr_close(s->ppl.ssh, s->spr,
-                                          "passphrase prompt");
+                                          "口令提示");
                             return;
                         }
                         passphrase =
@@ -1307,7 +1307,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     strbuf_free(sigblob);
 
                     pq_push(s->ppl.out_pq, s->pktout);
-                    ppl_logevent("Sent public key signature");
+                    ppl_logevent("已发送公钥签名");
                     s->type = AUTH_TYPE_PUBLICKEY;
                     ssh_key_free(key->key);
                     sfree(key->comment);
@@ -1336,7 +1336,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 put_stringz(s->pktout, s->username);
                 put_stringz(s->pktout, s->successor_layer->vt->name);
                 put_stringz(s->pktout, "gssapi-with-mic");
-                ppl_logevent("Attempting GSSAPI authentication");
+                ppl_logevent("正在尝试 GSSAPI 认证");
 
                 /* add mechanism info */
                 s->shgss->lib->indicate_mech(s->shgss->lib, &s->gss_buf);
@@ -1355,7 +1355,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 pq_push(s->ppl.out_pq, s->pktout);
                 crMaybeWaitUntilV((pktin = ssh2_userauth_pop(s)) != NULL);
                 if (pktin->type != SSH2_MSG_USERAUTH_GSSAPI_RESPONSE) {
-                    ppl_logevent("GSSAPI authentication request refused");
+                    ppl_logevent("GSSAPI 认证请求被拒绝");
                     pq_push_front(s->ppl.in_pq, pktin);
                     continue;
                 }
@@ -1370,8 +1370,8 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     ((char *)s->gss_rcvtok.value)[1] != s->gss_buf.length ||
                     memcmp((char *)s->gss_rcvtok.value + 2,
                            s->gss_buf.value,s->gss_buf.length) ) {
-                    ppl_logevent("GSSAPI authentication - wrong response "
-                                 "from server");
+                    ppl_logevent("GSSAPI 认证：响应有误"
+                                 "（来自服务器）");
                     continue;
                 }
 
@@ -1381,10 +1381,10 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                         s->shgss->lib, s->fullhostname, &s->shgss->srv_name);
                     if (s->gss_stat != SSH_GSS_OK) {
                         if (s->gss_stat == SSH_GSS_BAD_HOST_NAME)
-                            ppl_logevent("GSSAPI import name failed -"
-                                         " Bad service name");
+                            ppl_logevent("GSSAPI 导入名称失败："
+                                         "服务名无效");
                         else
-                            ppl_logevent("GSSAPI import name failed");
+                            ppl_logevent("GSSAPI 导入名称失败");
                         continue;
                     }
                 }
@@ -1438,7 +1438,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                         pq_push_front(s->ppl.in_pq, pktin);
                         break;
                     }
-                    ppl_logevent("GSSAPI authentication initialised");
+                    ppl_logevent("GSSAPI 认证已初始化");
 
                     /*
                      * Client and server now exchange tokens until GSSAPI
@@ -1474,7 +1474,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                                 (pktin = ssh2_userauth_pop(s)) != NULL);
                             if (pktin->type != SSH2_MSG_USERAUTH_FAILURE) {
                                 ssh_proto_error(
-                                    s->ppl.ssh, "Received unexpected packet "
+                                    s->ppl.ssh, "收到意料之外的数据包"
                                     "after SSH_MSG_USERAUTH_GSSAPI_ERRTOK "
                                     "(expected SSH_MSG_USERAUTH_FAILURE): "
                                     "type %d (%s)", pktin->type,
@@ -1486,14 +1486,14 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                         }
 
                         if (pktin->type == SSH2_MSG_USERAUTH_FAILURE) {
-                            ppl_logevent("GSSAPI authentication failed");
+                            ppl_logevent("GSSAPI 认证失败");
                             s->gss_stat = SSH_GSS_FAILURE;
                             pq_push_front(s->ppl.in_pq, pktin);
                             break;
                         } else if (pktin->type !=
                                    SSH2_MSG_USERAUTH_GSSAPI_TOKEN) {
-                            ppl_logevent("GSSAPI authentication -"
-                                         " bad server response");
+                            ppl_logevent("GSSAPI 认证："
+                                         "服务器响应有误");
                             s->gss_stat = SSH_GSS_FAILURE;
                             break;
                         }
@@ -1507,7 +1507,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     s->shgss->lib->release_cred(s->shgss->lib, &s->shgss->ctx);
                     continue;
                 }
-                ppl_logevent("GSSAPI authentication loop finished OK");
+                ppl_logevent("GSSAPI 认证流程正常结束");
 
                 /* Now send the MIC */
 
@@ -1537,7 +1537,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 put_stringz(s->pktout, "");     /* submethods */
                 pq_push(s->ppl.out_pq, s->pktout);
 
-                ppl_logevent("Attempting keyboard-interactive authentication");
+                ppl_logevent("正在尝试键盘交互认证");
 
                 if (s->authplugin) {
                     strbuf *amsg = authplugin_newmsg(PLUGIN_PROTOCOL);
@@ -1566,8 +1566,8 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                              * that message on to the user. (It might
                              * say, for example, what went wrong when
                              * it tried to open its config file.) */
-                            ppl_printf("Authentication plugin failed to set "
-                                       "up keyboard-interactive "
+                            ppl_printf("认证插件未能建立"
+                                       "键盘交互认证"
                                        "authentication:\r\n");
                             seat_set_trust_status(s->ppl.seat, false);
                             ppl_printf("%.*s\r\n", PTRLEN_PRINTF(message));
@@ -1576,16 +1576,16 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                                          "help with keyboard-interactive: "
                                          "%.*s", PTRLEN_PRINTF(message));
                         } else {
-                            ppl_logevent("Authentication plugin declined to "
-                                         "help with keyboard-interactive");
+                            ppl_logevent("认证插件拒绝"
+                                         "协助键盘交互认证");
                         }
                         s->authplugin_ki_active = false;
                         break;
                       }
                       case PLUGIN_PROTOCOL_ACCEPT:
                         s->authplugin_ki_active = true;
-                        ppl_logevent("Authentication plugin agreed to help "
-                                     "with keyboard-interactive");
+                        ppl_logevent("认证插件同意协助"
+                                     "键盘交互认证");
                         break;
                       default:
                         authplugin_bad_packet(
@@ -1641,10 +1641,10 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                             free_prompts(s->cur_prompt);
                             s->cur_prompt = NULL;
                             ssh_bpp_queue_disconnect(
-                                s->ppl.bpp, "Unable to authenticate",
+                                s->ppl.bpp, "无法完成认证",
                                 SSH2_DISCONNECT_AUTH_CANCELLED_BY_USER);
                             ssh_spr_close(s->ppl.ssh, s->spr, "keyboard-"
-                                          "interactive authentication prompt");
+                                          "交互式认证提示");
                             return;
                         }
 
@@ -1699,11 +1699,11 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                                 free_prompts(s->cur_prompt);
                                 s->cur_prompt = NULL;
                                 ssh_bpp_queue_disconnect(
-                                    s->ppl.bpp, "Unable to authenticate",
+                                    s->ppl.bpp, "无法完成认证",
                                     SSH2_DISCONNECT_AUTH_CANCELLED_BY_USER);
                                 ssh_spr_close(
                                     s->ppl.ssh, s->spr, "keyboard-"
-                                    "interactive authentication prompt");
+                                    "交互式认证提示");
                                 return;
                             }
 
@@ -1747,8 +1747,8 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     seat_antispoof_msg(
                         ppl_get_iseat(&s->ppl),
                         (s->authplugin_ki_active ?
-                         "End of keyboard-interactive prompts from plugin" :
-                         "End of keyboard-interactive prompts from server"));
+                         "来自插件的键盘交互提示已结束" :
+                         "来自服务器的键盘交互提示已结束"));
                 }
 
                 /*
@@ -1804,7 +1804,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 s->cur_prompt->utf8 = true;
                 s->cur_prompt->to_server = true;
                 s->cur_prompt->from_server = false;
-                s->cur_prompt->name = dupstr("SSH password");
+                s->cur_prompt->name = dupstr("SSH 密码");
                 add_prompt(s->cur_prompt, dupprintf("%s@%s's password: ",
                                                     s->username, s->hostname),
                            false);
@@ -1823,9 +1823,9 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     free_prompts(s->cur_prompt);
                     s->cur_prompt = NULL;
                     ssh_bpp_queue_disconnect(
-                        s->ppl.bpp, "Unable to authenticate",
+                        s->ppl.bpp, "无法完成认证",
                         SSH2_DISCONNECT_AUTH_CANCELLED_BY_USER);
-                    ssh_spr_close(s->ppl.ssh, s->spr, "password prompt");
+                    ssh_spr_close(s->ppl.ssh, s->spr, "密码提示");
                     return;
                 }
                 /*
@@ -1856,7 +1856,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 put_stringz(s->pktout, s->password);
                 s->pktout->minlen = 256;
                 pq_push(s->ppl.out_pq, s->pktout);
-                ppl_logevent("Sent password");
+                ppl_logevent("密码已发送");
                 s->type = AUTH_TYPE_PASSWORD;
 
                 /*
@@ -1880,9 +1880,9 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     {
                         const char *msg;
                         if (changereq_first_time)
-                            msg = "Server requested password change";
+                            msg = "服务器要求修改密码";
                         else
-                            msg = "Server rejected new password";
+                            msg = "服务器拒绝了新密码";
                         ppl_logevent("%s", msg);
                         ppl_printf("%s\r\n", msg);
                     }
@@ -1893,7 +1893,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     s->cur_prompt->utf8 = true;
                     s->cur_prompt->to_server = true;
                     s->cur_prompt->from_server = false;
-                    s->cur_prompt->name = dupstr("New SSH password");
+                    s->cur_prompt->name = dupstr("新 SSH 密码");
                     s->cur_prompt->instruction = mkstr(prompt);
                     s->cur_prompt->instr_reqd = true;
                     /*
@@ -1938,10 +1938,10 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                             smemclr(s->password, strlen(s->password));
                             sfree(s->password);
                             ssh_bpp_queue_disconnect(
-                                s->ppl.bpp, "Unable to authenticate",
+                                s->ppl.bpp, "无法完成认证",
                                 SSH2_DISCONNECT_AUTH_CANCELLED_BY_USER);
                             ssh_spr_close(s->ppl.ssh, s->spr,
-                                          "password-change prompt");
+                                          "修改密码提示");
                             return;
                         }
 
@@ -1989,7 +1989,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     s->cur_prompt = NULL;
                     s->pktout->minlen = 256;
                     pq_push(s->ppl.out_pq, s->pktout);
-                    ppl_logevent("Sent new password");
+                    ppl_logevent("新密码已发送");
 
                     /*
                      * Now see what the server has to say about it.
@@ -2026,9 +2026,9 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
             } else {
                 ssh_bpp_queue_disconnect(
                     s->ppl.bpp,
-                    "No supported authentication methods available",
+                    "没有可用的受支持认证方式",
                     SSH2_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE);
-                ssh_sw_abort(s->ppl.ssh, "No supported authentication methods "
+                ssh_sw_abort(s->ppl.ssh, "没有受支持的认证方式"
                              "available (server sent: %s)",
                              s->last_methods_string->s);
                 return;
@@ -2096,7 +2096,7 @@ static void ssh2_userauth_print_banner(struct ssh2_userauth_state *s)
         if (s->banner_scc) {
             seat_set_trust_status(s->ppl.seat, true);
             seat_antispoof_msg(ppl_get_iseat(&s->ppl),
-                               "End of banner message from server");
+                               "服务器公告消息到此结束");
         }
     }
 }
@@ -2189,9 +2189,9 @@ static bool ssh2_userauth_ki_setup_prompts(
     } else {
         if (plugin)
             put_datapl(sb, PTRLEN_LITERAL(
-                           "Communication with authentication plugin"));
+                           "与认证插件的通信"));
         else
-            put_datapl(sb, PTRLEN_LITERAL("SSH server authentication"));
+            put_datapl(sb, PTRLEN_LITERAL("SSH 服务器认证"));
         s->cur_prompt->name_reqd = false;
     }
     s->cur_prompt->name = strbuf_to_str(sb);
@@ -2325,7 +2325,7 @@ static void ssh2_userauth_add_alg_and_publickey(
 
         certkey = ssh_key_new_pub(certalg, detached_cert_pl);
         if (!certkey) {
-            put_fmt(fail_reason, "certificate key file is invalid");
+            put_fmt(fail_reason, "证书密钥文件无效");
             goto no_match;
         }
 
@@ -2343,13 +2343,13 @@ static void ssh2_userauth_add_alg_and_publickey(
          * In that situation, the detached cert should still override.
          */
         if (!pkalg) {
-            put_fmt(fail_reason, "unable to identify algorithm of base key");
+            put_fmt(fail_reason, "无法识别基础密钥的算法");
             goto no_match;
         }
 
         pk = ssh_key_new_pub(pkalg, pkblob);
         if (!pk) {
-            put_fmt(fail_reason, "base public key is invalid");
+            put_fmt(fail_reason, "基础公钥无效");
             goto no_match;
         }
 
@@ -2360,7 +2360,7 @@ static void ssh2_userauth_add_alg_and_publickey(
             goto match;                /* yes, a match on 2nd attempt! */
 
         /* Give up; we've tried to match these keys up and failed. */
-        put_fmt(fail_reason, "base public key does not match certificate");
+        put_fmt(fail_reason, "基础公钥与证书不匹配");
         goto no_match;
 
       match:

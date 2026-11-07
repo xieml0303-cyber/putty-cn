@@ -288,7 +288,7 @@ static void sesschan_send_eof(Channel *chan)
 
 static char *sesschan_log_close_msg(Channel *chan)
 {
-    return dupstr("Session channel closed");
+    return dupstr("会话通道已关闭");
 }
 
 static void sesschan_set_input_wanted(Channel *chan, bool wanted)
@@ -346,7 +346,7 @@ bool sesschan_run_command(Channel *chan, ptrlen command)
     if ((sess->scpsrv = scp_recognise_exec(sess->c, sess->sftpserver_vt,
                                            command)) != NULL) {
         sess->chan.vt = &scp_channelvt;
-        logevent(sess->parent_logctx, "Starting built-in SCP server");
+        logevent(sess->parent_logctx, "正在启动内置 SCP 服务器");
         return true;
     }
 
@@ -364,7 +364,7 @@ bool sesschan_run_subsystem(Channel *chan, ptrlen subsys)
     if (ptrlen_eq_string(subsys, "sftp") && sess->sftpserver_vt) {
         sess->sftpsrv = sftpsrv_new(sess->sftpserver_vt);
         sess->chan.vt = &sftp_channelvt;
-        logevent(sess->parent_logctx, "Starting built-in SFTP subsystem");
+        logevent(sess->parent_logctx, "正在启动内置 SFTP 子系统");
         return true;
     }
 

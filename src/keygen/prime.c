@@ -606,7 +606,7 @@ static mp_int *provableprime_generate_inner(
             break;
           }
           default:
-            unreachable("bad subprime policy");
+            unreachable("子素数策略异常（内部错误）");
         }
 
         for (size_t i = 0; i < nsizes; i++) {

@@ -3075,7 +3075,7 @@ int dlg_radiobutton_get(dlgcontrol *ctrl, dlgparam *dp)
     for (i = 0; i < c->ctrl->radio.nbuttons; i++)
         if (IsDlgButtonChecked(dp->hwnd, c->base_id + 1 + i))
             return i;
-    unreachable("no radio button was checked");
+    unreachable("未选中任何单选按钮（内部错误）");
 }
 
 void dlg_checkbox_set(dlgcontrol *ctrl, dlgparam *dp, bool checked)
@@ -3669,7 +3669,7 @@ void dlg_fontsel_set(dlgcontrol *ctrl, dlgparam *dp, FontSpec *fs)
      * cn: re-sync the fixed-pitch restriction from the stored setting.
      * This is now a read, not an inference from the chosen font: the
      * checkbox is authoritative. Inferring here would silently undo an
-     * explicit "restrict to fixed-pitch" choice the moment the user
+     * explicit "仅限等宽字体" choice the moment the user
      * picked a variable-pitch face.
      */
     dlg_auto_set_fixed_pitch_flag(dp);

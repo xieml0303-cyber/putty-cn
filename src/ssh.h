@@ -31,7 +31,7 @@ struct ssh_channel;
  *  - OUR_V2_BIGWIN is the window size we advertise for the only
  *    channel in a simple connection.  It must be <= INT_MAX.
  *
- *  - OUR_V2_MAXPKT is the official "maximum packet size" we send
+ *  - OUR_V2_MAXPKT is the official "最大包长限制" we send
  *    to the remote side. This actually has nothing to do with the
  *    size of the _packet_, but is instead a limit on the amount
  *    of data we're willing to receive in a single SSH2 channel

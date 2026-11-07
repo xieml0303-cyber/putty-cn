@@ -4698,7 +4698,7 @@ static int wintw_char_width(TermWin *tw, int uc)
         if (GetCharWidth32W(wgs->wintw_hdc, uc, uc, &ibuf) == 1)
             /* Okay that one worked */ ;
         else if (GetCharWidthW(wgs->wintw_hdc, uc, uc, &ibuf) == 1)
-            /* This should work on 9x too, but it's "less accurate" */ ;
+            /* This should work on 9x too, but it's "精度较低" */ ;
         else
             return 0;
     }
@@ -5304,7 +5304,7 @@ static int TranslateKey(WinGuiSeat *wgs, UINT message, WPARAM wParam,
              * 'LPWORD lpChar'.
              * The experience of a French user indicates that on
              * Win98, WORD[] should be passed in, but on Win2K, it should
-             * be BYTE[]. German WinXP and my Win2K with "US International"
+             * be BYTE[]. German WinXP and my Win2K with "美式国际键盘布局"
              * driver corroborate this.
              * Experimentally I've conditionalised the behaviour on the
              * Win9x/NT split, but I suspect it's worse than that.

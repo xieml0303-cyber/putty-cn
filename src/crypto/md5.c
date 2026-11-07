@@ -94,7 +94,7 @@ static inline void md5_block_pad(md5_block *blk, BinarySink *bs)
     put_data(bs, buf, 8);
     smemclr(buf, 8);
 
-    assert(blk->used == 0 && "Should have exactly hit a block boundary");
+    assert(blk->used == 0 && "本应恰好落在分组边界（内部错误）");
 }
 
 static inline uint32_t rol(uint32_t x, unsigned y)

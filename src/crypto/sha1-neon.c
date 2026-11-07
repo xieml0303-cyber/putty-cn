@@ -187,4 +187,4 @@ static void sha1_neon_digest(ssh_hash *hash, uint8_t *digest)
     PUT_32BIT_MSB_FIRST(digest + 16, s->core.e);
 }
 
-SHA1_VTABLE(neon, "NEON accelerated");
+SHA1_VTABLE(neon, "NEON 加速");

@@ -1101,12 +1101,12 @@ static char *answer_filemapping_message(const char *mapname)
         DWORD retd;
 
         if ((expectedsid = get_user_sid()) == NULL) {
-            err = dupstr("unable to get user SID");
+            err = dupstr("无法获取用户 SID");
             goto cleanup;
         }
 
         if ((expectedsid_bc = get_default_sid()) == NULL) {
-            err = dupstr("unable to get default SID");
+            err = dupstr("无法获取默认 SID");
             goto cleanup;
         }
 
@@ -1135,7 +1135,7 @@ static char *answer_filemapping_message(const char *mapname)
 
         if (!EqualSid(mapsid, expectedsid) &&
             !EqualSid(mapsid, expectedsid_bc)) {
-            err = dupstr("wrong owning SID of file mapping");
+            err = dupstr("文件映射的所有者 SID 不正确");
             goto cleanup;
         }
     } else {
@@ -1165,8 +1165,8 @@ static char *answer_filemapping_message(const char *mapname)
         }
         if (mbiSize < (offsetof(MEMORY_BASIC_INFORMATION, RegionSize) +
                        sizeof(mbi.RegionSize))) {
-            err = dupstr("VirtualQuery returned too little data to get "
-                         "region size");
+            err = dupstr("VirtualQuery 返回的数据不足，无法获取"
+                         "区域大小");
             goto cleanup;
         }
 
@@ -1176,7 +1176,7 @@ static char *answer_filemapping_message(const char *mapname)
     debug("region size = %"SIZEu"\n", mapsize);
 #endif
     if (mapsize < 5) {
-        err = dupstr("mapping smaller than smallest possible request");
+        err = dupstr("文件映射小于最小请求尺寸");
         goto cleanup;
     }
 

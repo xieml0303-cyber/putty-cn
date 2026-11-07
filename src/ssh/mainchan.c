@@ -99,7 +99,7 @@ mainchan *mainchan_new(
         const char *host = conf_get_str(mc->conf, CONF_ssh_nc_host);
         int port = conf_get_int(mc->conf, CONF_ssh_nc_port);
 
-        mc->sc = ssh_lportfwd_open(cl, host, port, "main channel",
+        mc->sc = ssh_lportfwd_open(cl, host, port, "主通道",
                                    NULL, &mc->chan);
         mc->type = MAINCHAN_DIRECT_TCPIP;
     } else {
@@ -128,7 +128,7 @@ static void mainchan_open_confirmation(Channel *chan)
     PacketProtocolLayer *ppl = mc->ppl; /* for ppl_logevent */
 
     seat_update_specials_menu(mc->ppl->seat);
-    ppl_logevent("Opened main channel");
+    ppl_logevent("已打开主通道");
     seat_notify_session_started(mc->ppl->seat);
 
     if (mc->is_simple)
@@ -228,10 +228,10 @@ static void mainchan_request_response(Channel *chan, bool success)
         mc->req_x11 = false;
 
         if (success) {
-            ppl_logevent("X11 forwarding enabled");
+            ppl_logevent("已启用 X11 转发");
             ssh_enable_x_fwd(mc->cl);
         } else {
-            ppl_logevent("X11 forwarding refused");
+            ppl_logevent("X11 转发被拒绝");
         }
         return;
     }
@@ -240,9 +240,9 @@ static void mainchan_request_response(Channel *chan, bool success)
         mc->req_agent = false;
 
         if (success) {
-            ppl_logevent("Agent forwarding enabled");
+            ppl_logevent("已启用代理转发");
         } else {
-            ppl_logevent("Agent forwarding refused");
+            ppl_logevent("代理转发被拒绝");
         }
         return;
     }
@@ -251,10 +251,10 @@ static void mainchan_request_response(Channel *chan, bool success)
         mc->req_pty = false;
 
         if (success) {
-            ppl_logevent("Allocated pty");
+            ppl_logevent("已分配伪终端（PTY）");
             mc->got_pty = true;
         } else {
-            ppl_logevent("Server refused to allocate pty");
+            ppl_logevent("服务器拒绝分配伪终端（PTY）");
             ppl_printf("Server refused to allocate pty\r\n");
             ssh_set_ldisc_option(mc->cl, LD_ECHO, true);
             ssh_set_ldisc_option(mc->cl, LD_EDIT, true);
@@ -273,9 +273,9 @@ static void mainchan_request_response(Channel *chan, bool success)
 
         if (mc->n_env_replies == mc->n_req_env) {
             if (mc->n_env_fails == 0) {
-                ppl_logevent("All environment variables successfully set");
+                ppl_logevent("所有环境变量均已成功设置");
             } else if (mc->n_env_fails == mc->n_req_env) {
-                ppl_logevent("All environment variables refused");
+                ppl_logevent("所有环境变量均被拒绝");
                 ppl_printf("Server refused to set environment "
                            "variables\r\n");
             } else {
@@ -370,7 +370,7 @@ static void mainchan_send_eof(Channel *chan)
          * isn't a particularly meaningful concept.
          */
         sshfwd_write_eof(mc->sc);
-        ppl_logevent("Sent EOF message");
+        ppl_logevent("已发送 EOF 消息");
         mc->eof_sent = true;
         ssh_set_wants_user_input(mc->cl, false); /* stop reading from stdin */
     }
@@ -392,7 +392,7 @@ static void mainchan_set_input_wanted(Channel *chan, bool wanted)
 
 static char *mainchan_log_close_msg(Channel *chan)
 {
-    return dupstr("Main session channel closed");
+    return dupstr("主会话通道已关闭");
 }
 
 static bool mainchan_rcvd_exit_status(Channel *chan, int status)

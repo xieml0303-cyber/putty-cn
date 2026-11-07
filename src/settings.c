@@ -591,7 +591,7 @@ void save_open_settings(settings_w *sesskey, Conf *conf)
                 if (info->storage_enum) {
                     bool success = conf_enum_map_to_storage(
                         info->storage_enum, ival, &ival);
-                    assert(success && "unmapped integer value");
+                    assert(success && "未映射的整数值");
                 }
                 write_setting_i(sesskey, info->save_keyword, ival);
                 break;
@@ -757,7 +757,7 @@ void load_open_settings(settings_r *sesskey, Conf *conf)
                     bool success = conf_enum_map_to_storage(
                         info->storage_enum, info->default_value.ival,
                         &defstorage);
-                    assert(success && "unmapped default");
+                    assert(success && "未映射的默认值");
 
                     /* Now retrieve the stored value */
                     int storageval = gppi_raw(sesskey, info->save_keyword,
@@ -950,8 +950,8 @@ void load_open_settings(settings_r *sesskey, Conf *conf)
              * Fall back to older NoRemoteQTitle format
              */
             storageval = gppi_raw(sesskey, "NoRemoteQTitle", 1);
-            /* We deliberately interpret the old setting of "no response" as
-             * "empty string". This changes the behaviour, but hopefully for
+            /* We deliberately interpret the old setting of "无响应" as
+             * "空字符串". This changes the behaviour, but hopefully for
              * the better; the user can always recover the old behaviour. */
             confval = storageval ? TITLE_EMPTY : TITLE_REAL;
         }
@@ -1062,7 +1062,7 @@ static int sessioncmp(const void *av, const void *bv)
     const char *b = *(const char *const *) bv;
 
     /*
-     * Alphabetical order, except that "Default Settings" is a
+     * Alphabetical order, except that "默认设置" is a
      * special case and comes first.
      */
     if (!strcmp(a, "默认设置"))
@@ -1108,7 +1108,7 @@ void get_sesslist(struct sesslist *list, bool allocate)
          */
 
         p = list->buffer;
-        list->nsessions = 1;           /* "Default Settings" counts as one */
+        list->nsessions = 1;           /* "默认设置" counts as one */
         while (*p) {
             if (strcmp(p, "默认设置"))
                 list->nsessions++;

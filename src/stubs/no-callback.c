@@ -10,7 +10,7 @@
 
 void queue_idempotent_callback(struct IdempotentCallback *ic)
 {
-    unreachable("callbacks are not supported in this application");
+    unreachable("此程序不支持回调");
 }
 
 void delete_callbacks_for_context(void *ctx)
@@ -19,7 +19,7 @@ void delete_callbacks_for_context(void *ctx)
 
 void queue_toplevel_callback(toplevel_callback_fn_t fn, void *ctx)
 {
-    unreachable("callbacks are not supported in this application");
+    unreachable("此程序不支持回调");
 }
 
 bool run_toplevel_callbacks(void)

@@ -339,4 +339,4 @@ static void sha256_ni_digest(ssh_hash *hash, uint8_t *digest)
     _mm_storeu_si128(output+1, hgfe);
 }
 
-SHA256_VTABLE(ni, "SHA-NI accelerated");
+SHA256_VTABLE(ni, "SHA-NI 加速");

@@ -1,6 +1,6 @@
 /*
  * Wrapper for GetCaretBlinkTime() which turns it into a signed integer,
- * with 0 meaning "no blinking".
+ * with 0 meaning "不闪烁".
  */
 
 #include "putty.h"

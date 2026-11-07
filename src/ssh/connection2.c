@@ -95,10 +95,10 @@ static char *ssh2_channel_open_failure_error_text(PktIn *pktin)
 {
     static const char *const reasons[] = {
         NULL,
-        "Administratively prohibited",
-        "Connect failed",
-        "Unknown channel type",
-        "Resource shortage",
+        "管理策略禁止",
+        "连接失败",
+        "未知通道类型",
+        "资源不足",
     };
     unsigned reason_code;
     const char *reason_code_string;
@@ -395,7 +395,7 @@ static bool ssh2_connection_filter_queue(struct ssh2_connection_state *s)
                 chanopen_result.u.failure.reason_code =
                     SSH2_OPEN_ADMINISTRATIVELY_PROHIBITED;
                 chanopen_result.u.failure.wire_message = dupstr(
-                    "maximum packet size of 0 not permitted");
+                    "不允许最大包长为 0");
             } else {
                 chanopen_result = ssh2_connection_parse_channel_open(
                     s, type, pktin, &c->sc);
@@ -744,7 +744,7 @@ static bool ssh2_connection_filter_queue(struct ssh2_connection_state *s)
                     BinarySource_BARE_INIT_PL(bs_modes, encoded_modes);
                     modes = read_ttymodes_from_packet(bs_modes, 2);
                     if (get_err(bs_modes) || get_avail(bs_modes) > 0) {
-                        ppl_logevent("Unable to decode terminal mode string");
+                        ppl_logevent("无法解码终端模式字符串");
                         reply_success = false;
                     } else {
                         reply_success = chan_allocate_pty(
@@ -788,7 +788,7 @@ static bool ssh2_connection_filter_queue(struct ssh2_connection_state *s)
                     ssh_proto_error(
                         s->ppl.ssh,
                         "Received %s for channel %d with no outstanding "
-                        "channel request",
+                        "通道请求",
                         ssh2_pkt_type(s->ppl.bpp->pls->kctx,
                                       s->ppl.bpp->pls->actx, pktin->type),
                         c->localid);
@@ -1027,7 +1027,7 @@ static void ssh2_connection_process_queue(PacketProtocolLayer *ppl)
         s->antispoof_prompt = ssh_ppl_new_prompts(&s->ppl);
         s->antispoof_prompt->to_server = false;
         s->antispoof_prompt->from_server = false;
-        s->antispoof_prompt->name = dupstr("Authentication successful");
+        s->antispoof_prompt->name = dupstr("认证成功");
         add_prompt(
             s->antispoof_prompt,
             dupstr("Access granted. Press Return to begin session. "), false);
@@ -1304,7 +1304,7 @@ static void ssh2_check_termination(struct ssh2_connection_state *s)
          * and indeed OpenSSH feels this is more polite than sending a
          * DISCONNECT. So now we don't.
          */
-        ssh_user_close(s->ppl.ssh, "All channels closed");
+        ssh_user_close(s->ppl.ssh, "所有通道已关闭");
         return;
     }
 }

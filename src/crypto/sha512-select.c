@@ -48,7 +48,7 @@ const ssh_hashalg ssh_sha512 = {
     .new = sha512_select,
     .hlen = 64,
     .blocklen = 128,
-    HASHALG_NAMES_ANNOTATED("SHA-512", "dummy selector vtable"),
+    HASHALG_NAMES_ANNOTATED("SHA-512", "占位选择器虚函数表"),
     .extra = real_sha512_algs,
 };
 
@@ -56,6 +56,6 @@ const ssh_hashalg ssh_sha384 = {
     .new = sha512_select,
     .hlen = 48,
     .blocklen = 128,
-    HASHALG_NAMES_ANNOTATED("SHA-384", "dummy selector vtable"),
+    HASHALG_NAMES_ANNOTATED("SHA-384", "占位选择器虚函数表"),
     .extra = real_sha384_algs,
 };

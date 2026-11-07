@@ -642,8 +642,8 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
         /* We delay evaluating this until after the protocol is decided,
          * so that we can warn if it's of no use with the selected protocol */
         if (conf_get_int(conf, CONF_protocol) != PROT_SSH)
-            cmdline_error("the -pw option can only be used with the "
-                          "SSH protocol");
+            cmdline_error("-pw 选项只能用于"
+                          "SSH 协议");
         else {
             if (cmdline_password) {
                 smemclr(cmdline_password, strlen(cmdline_password));
@@ -663,8 +663,8 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
         /* We delay evaluating this until after the protocol is decided,
          * so that we can warn if it's of no use with the selected protocol */
         if (conf_get_int(conf, CONF_protocol) != PROT_SSH)
-            cmdline_error("the -pwfile option can only be used with the "
-                          "SSH protocol");
+            cmdline_error("-pwfile 选项只能用于"
+                          "SSH 协议");
         else {
             Filename *fn = cmdline_arg_to_filename(nextarg);
             FILE *fp = f_open(fn, "r", false);
@@ -823,8 +823,8 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
         UNAVAILABLE_IN(TOOLTYPE_FILETRANSFER | TOOLTYPE_NONNETWORK);
         SAVEABLE(1);
         if (conf_get_int(conf, CONF_protocol) != PROT_SERIAL)
-            cmdline_error("the -sercfg option can only be used with the "
-                          "serial protocol");
+            cmdline_error("-sercfg 选项只能用于"
+                          "串口协议");
         /* Value[0] contains one or more , separated values, like 19200,8,n,1,X */
         nextitem = value;
         while (nextitem[0] != '\0') {

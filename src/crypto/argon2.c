@@ -523,18 +523,18 @@ char *argon2_params_bad(uint32_t mem, uint32_t passes,
     if (Slen > 0xFFFFFFFF)
         return dupprintf("salt length %zu exceeds 2^32-1", Slen);
     if (parallel < 1)
-        return dupprintf("parallelism level must be at least 1");
+        return dupprintf("并行度必须至少为 1");
     if (parallel > 0xFFFFFF)
         return dupprintf("parallelism level %"PRIu32" exceeds 2^24-1",
                          parallel);
     if (taglen < 4)       /* upper bound 2^32-1 enforced by data type */
         return dupprintf("tag length %"PRIu32" exceeds 2^32-1", taglen);
     if (mem < 8*parallel) /* upper bound 2^32-1 enforced by data type */
-        return dupprintf("memory requirement %"PRIu32" must be at least "
+        return dupprintf("memory requirement %"PRIu32"必须至少为"
                          "%"PRIu32" for parallelism level %"PRIu32,
                          mem, 8*parallel, parallel);
     if (passes < 1)
-        return dupprintf("number of passes must be at least 1");
+        return dupprintf("迭代轮数必须至少为 1");
     if (Klen > 0xFFFFFFFF)
         return dupprintf("secret length %zu exceeds 2^32-1", Klen);
     if (Xlen > 0xFFFFFFFF)

@@ -38,9 +38,9 @@
 
 const int ngsslibs = 3;
 const char *const gsslibnames[3] = {
-    "MIT Kerberos GSSAPI"MIT_KERB_SUFFIX".DLL",
+    "①〔保留原文〕MIT Kerberos GSSAPI；②MIT Kerberos GSSAPI 库"MIT_KERB_SUFFIX".DLL",
     "Microsoft SSPI SECUR32.DLL",
-    "User-specified GSSAPI DLL",
+    "用户指定的 GSSAPI DLL",
 };
 const struct keyvalwhere gsslibkeywords[] = {
     { "gssapi32", 0, -1, -1 },
@@ -543,7 +543,7 @@ static Ssh_gss_stat ssh_sspi_display_status(struct ssh_gss_library *lib,
 
     /* decode the error code */
     switch (winctx->maj_stat) {
-      case SEC_E_OK: msg="SSPI status OK"; break;
+      case SEC_E_OK: msg="SSPI 状态正常"; break;
       case SEC_E_INVALID_HANDLE: msg="The handle passed to the function"
             " is invalid.";
         break;
@@ -574,7 +574,7 @@ static Ssh_gss_stat ssh_sspi_display_status(struct ssh_gss_library *lib,
             " negotiate the proper security package.";
         break;
       default:
-        msg = "Internal SSPI error";
+        msg = "SSPI 内部错误";
         break;
     }
 

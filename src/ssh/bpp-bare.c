@@ -81,7 +81,7 @@ static void ssh2_bare_bpp_handle_input(BinaryPacketProtocol *bpp)
         }
 
         if (s->packetlen <= 0 || s->packetlen >= (long)OUR_V2_PACKETLIMIT) {
-            ssh_sw_abort(s->bpp.ssh, "Invalid packet length received");
+            ssh_sw_abort(s->bpp.ssh, "收到的数据包长度无效");
             crStopV;
         }
 
@@ -118,7 +118,7 @@ static void ssh2_bare_bpp_handle_input(BinaryPacketProtocol *bpp)
              * first place unless it's legal to have sent it.
              */
             ssh_proto_error(s->bpp.ssh, "Remote side sent SSH2_MSG_EXT_INFO "
-                            "in bare connection protocol");
+                            "（在裸连接协议中）");
             return;
         }
 
@@ -151,9 +151,9 @@ static void ssh2_bare_bpp_handle_input(BinaryPacketProtocol *bpp)
   eof:
     if (!s->bpp.expect_close) {
         ssh_remote_error(s->bpp.ssh,
-                         "Remote side unexpectedly closed network connection");
+                         "远端意外关闭了网络连接");
     } else {
-        ssh_remote_eof(s->bpp.ssh, "Remote side closed network connection");
+        ssh_remote_eof(s->bpp.ssh, "远端关闭了网络连接");
     }
     return;  /* avoid touching s now it's been freed */
 

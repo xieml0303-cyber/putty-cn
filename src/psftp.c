@@ -2723,7 +2723,7 @@ static int psftp_connect(char *userhost, char *user, int portnumber)
                  " exec /usr/lib/sftp-server\n"
                  "test -x /usr/local/lib/sftp-server &&"
                  " exec /usr/local/lib/sftp-server\n"
-                 "exec sftp-server");
+                 "〔保留原文〕exec sftp-server");
     conf_set_bool(conf, CONF_ssh_subsys2, false);
 
     psftp_logctx = log_init(console_cli_logpolicy, conf);

@@ -108,7 +108,7 @@ static void pds_free(PortableDialogStuff *pds)
 
 /*
  * Ask what to do about unsaved changes when the config box is closed
- * with the title-bar X. Returns 1 for "save and exit", 2 for "discard
+ * with the title-bar X. Returns 1 for "保存并退出", 2 for "discard
  * and exit", and 0 for "cancel" (stay in the box).
  */
 static INT_PTR CALLBACK SaveChangesProc(HWND hwnd, UINT msg,
@@ -1591,8 +1591,8 @@ static const char *process_seatdialogtext(
             put_fmt(dlg_text, "%s\r\n\r\n", item->text);
             break;
           case SDT_SCARY_HEADING:
-            assert(scary_heading != NULL && "only expect a scary heading if "
-                   "the dialog has somewhere to put it");
+            assert(scary_heading != NULL && "只有在"
+                   "对话框有位置放置时，才会显示醒目的警告标题");
             *scary_heading = item->text;
             break;
           case SDT_TITLE:

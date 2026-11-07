@@ -159,4 +159,4 @@ static void sha256_neon_digest(ssh_hash *hash, uint8_t *digest)
     vst1q_u8(digest + 16, vrev32q_u8(vreinterpretq_u8_u32(s->core.efgh)));
 }
 
-SHA256_VTABLE(neon, "NEON accelerated");
+SHA256_VTABLE(neon, "NEON 加速");

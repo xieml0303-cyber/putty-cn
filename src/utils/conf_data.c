@@ -788,7 +788,7 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
 
         /*
          * cn: CONF_mousepaste_custom and friends only carry a string
-         * when the corresponding dropdown is set to "custom clipboard",
+         * when the corresponding dropdown is set to "自定义剪贴板",
          * which Windows builds cannot do (NAMED_CLIPBOARDS is not
          * defined). Reporting them would show a value the user never
          * picked, so the three dropdowns below are reported on their

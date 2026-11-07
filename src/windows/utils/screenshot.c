@@ -120,7 +120,7 @@ char *save_screenshot(HWND hwnd, Filename *outfile)
 /* Without <dwmapi.h> we can't get the right window rectangle */
 char *save_screenshot(HWND hwnd, Filename *outfile)
 {
-    return dupstr("Demo screenshots not compiled in to this build");
+    return dupstr("此构建未编译演示截图功能");
 }
 
 #endif /* HAVE_DWMAPI_H */

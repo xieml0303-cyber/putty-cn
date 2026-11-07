@@ -79,7 +79,7 @@ const struct BackendVtable *const backends[] = {
      * hasn't already appeared above, and Raw.
      *
      * Raw and bare-ssh-connection are deliberately kept in this list
-     * (they are still reachable via "putty -raw" etc. and the bare
+     * (they are still reachable via "〔保留原文〕putty -raw" etc. and the bare
      * ssh-connection mechanism is used internally by SSH proxying and
      * connection sharing), but they get no radio button and the
      * config UI no longer has a dropdown, so they are not selectable

@@ -49,8 +49,8 @@ static void logwrite(LogContext *ctx, ptrlen data)
         if (fwrite(data.ptr, 1, data.len, ctx->lgfp) < data.len) {
             logfclose(ctx);
             ctx->state = L_ERROR;
-            lp_eventlog(ctx->lp, "Disabled writing session log "
-                        "due to error while writing");
+            lp_eventlog(ctx->lp, "已停止写入会话日志"
+                        "，原因是写入时出错");
         }
     }                                  /* else L_ERROR, so ignore the write */
 }
@@ -122,8 +122,8 @@ static void logfopen_callback(void *vctx, int mode)
                       (mode == 1 ? "Appending" : "Writing new"),
                       (ctx->logtype == LGTYP_ASCII ? "ASCII" :
                        ctx->logtype == LGTYP_DEBUG ? "raw" :
-                       ctx->logtype == LGTYP_PACKETS ? "SSH packets" :
-                       ctx->logtype == LGTYP_SSHRAW ? "SSH raw data" :
+                       ctx->logtype == LGTYP_PACKETS ? "SSH 数据包" :
+                       ctx->logtype == LGTYP_SSHRAW ? "SSH 原始数据" :
                        "unknown"),
                       filename_to_str(ctx->currlogfilename));
     lp_eventlog(ctx->lp, event);

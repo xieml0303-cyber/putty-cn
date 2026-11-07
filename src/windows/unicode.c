@@ -33,7 +33,7 @@ static const WCHAR unitab_xterm_std[32] = {
 
 /* XXX: This could be done algorithmically, but I'm not sure it's
  *      worth the hassle -- jtn */
-/* ISO/IEC 8859-1:1998 (Latin-1, "Western", "West European") */
+/* ISO/IEC 8859-1:1998 (Latin-1, "Western", "西欧") */
 static const wchar_t iso_8859_1[] = {
     0x00A0, 0x00A1, 0x00A2, 0x00A3, 0x00A4, 0x00A5, 0x00A6, 0x00A7,
     0x00A8, 0x00A9, 0x00AA, 0x00AB, 0x00AC, 0x00AD, 0x00AE, 0x00AF,
@@ -49,7 +49,7 @@ static const wchar_t iso_8859_1[] = {
     0x00F8, 0x00F9, 0x00FA, 0x00FB, 0x00FC, 0x00FD, 0x00FE, 0x00FF
 };
 
-/* ISO/IEC 8859-2:1999 (Latin-2, "Central European", "East European") */
+/* ISO/IEC 8859-2:1999 (Latin-2, "中欧", "东欧") */
 static const wchar_t iso_8859_2[] = {
     0x00A0, 0x0104, 0x02D8, 0x0141, 0x00A4, 0x013D, 0x015A, 0x00A7,
     0x00A8, 0x0160, 0x015E, 0x0164, 0x0179, 0x00AD, 0x017D, 0x017B,
@@ -65,7 +65,7 @@ static const wchar_t iso_8859_2[] = {
     0x0159, 0x016F, 0x00FA, 0x0171, 0x00FC, 0x00FD, 0x0163, 0x02D9
 };
 
-/* ISO/IEC 8859-3:1999 (Latin-3, "South European", "Maltese & Esperanto") */
+/* ISO/IEC 8859-3:1999 (Latin-3, "南欧", "Maltese & Esperanto") */
 static const wchar_t iso_8859_3[] = {
     0x00A0, 0x0126, 0x02D8, 0x00A3, 0x00A4, 0xFFFD, 0x0124, 0x00A7,
     0x00A8, 0x0130, 0x015E, 0x011E, 0x0134, 0x00AD, 0xFFFD, 0x017B,
@@ -81,7 +81,7 @@ static const wchar_t iso_8859_3[] = {
     0x011D, 0x00F9, 0x00FA, 0x00FB, 0x00FC, 0x016D, 0x015D, 0x02D9
 };
 
-/* ISO/IEC 8859-4:1998 (Latin-4, "North European") */
+/* ISO/IEC 8859-4:1998 (Latin-4, "北欧") */
 static const wchar_t iso_8859_4[] = {
     0x00A0, 0x0104, 0x0138, 0x0156, 0x00A4, 0x0128, 0x013B, 0x00A7,
     0x00A8, 0x0160, 0x0112, 0x0122, 0x0166, 0x00AD, 0x017D, 0x00AF,
@@ -209,7 +209,7 @@ static const wchar_t iso_8859_11[] = {
     0x0E58, 0x0E59, 0x0E5A, 0x0E5B, 0xFFFD, 0xFFFD, 0xFFFD, 0xFFFD
 };
 
-/* ISO/IEC 8859-13:1998 (Latin-7, "Baltic Rim") */
+/* ISO/IEC 8859-13:1998 (Latin-7, "波罗的海沿岸") */
 static const wchar_t iso_8859_13[] = {
     0x00A0, 0x201D, 0x00A2, 0x00A3, 0x00A4, 0x201E, 0x00A6, 0x00A7,
     0x00D8, 0x00A9, 0x0156, 0x00AB, 0x00AC, 0x00AD, 0x00AE, 0x00C6,
@@ -358,7 +358,7 @@ static const wchar_t dec_mcs[] = {
 };
 
 /* Mazovia (Polish) aka CP620
- * from "Mazowia to Unicode table", 04/24/96, Mikolaj Jedrzejak */
+ * from "Mazowia 到 Unicode 的映射表", 04/24/96, Mikolaj Jedrzejak */
 static const wchar_t mazovia[] = {
     /* Code point 0x9B is "zloty" symbol (z&#0142;), which is not
      *   widely used and for which there is no Unicode equivalent.

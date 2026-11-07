@@ -160,5 +160,5 @@ static inline void aesgcm_neon_output(aesgcm_neon *ctx, unsigned char *output)
 }
 
 #define AESGCM_FLAVOUR neon
-#define AESGCM_NAME "NEON accelerated"
+#define AESGCM_NAME "NEON 加速"
 #include "aesgcm-footer.h"

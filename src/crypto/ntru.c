@@ -1575,7 +1575,7 @@ const pq_kemalg ssh_ntru = {
     .encaps = ntru_vt_encaps,
     .decaps = ntru_vt_decaps,
     .free_dk = ntru_vt_free_dk,
-    .description = "NTRU Prime",
+    .description = "①〔保留原文〕NTRU Prime；②NTRU Prime 算法",
     .ek_len = 1158,
     .c_len = 1039,
 };

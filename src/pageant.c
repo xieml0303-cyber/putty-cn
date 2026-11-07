@@ -227,8 +227,8 @@ static void pk_priv_free_private_material(PageantPrivateKey *priv)
         sfree(priv->encrypted_key_comment);
         priv->encrypted_key_comment = NULL;
     }
-    fail_requests_for_key(priv, "key deleted from Pageant while signing "
-                          "request was pending");
+    fail_requests_for_key(priv, "密钥在签名过程中被从 Pageant 删除"
+                          "（当时请求尚在等待）");
 }
 
 static void pk_priv_free(PageantPrivateKey *priv)
@@ -710,8 +710,8 @@ static void signop_coroutine(PageantAsyncOp *pao)
         if (!request_passphrase(so->pao.info->pc, so->priv)) {
             response = strbuf_new();
             failure(so->pao.info->pc, so->pao.reqid, response,
-                    so->failure_type, "on-demand decryption could not "
-                    "prompt for a passphrase");
+                    so->failure_type, "按需解密时无法"
+                    "提示输入口令");
             goto respond;
         }
 
@@ -824,7 +824,7 @@ void pageant_passphrase_request_success(PageantClientDialogId *dlgid,
         strbuf_free(ppsb);
 
         if (!skey) {
-            fail_requests_for_key(priv, "unable to decrypt key");
+            fail_requests_for_key(priv, "无法解密密钥");
             return;
         } else if (skey == SSH2_WRONG_PASSPHRASE) {
             /*
@@ -846,8 +846,8 @@ void pageant_passphrase_request_success(PageantClientDialogId *dlgid,
 
             priv->decryption_prompt_active = false;
             if (!request_passphrase(so->pao.info->pc, so->priv)) {
-                fail_requests_for_key(priv, "unable to continue creating "
-                                      "passphrase prompts");
+                fail_requests_for_key(priv, "无法继续创建"
+                                      "口令提示");
             }
             return;
         } else {
@@ -871,7 +871,7 @@ void pageant_passphrase_request_refused(PageantClientDialogId *dlgid)
     gui_request_in_progress = false;
     priv->decryption_prompt_active = false;
 
-    fail_requests_for_key(priv, "user refused to supply passphrase");
+    fail_requests_for_key(priv, "用户拒绝提供口令");
 
     unblock_pending_gui_requests();
 }
@@ -962,7 +962,7 @@ static PageantAsyncOp *pageant_make_op(
 
     type = get_byte(msg);
     if (get_err(msg)) {
-        fail("message contained no type code");
+        fail("消息中不含类型码");
         goto responded;
     }
 
@@ -1042,11 +1042,11 @@ static PageantAsyncOp *pageant_make_op(
         response_type = get_uint32(msg);
 
         if (get_err(msg)) {
-            fail("unable to decode request");
+            fail("无法解码请求");
             goto challenge1_cleanup;
         }
         if (response_type != 1) {
-            fail("response type other than 1 not supported");
+            fail("不支持 1 以外的响应类型");
             goto challenge1_cleanup;
         }
 
@@ -1059,7 +1059,7 @@ static PageantAsyncOp *pageant_make_op(
         }
 
         if ((pub = findpubkey1(&reqkey)) == NULL) {
-            fail("key not found");
+            fail("未找到密钥");
             goto challenge1_cleanup;
         }
         priv = pub_to_priv(pub);
@@ -1101,7 +1101,7 @@ static PageantAsyncOp *pageant_make_op(
         sigdata = get_string(msg);
 
         if (get_err(msg)) {
-            fail("unable to decode request");
+            fail("无法解码请求");
             goto responded;
         }
 
@@ -1125,7 +1125,7 @@ static PageantAsyncOp *pageant_make_op(
             sfree(fingerprint);
         }
         if ((pub = findpubkey2(keyblob)) == NULL) {
-            fail("key not found");
+            fail("未找到密钥");
             goto responded;
         }
 
@@ -1133,7 +1133,7 @@ static PageantAsyncOp *pageant_make_op(
             pageant_client_log(pc, reqid, "signature flags = 0x%08"PRIx32,
                                flags);
         else
-            pageant_client_log(pc, reqid, "no signature flags");
+            pageant_client_log(pc, reqid, "不含签名标志位");
 
         strbuf_free(sb); /* no immediate response */
 
@@ -1166,12 +1166,12 @@ static PageantAsyncOp *pageant_make_op(
         key->comment = mkstr(get_string(msg));
 
         if (get_err(msg)) {
-            fail("unable to decode request");
+            fail("无法解码请求");
             goto add1_cleanup;
         }
 
         if (!rsa_verify(key)) {
-            fail("key is invalid");
+            fail("密钥无效");
             goto add1_cleanup;
         }
 
@@ -1188,7 +1188,7 @@ static PageantAsyncOp *pageant_make_op(
             pageant_client_log(pc, reqid, "reply: SSH_AGENT_SUCCESS");
             key = NULL;            /* don't free it in cleanup */
         } else {
-            fail("key already present");
+            fail("密钥已存在");
         }
 
       add1_cleanup:
@@ -1216,21 +1216,21 @@ static PageantAsyncOp *pageant_make_op(
         key->comment = NULL;
         alg = find_pubkey_alg_len(algpl);
         if (!alg) {
-            fail("algorithm unknown");
+            fail("算法未知");
             goto add2_cleanup;
         }
 
         key->key = ssh_key_new_priv_openssh(alg, msg);
 
         if (!key->key) {
-            fail("key setup failed");
+            fail("密钥设置失败");
             goto add2_cleanup;
         }
 
         key->comment = mkstr(get_string(msg));
 
         if (get_err(msg)) {
-            fail("unable to decode request");
+            fail("无法解码请求");
             goto add2_cleanup;
         }
 
@@ -1249,7 +1249,7 @@ static PageantAsyncOp *pageant_make_op(
 
             key = NULL;            /* don't clean it up */
         } else {
-            fail("key already present");
+            fail("密钥已存在");
         }
 
       add2_cleanup:
@@ -1278,7 +1278,7 @@ static PageantAsyncOp *pageant_make_op(
         get_rsa_ssh1_pub(msg, &reqkey, RSA_SSH1_EXPONENT_FIRST);
 
         if (get_err(msg)) {
-            fail("unable to decode request");
+            fail("无法解码请求");
             freersakey(&reqkey);
             goto responded;
         }
@@ -1304,7 +1304,7 @@ static PageantAsyncOp *pageant_make_op(
 
             pageant_client_log(pc, reqid, "reply: SSH_AGENT_SUCCESS");
         } else {
-            fail("key not found");
+            fail("未找到密钥");
         }
         break;
       }
@@ -1322,7 +1322,7 @@ static PageantAsyncOp *pageant_make_op(
         blob = get_string(msg);
 
         if (get_err(msg)) {
-            fail("unable to decode request");
+            fail("无法解码请求");
             goto responded;
         }
 
@@ -1335,7 +1335,7 @@ static PageantAsyncOp *pageant_make_op(
 
         pub = findpubkey2(blob);
         if (!pub) {
-            fail("key not found");
+            fail("未找到密钥");
             goto responded;
         }
 
@@ -1422,7 +1422,7 @@ static PageantAsyncOp *pageant_make_op(
             ptrlen keyfile = get_string(msg);
 
             if (get_err(msg)) {
-                fail("unable to decode request");
+                fail("无法解码请求");
                 goto responded;
             }
 
@@ -1466,7 +1466,7 @@ static PageantAsyncOp *pageant_make_op(
                     pageant_client_log(pc, reqid, "reply: SSH_AGENT_SUCCESS"
                                        " (loaded unencrypted PPK)");
                 } else {
-                    fail("key already present");
+                    fail("密钥已存在");
                     if (skey->key)
                         ssh_key_free(skey->key);
                     if (skey->comment)
@@ -1506,7 +1506,7 @@ static PageantAsyncOp *pageant_make_op(
             ptrlen blob = get_string(msg);
 
             if (get_err(msg)) {
-                fail("unable to decode request");
+                fail("无法解码请求");
                 goto responded;
             }
 
@@ -1520,7 +1520,7 @@ static PageantAsyncOp *pageant_make_op(
 
             PageantPublicKey *pub = findpubkey2(blob);
             if (!pub) {
-                fail("key not found");
+                fail("未找到密钥");
                 goto responded;
             }
 
@@ -1528,7 +1528,7 @@ static PageantAsyncOp *pageant_make_op(
                                "found with comment: %s", pub->comment);
 
             if (!reencrypt_key(pub)) {
-                fail("this key couldn't be re-encrypted");
+                fail("无法重新加密此密钥");
                 goto responded;
             }
 
@@ -1564,7 +1564,7 @@ static PageantAsyncOp *pageant_make_op(
             }
 
             if (nsuccesses == 0 && nfailures > 0) {
-                fail("no key could be re-encrypted");
+                fail("没有任何密钥可重新加密");
             } else {
                 keylist_update();
                 put_byte(sb, SSH_AGENT_SUCCESS);
@@ -1612,7 +1612,7 @@ static PageantAsyncOp *pageant_make_op(
       default:
         pageant_client_log(pc, reqid, "request: unknown message type %d",
                            type);
-        fail("unrecognised message");
+        fail("无法识别的消息");
         break;
     }
 

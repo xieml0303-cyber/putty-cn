@@ -12,7 +12,7 @@ size_t nullseat_banner(Seat *seat, const void *data, size_t len) {return 0;}
 size_t nullseat_banner_to_stderr(Seat *seat, const void *data, size_t len)
 { return seat_output(seat, SEAT_OUTPUT_STDERR, data, len); }
 SeatPromptResult nullseat_get_userpass_input(Seat *seat, prompts_t *p)
-{ return SPR_SW_ABORT("this seat can't handle interactive prompts"); }
+{ return SPR_SW_ABORT("此 seat 无法处理交互式提示（内部错误）"); }
 void nullseat_notify_session_started(Seat *seat) {}
 void nullseat_notify_remote_exit(Seat *seat) {}
 void nullseat_notify_remote_disconnect(Seat *seat) {}
@@ -25,15 +25,15 @@ SeatPromptResult nullseat_confirm_ssh_host_key(
     Seat *seat, const char *host, int port, const char *keytype,
     char *keystr, SeatDialogText *text, HelpCtx helpctx,
     void (*callback)(void *ctx, SeatPromptResult result), void *ctx)
-{ return SPR_SW_ABORT("this seat can't handle interactive prompts"); }
+{ return SPR_SW_ABORT("此 seat 无法处理交互式提示（内部错误）"); }
 SeatPromptResult nullseat_confirm_weak_crypto_primitive(
     Seat *seat, SeatDialogText *text,
     void (*callback)(void *ctx, SeatPromptResult result), void *ctx)
-{ return SPR_SW_ABORT("this seat can't handle interactive prompts"); }
+{ return SPR_SW_ABORT("此 seat 无法处理交互式提示（内部错误）"); }
 SeatPromptResult nullseat_confirm_weak_cached_hostkey(
     Seat *seat, SeatDialogText *text,
     void (*callback)(void *ctx, SeatPromptResult result), void *ctx)
-{ return SPR_SW_ABORT("this seat can't handle interactive prompts"); }
+{ return SPR_SW_ABORT("此 seat 无法处理交互式提示（内部错误）"); }
 bool nullseat_is_never_utf8(Seat *seat) { return false; }
 bool nullseat_is_always_utf8(Seat *seat) { return true; }
 void nullseat_echoedit_update(Seat *seat, bool echoing, bool editing) {}

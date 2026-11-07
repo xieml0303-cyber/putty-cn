@@ -7,5 +7,5 @@
 
 void out_of_memory(void)
 {
-    modalfatalbox("Out of memory");
+    modalfatalbox("内存不足");
 }

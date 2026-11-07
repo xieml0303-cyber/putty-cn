@@ -243,7 +243,7 @@ static SeatPromptResult tempseat_get_userpass_input(Seat *seat, prompts_t *p)
 
 static size_t tempseat_banner(Seat *seat, const void *data, size_t len)
 {
-    unreachable("banner should never be called on TempSeat");
+    unreachable("不应在 TempSeat 上调用 banner（内部错误）");
 }
 
 static SeatPromptResult tempseat_confirm_ssh_host_key(
@@ -259,7 +259,7 @@ static SeatPromptResult tempseat_confirm_weak_crypto_primitive(
     void (*callback)(void *ctx, SeatPromptResult result), void *ctx)
 {
     unreachable("confirm_weak_crypto_primitive "
-                "should never be called on TempSeat");
+                "不应在 TempSeat 上调用（内部错误）");
 }
 
 static SeatPromptResult tempseat_confirm_weak_cached_hostkey(
@@ -267,7 +267,7 @@ static SeatPromptResult tempseat_confirm_weak_cached_hostkey(
     void (*callback)(void *ctx, SeatPromptResult result), void *ctx)
 {
     unreachable("confirm_weak_cached_hostkey "
-                "should never be called on TempSeat");
+                "不应在 TempSeat 上调用（内部错误）");
 }
 
 static void tempseat_connection_fatal(Seat *seat, const char *message)
@@ -296,7 +296,7 @@ static void tempseat_nonfatal(Seat *seat, const char *message)
      * host key collection, and a backend's not _doing_ that when we
      * haven't connected it to the host yet.
      */
-    unreachable("nonfatal should never be called on TempSeat");
+    unreachable("不应在 TempSeat 上调用 nonfatal（内部错误）");
 }
 
 static bool tempseat_eof(Seat *seat)
@@ -320,7 +320,7 @@ static bool tempseat_eof(Seat *seat)
      * total waste. Hence, we'll put EOF in the category of things we
      * expect backends never to do while the real Seat is out on loan.
      */
-    unreachable("eof should never be called on TempSeat");
+    unreachable("不应在 TempSeat 上调用 eof（内部错误）");
 }
 
 /* ----------------------------------------------------------------------

@@ -72,7 +72,7 @@ static size_t handle_gotdata(
     HandleSocket *hs = (HandleSocket *)handle_get_privdata(h);
 
     if (err) {
-        plug_closing_error(hs->plug, "Read error from handle");
+        plug_closing_error(hs->plug, "从句柄读取时出错");
         return 0;
     } else if (len == 0) {
         plug_closing_normal(hs->plug);

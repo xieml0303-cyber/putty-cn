@@ -22,7 +22,7 @@ int ssh2_censor_packet(
     if (pls->omit_data &&
         (type == SSH2_MSG_CHANNEL_DATA ||
          type == SSH2_MSG_CHANNEL_EXTENDED_DATA)) {
-        /* "Session data" packets - omit the data string. */
+        /* "会话数据" packets - omit the data string. */
         get_uint32(src);              /* skip channel id */
         if (type == SSH2_MSG_CHANNEL_EXTENDED_DATA)
             get_uint32(src);          /* skip extended data type */

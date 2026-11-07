@@ -251,8 +251,8 @@ static void ca_save_handler(dlgcontrol *ctrl, dlgparam *dp,
     struct ca_state *st = (struct ca_state *)ctrl->context.p;
     if (event == EVENT_ACTION) {
         if (!*st->validity) {
-            dlg_error_msg(dp, "No validity expression configured "
-                          "for this key");
+            dlg_error_msg(dp, "尚未为"
+                          "此密钥配置有效性表达式");
             return;
         }
 

@@ -40,5 +40,5 @@ const ssh_hashalg ssh_sha1 = {
     .new = sha1_select,
     .hlen = 20,
     .blocklen = 64,
-    HASHALG_NAMES_ANNOTATED("SHA-1", "dummy selector vtable"),
+    HASHALG_NAMES_ANNOTATED("SHA-1", "占位选择器虚函数表"),
 };

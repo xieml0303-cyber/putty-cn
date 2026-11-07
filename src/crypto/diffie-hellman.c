@@ -418,14 +418,14 @@ mp_int *dh_create_e(dh_ctx *ctx)
 const char *dh_validate_f(dh_ctx *ctx, mp_int *f)
 {
     if (!mp_hs_integer(f, 2)) {
-        return "f value received is too small";
+        return "收到的 f 值过小";
     } else {
         mp_int *pm1 = mp_copy(ctx->p);
         mp_sub_integer_into(pm1, pm1, 1);
         unsigned cmp = mp_cmp_hs(f, pm1);
         mp_free(pm1);
         if (cmp)
-            return "f value received is too large";
+            return "收到的 f 值过大";
     }
     return NULL;
 }

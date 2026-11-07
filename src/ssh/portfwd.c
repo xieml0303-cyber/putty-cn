@@ -230,7 +230,7 @@ static void pfd_receive(Plug *plug, int urgent, const char *data, size_t len)
             switch (pf->socks_state) {
               case SOCKS_INITIAL:
               case SOCKS_NONE:
-                unreachable("These case values cannot appear");
+                unreachable("这些分支取值不应出现（内部错误）");
 
               case SOCKS_4:
                 /* SOCKS 4/4A connect message */
@@ -592,7 +592,7 @@ static char *pfl_listen(const char *desthost, int destport,
 
 static char *pfd_log_close_msg(Channel *chan)
 {
-    return dupstr("Forwarded port closed");
+    return dupstr("转发端口已关闭");
 }
 
 static void pfd_close(struct PortForwarding *pf)
@@ -832,7 +832,7 @@ void portfwdmgr_config(PortFwdManager *mgr, Conf *conf)
             sserv = 1;
             sport = net_service_lookup(sports);
             if (!sport) {
-                logeventf(mgr->cl->logctx, "Service lookup failed for source"
+                logeventf(mgr->cl->logctx, "源端服务查询失败"
                           " port \"%s\"", sports);
             }
         }
@@ -859,7 +859,7 @@ void portfwdmgr_config(PortFwdManager *mgr, Conf *conf)
                 dport = net_service_lookup(dports);
                 if (!dport) {
                     logeventf(mgr->cl->logctx,
-                              "Service lookup failed for destination"
+                              "目的端服务查询失败"
                               " port \"%s\"", dports);
                 }
             }
@@ -1072,7 +1072,7 @@ bool portfwdmgr_listen(PortFwdManager *mgr, const char *host, int port,
                            mgr->cl, conf, &pfr->local, pfr->addressfamily);
     logeventf(mgr->cl->logctx,
               "%s on port %s:%d to forward to client%s%s",
-              err ? "Failed to listen" : "Listening", host, port,
+              err ? "监听失败" : "Listening", host, port,
               err ? ": " : "", err ? err : "");
     if (err) {
         sfree(err);

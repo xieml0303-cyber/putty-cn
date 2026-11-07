@@ -338,4 +338,4 @@ NI_ENC_DEC(192)
 NI_ENC_DEC(256)
 
 AES_EXTRA(_ni);
-AES_ALL_VTABLES(_ni, "AES-NI accelerated");
+AES_ALL_VTABLES(_ni, "AES-NI 加速");

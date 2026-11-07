@@ -56,7 +56,7 @@ void modalfatalbox(const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
-    console_print_error_msg_fmt_v("FATAL ERROR", fmt, ap);
+    console_print_error_msg_fmt_v("致命错误", fmt, ap);
     va_end(ap);
     cleanup_exit(1);
 }
@@ -71,7 +71,7 @@ void nonfatal(const char *fmt, ...)
 
 void console_connection_fatal(Seat *seat, const char *msg)
 {
-    console_print_error_msg("FATAL ERROR", msg);
+    console_print_error_msg("致命错误", msg);
     cleanup_exit(1);
 }
 

@@ -807,7 +807,7 @@ static void share_try_cleanup(struct ssh_sharing_connstate *cs)
      */
     while ((hc = (struct share_halfchannel *)
             index234(cs->halfchannels, 0)) != NULL) {
-        static const char reason[] = "PuTTY downstream no longer available";
+        static const char reason[] = "PuTTY 下游连接不再可用";
         static const char lang[] = "en";
         strbuf *packet;
 
@@ -819,7 +819,7 @@ static void share_try_cleanup(struct ssh_sharing_connstate *cs)
         ssh_send_packet_from_downstream(
             cs->parent->cl, cs->id, SSH2_MSG_CHANNEL_OPEN_FAILURE,
             packet->s, packet->len,
-            "cleanup after downstream went away");
+            "下游连接断开后的清理");
         strbuf_free(packet);
 
         share_remove_halfchannel(cs, hc);
@@ -848,7 +848,7 @@ static void share_try_cleanup(struct ssh_sharing_connstate *cs)
             ssh_send_packet_from_downstream(
                 cs->parent->cl, cs->id, SSH2_MSG_CHANNEL_CLOSE,
                 packet->s, packet->len,
-                "cleanup after downstream went away");
+                "下游连接断开后的清理");
             strbuf_free(packet);
 
             if (chan->state != RCVD_CLOSE) {
@@ -881,7 +881,7 @@ static void share_try_cleanup(struct ssh_sharing_connstate *cs)
             ssh_send_packet_from_downstream(
                 cs->parent->cl, cs->id, SSH2_MSG_GLOBAL_REQUEST,
                 packet->s, packet->len,
-                "cleanup after downstream went away");
+                "下游连接断开后的清理");
             strbuf_free(packet);
 
             ssh_rportfwd_remove(cs->parent->cl, fwd->rpf);
@@ -1014,7 +1014,7 @@ static void share_dead_xchannel_respond(struct ssh_sharing_connstate *cs,
                 ssh_send_packet_from_downstream(
                     cs->parent->cl, cs->id, SSH2_MSG_CHANNEL_FAILURE,
                     packet->s, packet->len,
-                    "downstream refused X channel open");
+                    "下游连接拒绝了 X 通道打开请求");
                 strbuf_free(packet);
             }
         } else if (msg->type == SSH2_MSG_CHANNEL_CLOSE) {
@@ -1065,7 +1065,7 @@ static void share_xchannel_confirmation(
     ssh_send_packet_from_downstream(
         cs->parent->cl, cs->id, SSH2_MSG_CHANNEL_WINDOW_ADJUST,
         packet->s, packet->len,
-        "window adjustment after downstream accepted X channel");
+        "下游连接接受 X 通道后的窗口调整");
     strbuf_free(packet);
 }
 
@@ -1081,7 +1081,7 @@ static void share_xchannel_failure(struct ssh_sharing_connstate *cs,
     ssh_send_packet_from_downstream(
         cs->parent->cl, cs->id, SSH2_MSG_CHANNEL_CLOSE,
         packet->s, packet->len,
-        "downstream refused X channel open");
+        "下游连接拒绝了 X 通道打开请求");
     strbuf_free(packet);
 
     /*
@@ -2121,10 +2121,10 @@ Socket *ssh_connection_sharing_init(
             /* Failing that, ds_err and us_err indicate why we
              * couldn't be a downstream and an upstream respectively */
             if (ds_err)
-                logeventf(logctx, "Could not set up connection sharing"
+                logeventf(logctx, "无法建立连接共享"
                           " as downstream: %s", ds_err);
             if (us_err)
-                logeventf(logctx, "Could not set up connection sharing"
+                logeventf(logctx, "无法建立连接共享"
                           " as upstream: %s", us_err);
         }
 

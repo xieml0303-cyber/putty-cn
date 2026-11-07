@@ -334,7 +334,7 @@ static void subtest(const char *filename, int lineno, const char *subdesc,
         nf = nfd(input);
         break;
       default:
-        unreachable("bad nftype");
+        unreachable("nftype 取值异常（内部错误）");
     }
 
     if (nf->len == expected->len && !memcmp(nf->buf, expected->buf, nf->len)) {

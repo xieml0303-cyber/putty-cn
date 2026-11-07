@@ -344,7 +344,7 @@ static void psocks_plug_log(Plug *plug, Socket *s, PlugLogType type,
         psocks_conn_log(conn, "connection attempt failed: %s", error_msg);
         break;
       case PLUGLOG_CONNECT_SUCCESS:
-        psocks_conn_log(conn, "connection established", error_msg);
+        psocks_conn_log(conn, "连接已建立", error_msg);
         if (conn->connecting) {
             chan_open_confirmation(conn->chan);
             conn->connecting = false;
@@ -531,13 +531,13 @@ void psocks_start(psocks_state *ps)
 int check_stored_host_key(const char *hostname, int port,
                           const char *keytype, const char *key)
 {
-    unreachable("host keys not handled in this tool");
+    unreachable("此工具不处理主机密钥");
 }
 
 void store_host_key(Seat *seat, const char *hostname, int port,
                     const char *keytype, const char *key)
 {
-    unreachable("host keys not handled in this tool");
+    unreachable("此工具不处理主机密钥");
 }
 
 /*

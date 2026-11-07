@@ -6,7 +6,7 @@
 
 void random_read(void *out, size_t size)
 {
-    unreachable("Random numbers are not available in this application");
+    unreachable("此程序不提供随机数");
 }
 
 void random_save_seed(void)

@@ -88,7 +88,7 @@ static const struct {
      * mapping files.
      */
     { smRoman, -1,                   0,     "Symbol", CS_MAC_SYMBOL },
-    { smRoman, -1,                   0,     "Zapf Dingbats", CS_MAC_DINGBATS },
+    { smRoman, -1,                   0,     "①〔保留原文〕Zapf Dingbats；②Zapf Dingbats 字体", CS_MAC_DINGBATS },
     { smRoman, verTurkey,            0,     NULL,    CS_MAC_TURKISH },
     { smRoman, verYugoCroatian,      0x850, NULL,    CS_MAC_CROATIAN },
     { smRoman, verYugoCroatian,      0,     NULL,    CS_MAC_CROATIAN_OLD },

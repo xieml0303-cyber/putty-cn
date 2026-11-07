@@ -41,7 +41,7 @@ static char *hybrid_description(const ssh_kex *kex)
     else if (alg->classical_alg == &ssh_ec_kex_nistp384)
         classical_name = "NIST P384";
     else
-        unreachable("don't have a name for this classical alg");
+        unreachable("没有该经典算法的名称（内部错误）");
 
     return dupprintf("%s / %s hybrid key exchange",
                      alg->pq_alg->description, classical_name);

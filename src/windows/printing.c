@@ -181,7 +181,7 @@ printer_job *printer_start_job(char *printer)
     if (!p_OpenPrinter(printer, &pj->hprinter, NULL))
         goto error;
 
-    docinfo.pDocName = "PuTTY remote printer output";
+    docinfo.pDocName = "PuTTY 远程打印机输出";
     docinfo.pOutputFile = NULL;
     docinfo.pDatatype = "RAW";
 

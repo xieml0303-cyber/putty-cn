@@ -3,7 +3,7 @@
 bool agent_exists(void) { return false; }
 Socket *agent_connect(Plug *plug) {
     return new_error_socket_fmt(
-        plug, "no actual networking in this application");
+        plug, "此程序不包含实际网络功能");
 }
 void agent_cancel_query(agent_pending_query *pq) {}
 agent_pending_query *agent_query(

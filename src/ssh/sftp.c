@@ -203,15 +203,15 @@ static int fxp_got_status(struct sftp_packet *pktin)
         /* SSH_FX_OK. The only time we will display a _message_ for this
          * is if we were expecting something other than FXP_STATUS on
          * success, so this is actually an error message! */
-        "unexpected OK response",
-        "end of file",
-        "no such file or directory",
-        "permission denied",
+        "意外的 OK 响应",
+        "文件结束",
+        "文件或目录不存在",
+        "权限不足",
         "failure",
-        "bad message",
-        "no connection",
-        "connection lost",
-        "operation unsupported",
+        "消息格式错误",
+        "未建立连接",
+        "连接已断开",
+        "不支持该操作",
     };
 
     if (pktin->type != SSH_FXP_STATUS) {
@@ -224,7 +224,7 @@ static int fxp_got_status(struct sftp_packet *pktin)
             fxp_errtype = -1;
         } else {
             if (fxp_errtype < 0 || fxp_errtype >= lenof(messages))
-                fxp_error_message = "unknown error code";
+                fxp_error_message = "未知错误码";
             else
                 fxp_error_message = messages[fxp_errtype];
         }
@@ -268,7 +268,7 @@ bool fxp_init(void)
 
     pktin = sftp_recv();
     if (!pktin) {
-        fxp_internal_error("could not connect");
+        fxp_internal_error("无法建立连接");
         return false;
     }
     if (pktin->type != SSH_FXP_VERSION) {
@@ -283,7 +283,7 @@ bool fxp_init(void)
         return false;
     }
     if (remotever > SFTP_PROTO_VERSION) {
-        fxp_internal_error("remote protocol is more advanced than we support");
+        fxp_internal_error("远端协议版本高于本客户端支持的版本");
         sftp_pkt_free(pktin);
         return false;
     }
@@ -765,7 +765,7 @@ int fxp_read_recv(struct sftp_packet *pktin, struct sftp_request *req,
         }
 
         if (data.len > len) {
-            fxp_internal_error("READ returned more bytes than requested");
+            fxp_internal_error("READ 返回的字节数超过请求量");
             sftp_pkt_free(pktin);
             return -1;
         }
@@ -1044,7 +1044,7 @@ int xfer_download_gotpkt(struct fxp_xfer *xfer, struct sftp_packet *pktin)
         return INT_MIN;            /* this packet doesn't even make sense */
     rr = (struct req *)fxp_get_userdata(rreq);
     if (!rr) {
-        fxp_internal_error("request ID is not part of the current download");
+        fxp_internal_error("请求 ID 不属于当前下载任务");
         return INT_MIN;                /* this packet isn't ours */
     }
     rr->retlen = fxp_read_recv(pktin, rreq, rr->buffer, rr->len);
@@ -1226,7 +1226,7 @@ int xfer_upload_gotpkt(struct fxp_xfer *xfer, struct sftp_packet *pktin)
         return INT_MIN;            /* this packet doesn't even make sense */
     rr = (struct req *)fxp_get_userdata(rreq);
     if (!rr) {
-        fxp_internal_error("request ID is not part of the current upload");
+        fxp_internal_error("请求 ID 不属于当前上传任务");
         return INT_MIN;                /* this packet isn't ours */
     }
     ret = fxp_write_recv(pktin, rreq);

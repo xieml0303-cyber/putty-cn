@@ -28,7 +28,7 @@ char *buildinfo(const char *newline)
 #else
     put_fmt(buf, ", 模拟 ");
 #endif
-    put_fmt(buf, "Visual Studio");
+    put_fmt(buf, "〔保留原文〕Visual Studio");
 
 #if 0
     /*

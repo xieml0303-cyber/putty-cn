@@ -24,7 +24,7 @@ int ssh1_censor_packet(
          type == SSH1_SMSG_STDERR_DATA ||
          type == SSH1_CMSG_STDIN_DATA ||
          type == SSH1_MSG_CHANNEL_DATA)) {
-        /* "Session data" packets - omit the data string. */
+        /* "会话数据" packets - omit the data string. */
         if (type == SSH1_MSG_CHANNEL_DATA)
             get_uint32(src);           /* skip channel id */
         str = get_string(src);

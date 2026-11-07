@@ -201,17 +201,17 @@ static char *x11_verify(unsigned long peer_ip, int peer_port,
         /*
          * If the user has attempted to connect to the forwarded X
          * display with no authority at all, we can give a better
-         * error message than the generic "unsupported protocol". We
+         * error message than the generic "不支持的协议". We
          * at least _recognise_ the null auth protocol, even if we
          * don't _accept_ it.
          */
-        return dupstr("No authorisation provided");
+        return dupstr("未提供授权信息");
     } else {
         return dupprintf("Unsupported authorisation protocol '%s'", proto);
     }
 
     if ((auth = find234(authtree, &match_dummy, 0)) == NULL)
-        return dupstr("Authorisation not recognised");
+        return dupstr("无法识别授权信息");
 
     /*
      * If we're using MIT-MAGIC-COOKIE-1, that was all we needed. If
@@ -228,8 +228,8 @@ static char *x11_verify(unsigned long peer_ip, int peer_port,
             return dupprintf("XDM-AUTHORIZATION-1 data was wrong length "
                              "(%d, expected 24)", dlen);
         if (peer_port == -1)
-            return dupstr("cannot do XDM-AUTHORIZATION-1 without remote "
-                          "address data");
+            return dupstr("缺少远端"
+                          "地址数据，无法执行 XDM-AUTHORIZATION-1 校验");
         des_decrypt_xdmauth(auth->data+9, data, 24);
 
         /* Bitwise-OR together any mismatches in the fixed parts of
@@ -246,13 +246,13 @@ static char *x11_verify(unsigned long peer_ip, int peer_port,
         for (i = 18; i < 24; i++)
             mismatches |= data[i];
         if (mismatches)
-            return dupstr("XDM-AUTHORIZATION-1 data failed check");
+            return dupstr("XDM-AUTHORIZATION-1 数据校验失败");
 
         t = GET_32BIT_MSB_FIRST(data+14);
         tim = time(NULL);
         if (((unsigned long)t - (unsigned long)tim
              + XDM_MAXSKEW) > 2*XDM_MAXSKEW)
-            return dupstr("XDM-AUTHORIZATION-1 time stamp was too far out");
+            return dupstr("XDM-AUTHORIZATION-1 时间戳偏差过大");
         seen = snew(struct XDMSeen);
         seen->time = t;
         memcpy(seen->clientid, data+8, 6);
@@ -260,7 +260,7 @@ static char *x11_verify(unsigned long peer_ip, int peer_port,
         ret = add234(auth->xdmseen, seen);
         if (ret != seen) {
             sfree(seen);
-            return dupstr("XDM-AUTHORIZATION-1 data replayed");
+            return dupstr("检测到 XDM-AUTHORIZATION-1 数据重放");
         }
         /* While we're here, purge entries too old to be replayed. */
         for (;;) {
@@ -649,5 +649,5 @@ static void x11_send_eof(Channel *chan)
 
 static char *x11_log_close_msg(Channel *chan)
 {
-    return dupstr("Forwarded X11 connection terminated");
+    return dupstr("转发的 X11 连接已终止");
 }

@@ -326,4 +326,4 @@ static void sha384_neon_digest(ssh_hash *hash, uint8_t *digest)
     vst1q_u8(digest+32, vrev64q_u8(vreinterpretq_u8_u64(s->core.ef)));
 }
 
-SHA512_VTABLES(neon, "NEON accelerated");
+SHA512_VTABLES(neon, "NEON 加速");

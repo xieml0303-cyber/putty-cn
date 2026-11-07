@@ -350,7 +350,7 @@ static void serbreak_timer(void *ctx, unsigned long now)
     if (now == serial->clearbreak_time && serial->port) {
         ClearCommBreak(serial->port);
         serial->break_in_progress = false;
-        logevent(serial->logctx, "Finished serial break");
+        logevent(serial->logctx, "串口间断信号已结束");
     }
 }
 
@@ -362,7 +362,7 @@ static void serial_special(Backend *be, SessionSpecialCode code, int arg)
     Serial *serial = container_of(be, Serial, backend);
 
     if (serial->port && code == SS_BRK) {
-        logevent(serial->logctx, "Starting serial break at user request");
+        logevent(serial->logctx, "按用户要求开始发送串口间断信号");
         SetCommBreak(serial->port);
         /*
          * To send a serial break on Windows, we call SetCommBreak

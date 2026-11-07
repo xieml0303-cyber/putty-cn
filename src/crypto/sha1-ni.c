@@ -322,4 +322,4 @@ static void sha1_ni_digest(ssh_hash *hash, uint8_t *digest)
     PUT_32BIT_MSB_FIRST(digest + 16, e);
 }
 
-SHA1_VTABLE(ni, "SHA-NI accelerated");
+SHA1_VTABLE(ni, "SHA-NI 加速");

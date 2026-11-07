@@ -829,7 +829,7 @@ static char *connect_to_host(
          */
         addressfamily = conf_get_int(ssh->conf, CONF_addressfamily);
         addr = name_lookup(host, port, realhost, ssh->conf, addressfamily,
-                           ssh->logctx, "SSH connection");
+                           ssh->logctx, "SSH 连接");
         if ((err = sk_addr_error(addr)) != NULL) {
             sk_addr_free(addr);
             return dupstr(err);
@@ -1329,7 +1329,7 @@ const BackendVtable sshconn_backend = {
     .close_warn_text = ssh_close_warn_text,
     .id = "ssh-connection",
     .displayname_tc = "裸 ssh 连接",
-    .displayname_lc = "bare ssh-connection",
+    .displayname_lc = "①裸 SSH 连接；②〔保留原文〕bare ssh-connection",
     .protocol = PROT_SSHCONN,
     .flags = BACKEND_SUPPORTS_NC_HOST | BACKEND_NOTIFIES_SESSION_START,
 };

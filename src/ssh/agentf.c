@@ -230,7 +230,7 @@ static void agentf_send_eof(Channel *chan)
 
 static char *agentf_log_close_msg(Channel *chan)
 {
-    return dupstr("Agent-forwarding connection closed");
+    return dupstr("代理转发连接已关闭");
 }
 
 static void agentf_set_input_wanted(Channel *chan, bool wanted)

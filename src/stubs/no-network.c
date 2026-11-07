@@ -75,14 +75,14 @@ Socket *sk_new(SockAddr *addr, int port, bool privport, bool oobinline,
                bool nodelay, bool keepalive, Plug *plug)
 {
     return new_error_socket_fmt(
-        plug, "no actual networking in this application");
+        plug, "此程序不包含实际网络功能");
 }
 
 Socket *sk_newlistener(const char *srcaddr, int port, Plug *plug,
                        bool local_host_only, int orig_address_family)
 {
     return new_error_socket_fmt(
-        plug, "no actual networking in this application");
+        plug, "此程序不包含实际网络功能");
 }
 
 void *(sk_getxdmdata)(Socket *sock, int *lenp)
@@ -97,7 +97,7 @@ void plug_closing_errno(Plug *plug, int error)
 
 const char *sk_addr_error(SockAddr *addr)
 {
-    return "no actual network addresses in this application";
+    return "此程序不包含实际网络地址";
 }
 
 int net_service_lookup(const char *service)
@@ -128,7 +128,7 @@ SockAddr *sk_namedpipe_addr(const char *pipename)
 Socket *new_unix_listener(SockAddr *listenaddr, Plug *plug)
 {
     return new_error_socket_fmt(
-        plug, "no actual networking in this application");
+        plug, "此程序不包含实际网络功能");
 }
 
 void subproc_waiter_set_callback(
@@ -141,7 +141,7 @@ Socket *platform_start_subprocess(
     if (waiter)
         *waiter = NULL;
     return new_error_socket_fmt(
-        plug, "no actual networking in this application");
+        plug, "此程序不包含实际网络功能");
 }
 
 #ifdef PUTTY_WINDOWS_PLATFORM_H

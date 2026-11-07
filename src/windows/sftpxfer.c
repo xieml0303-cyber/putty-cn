@@ -1654,7 +1654,7 @@ static HWND sftp_ensure_hidden_window(void)
      * 正占着，覆盖它会让终端的 SSH 收不到网络事件。改由
      * sftp_xfer_open 在建连接期间用 winselgui_push_hwnd 临时绑定。
      */
-    sftp_hidden_hwnd = CreateWindowExW(0, classname, L"PuTTY SFTP",
+    sftp_hidden_hwnd = CreateWindowExW(0, classname, L"〔保留原文〕PuTTY SFTP",
                                        0, 0, 0, 0, 0,
                                        NULL, NULL, wc.hInstance, NULL);
     return sftp_hidden_hwnd;

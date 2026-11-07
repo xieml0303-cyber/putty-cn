@@ -855,7 +855,7 @@ static void loggingbuttons_handler(dlgcontrol *ctrl, dlgparam *dlg,
     int button;
     Conf *conf = (Conf *)data;
     /* This function works just like the standard radio-button handler,
-     * but it has to fall back to "no logging" in situations where the
+     * but it has to fall back to "不记录日志" in situations where the
      * configured logging type isn't applicable.
      */
     if (event == EVENT_REFRESH) {
@@ -927,7 +927,7 @@ static void cipherlist_handler(dlgcontrol *ctrl, dlgparam *dlg,
             { "-- 下面为警告选项 --",  CIPHER_WARN }
         };
 
-        /* Set up the "selected ciphers" box. */
+        /* Set up the "已选加密算法" box. */
         /* (cipherlist assumed to contain all ciphers) */
         dlg_update_start(ctrl, dlg);
         dlg_listbox_clear(ctrl, dlg);
@@ -997,16 +997,16 @@ static void kexlist_handler(dlgcontrol *ctrl, dlgparam *dlg,
             { "Diffie-Hellman group 16 (4096-bit)", KEX_DHGROUP16 },
             { "Diffie-Hellman group 17 (6144-bit)", KEX_DHGROUP17 },
             { "Diffie-Hellman group 18 (8192-bit)", KEX_DHGROUP18 },
-            { "Diffie-Hellman group exchange",      KEX_DHGEX },
-            { "RSA-based key exchange",             KEX_RSA },
-            { "ECDH key exchange",                  KEX_ECDH },
+            { "Diffie-Hellman 组交换",      KEX_DHGEX },
+            { "基于 RSA 的密钥交换",             KEX_RSA },
+            { "ECDH 密钥交换",                  KEX_ECDH },
             { "NTRU Prime / Curve25519 hybrid kex", KEX_NTRU_HYBRID },
             { "ML-KEM / Curve25519 hybrid kex",     KEX_MLKEM_25519_HYBRID },
             { "ML-KEM / NIST ECDH hybrid kex",      KEX_MLKEM_NIST_HYBRID },
             { "-- 下面为警告选项 --",              KEX_WARN }
         };
 
-        /* Set up the "kex preference" box. */
+        /* Set up the "密钥交换算法优先级" box. */
         /* (kexlist assumed to contain all algorithms) */
         dlg_update_start(ctrl, dlg);
         dlg_listbox_clear(ctrl, dlg);
@@ -1050,7 +1050,7 @@ static void hklist_handler(dlgcontrol *ctrl, dlgparam *dlg,
             { "-- 下面为警告选项 --", HK_WARN }
         };
 
-        /* Set up the "host key preference" box. */
+        /* Set up the "主机密钥算法优先级" box. */
         /* (hklist assumed to contain all algorithms) */
         dlg_update_start(ctrl, dlg);
         dlg_listbox_clear(ctrl, dlg);
@@ -1542,7 +1542,7 @@ static void config_coe_handler(dlgcontrol *ctrl, dlgparam *dlg,
  * cn: Persist the "默认设置" session with the same protections as the
  * save button: the auto-fallback serial port is not baked in (H3),
  * and the connection targets (host/port/protocol) are written as the
- * pristine defaults. Used by the save button and by "save and exit"
+ * pristine defaults. Used by the save button and by "保存并退出"
  * in the close prompt. Returns NULL on success, else the error text
  * (caller frees).
  */

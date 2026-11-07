@@ -205,7 +205,7 @@ typedef const char *HelpCtx;
 #define WINHELP_CTX_errors_cert_mismatch "errors-cert-mismatch"
 
 /* These are used in Windows-specific bits of the frontend.
- * We (ab)use "help context identifiers" (dwContextId) to identify them. */
+ * We (ab)use "帮助上下文标识符" (dwContextId) to identify them. */
 
 #define HELPCTXID(x) WINHELP_CTXID_ ## x
 

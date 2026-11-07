@@ -359,7 +359,7 @@ static void ssh2_bpp_handle_input(BinaryPacketProtocol *bpp)
                     break;
                 if (s->packetlen >= (long)OUR_V2_PACKETLIMIT) {
                     ssh_sw_abort(s->bpp.ssh,
-                                 "No valid incoming packet found");
+                                 "未找到有效的入站数据包");
                     crStopV;
                 }
             }
@@ -406,7 +406,7 @@ static void ssh2_bpp_handle_input(BinaryPacketProtocol *bpp)
             if (s->len < 0 || s->len > (long)OUR_V2_PACKETLIMIT ||
                 s->len % s->cipherblk != 0) {
                 ssh_sw_abort(s->bpp.ssh,
-                             "Incoming packet length field was garbled");
+                             "入站数据包的长度字段损坏");
                 crStopV;
             }
 
@@ -435,7 +435,7 @@ static void ssh2_bpp_handle_input(BinaryPacketProtocol *bpp)
              */
             if (s->in.mac && !ssh2_mac_verify(
                     s->in.mac, s->data, s->len + 4, s->in.sequence)) {
-                ssh_sw_abort(s->bpp.ssh, "Incorrect MAC received on packet");
+                ssh_sw_abort(s->bpp.ssh, "收到数据包的 MAC 校验不正确");
                 crStopV;
             }
 
@@ -470,7 +470,7 @@ static void ssh2_bpp_handle_input(BinaryPacketProtocol *bpp)
             if (s->len < 0 || s->len > (long)OUR_V2_PACKETLIMIT ||
                 (s->len + 4) % s->cipherblk != 0) {
                 ssh_sw_abort(s->bpp.ssh,
-                             "Incoming packet was garbled on decryption");
+                             "入站数据包解密后损坏");
                 crStopV;
             }
 
@@ -507,7 +507,7 @@ static void ssh2_bpp_handle_input(BinaryPacketProtocol *bpp)
              */
             if (s->in.mac && !ssh2_mac_verify(
                     s->in.mac, s->data, s->len + 4, s->in.sequence)) {
-                ssh_sw_abort(s->bpp.ssh, "Incorrect MAC received on packet");
+                ssh_sw_abort(s->bpp.ssh, "收到数据包的 MAC 校验不正确");
                 crStopV;
             }
         }
@@ -515,7 +515,7 @@ static void ssh2_bpp_handle_input(BinaryPacketProtocol *bpp)
         s->pad = s->data[4];
         if (s->pad < 4 || s->len - s->pad < 1) {
             ssh_sw_abort(s->bpp.ssh,
-                         "Invalid padding length on received packet");
+                         "收到的数据包填充长度无效");
             crStopV;
         }
         /*
@@ -671,8 +671,8 @@ static void ssh2_bpp_handle_input(BinaryPacketProtocol *bpp)
                      * time. */
                     ssh_proto_error(s->bpp.ssh,
                                     "Remote side sent SSH2_MSG_EXT_INFO "
-                                    "that was not immediately after the "
-                                    "initial NEWKEYS");
+                                    "也不是紧接在"
+                                    "初始 NEWKEYS 之后");
                     return;
                 } else if (s->nnewkeys > 0 && s->seen_userauth_success) {
                     /* We're the client, so they're the server. In
@@ -723,9 +723,9 @@ static void ssh2_bpp_handle_input(BinaryPacketProtocol *bpp)
     crMaybeWaitUntilV(!pq_peek(&s->bpp.in_pq));
     if (!s->bpp.expect_close) {
         ssh_remote_error(s->bpp.ssh,
-                         "Remote side unexpectedly closed network connection");
+                         "远端意外关闭了网络连接");
     } else {
-        ssh_remote_eof(s->bpp.ssh, "Remote side closed network connection");
+        ssh_remote_eof(s->bpp.ssh, "远端关闭了网络连接");
     }
     return;  /* avoid touching s now it's been freed */
 

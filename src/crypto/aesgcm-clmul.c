@@ -176,5 +176,5 @@ static inline void aesgcm_clmul_output(aesgcm_clmul *ctx,
 }
 
 #define AESGCM_FLAVOUR clmul
-#define AESGCM_NAME "CLMUL accelerated"
+#define AESGCM_NAME "CLMUL 加速"
 #include "aesgcm-footer.h"

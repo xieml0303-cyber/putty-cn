@@ -659,7 +659,7 @@ const ssh_cipheralg ssh_blowfish_ssh1 = {
     .real_keybits = 128,
     .padded_keybytes = SSH1_SESSION_KEY_LENGTH,
     .flags = SSH_CIPHER_IS_CBC,
-    .text_name = "Blowfish-256 CBC",
+    .text_name = "①〔保留原文〕Blowfish-256 CBC；②Blowfish-256 CBC 模式",
 };
 
 const ssh_cipheralg ssh_blowfish_ssh2 = {
@@ -675,7 +675,7 @@ const ssh_cipheralg ssh_blowfish_ssh2 = {
     .real_keybits = 128,
     .padded_keybytes = 16,
     .flags = SSH_CIPHER_IS_CBC,
-    .text_name = "Blowfish-128 CBC",
+    .text_name = "①〔保留原文〕Blowfish-128 CBC；②Blowfish-128 CBC 模式",
 };
 
 const ssh_cipheralg ssh_blowfish_ssh2_ctr = {
@@ -691,7 +691,7 @@ const ssh_cipheralg ssh_blowfish_ssh2_ctr = {
     .real_keybits = 256,
     .padded_keybytes = 32,
     .flags = 0,
-    .text_name = "Blowfish-256 SDCTR",
+    .text_name = "①〔保留原文〕Blowfish-256 SDCTR；②Blowfish-256 SDCTR 模式",
 };
 
 static const ssh_cipheralg *const blowfish_list[] = {

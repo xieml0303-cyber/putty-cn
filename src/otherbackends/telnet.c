@@ -750,7 +750,7 @@ static char *telnet_init(const BackendVtable *vt, Seat *seat,
      */
     addressfamily = conf_get_int(telnet->conf, CONF_addressfamily);
     addr = name_lookup(host, port, realhost, telnet->conf, addressfamily,
-                       telnet->logctx, "Telnet connection");
+                       telnet->logctx, "Telnet 连接");
     if ((err = sk_addr_error(addr)) != NULL) {
         sk_addr_free(addr);
         return dupstr(err);
@@ -1008,21 +1008,21 @@ static void telnet_special(Backend *be, SessionSpecialCode code, int arg)
 static const SessionSpecial *telnet_get_specials(Backend *be)
 {
     static const SessionSpecial specials[] = {
-        {"Are You There", SS_AYT},
+        {"询问对方是否在线", SS_AYT},
         {"Break", SS_BRK},
         {"Synch", SS_SYNCH},
-        {"Erase Character", SS_EC},
-        {"Erase Line", SS_EL},
+        {"删除字符", SS_EC},
+        {"删除行", SS_EL},
         {"Go Ahead", SS_GA},
-        {"No Operation", SS_NOP},
+        {"空操作", SS_NOP},
         {NULL, SS_SEP},
-        {"Abort Process", SS_ABORT},
-        {"Abort Output", SS_AO},
-        {"Interrupt Process", SS_IP},
-        {"Suspend Process", SS_SUSP},
+        {"中止进程", SS_ABORT},
+        {"中止输出", SS_AO},
+        {"中断进程", SS_IP},
+        {"挂起进程", SS_SUSP},
         {NULL, SS_SEP},
-        {"End Of Record", SS_EOR},
-        {"End Of File", SS_EOF},
+        {"记录结束", SS_EOR},
+        {"文件结束", SS_EOF},
         {NULL, SS_EXITMENU}
     };
     return specials;

@@ -101,5 +101,5 @@ static inline void sha256_block_pad(sha256_block *blk, BinarySink *bs)
         put_byte(bs, 0);
     put_uint64(bs, final_len);
 
-    assert(blk->used == 0 && "Should have exactly hit a block boundary");
+    assert(blk->used == 0 && "本应恰好落在分组边界（内部错误）");
 }

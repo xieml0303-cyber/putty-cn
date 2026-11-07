@@ -85,7 +85,7 @@ void key_components_free(key_components *kc)
             strbuf_free(comp->str);
             break;
           default:
-            unreachable("bad key component type");
+            unreachable("密钥组件类型异常（内部错误）");
         }
     }
     sfree(kc->components);

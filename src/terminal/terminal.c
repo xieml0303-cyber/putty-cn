@@ -2558,7 +2558,7 @@ void term_size(Terminal *term, int newrows, int newcols, int newsavelines)
     int save_alt_which = term->alt_which;
     /*
      * swap_screen() below runs seen_disp_event(), which honours the
-     * "scroll to bottom on display activity" setting and would throw
+     * "显示活动时滚动到底部" setting and would throw
      * away the user's scrollback position. A resize is not output, so
      * keep the viewpoint where it was; reflow_buffer() re-maps it.
      */
@@ -8139,7 +8139,7 @@ int format_small_keypad_key(char *buf, Terminal *term, SmallKeypadKey key,
       case SKK_END: code = 4; break;
       case SKK_PGUP: code = 5; break;
       case SKK_PGDN: code = 6; break;
-      default: unreachable("bad small keypad key enum value");
+      default: unreachable("小键盘按键枚举值异常（内部错误）");
     }
 
     /* Reorder edit keys to physical order */
@@ -8385,7 +8385,7 @@ static void term_userpass_next_prompt(struct term_userpass_state *s);
 static inline SeatPromptResult signal_prompts_t(Terminal *term, prompts_t *p,
                                                 SeatPromptResult spr)
 {
-    assert(p->callback && "Asynchronous userpass input requires a callback");
+    assert(p->callback && "异步用户名／密码输入需要回调函数（内部错误）");
     queue_toplevel_callback(p->callback, p->callback_ctx);
     if (term->ldisc)
         ldisc_provide_userpass_le(term->ldisc, NULL);
@@ -8521,7 +8521,7 @@ SeatPromptResult term_get_userpass_input(Terminal *term, prompts_t *p)
     if (!term->ldisc) {
         /* Can't handle interactive prompts without an ldisc */
         return signal_prompts_t(term, p, SPR_SW_ABORT(
-            "Terminal not prepared for interactive prompts"));
+            "终端尚未准备好处理交互式提示（内部错误）"));
     }
 
     if (p->spr.kind != SPRK_INCOMPLETE) {

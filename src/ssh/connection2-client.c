@@ -26,14 +26,14 @@ static ChanopenResult chan_open_x11(
     if (!s->X11_fwd_enabled && !s->connshare) {
         CHANOPEN_RETURN_FAILURE(
             SSH2_OPEN_ADMINISTRATIVELY_PROHIBITED,
-            ("X11 forwarding is not enabled"));
+            ("未启用 X11 转发"));
     }
 
     peeraddr_str = peeraddr.ptr ? mkstr(peeraddr) : NULL;
     ch = x11_new_channel(
         s->x11authtree, sc, peeraddr_str, peerport, s->connshare != NULL);
     sfree(peeraddr_str);
-    ppl_logevent("Opened X11 forward channel");
+    ppl_logevent("已打开 X11 转发通道");
     CHANOPEN_RETURN_SUCCESS(ch);
 }
 
@@ -58,7 +58,7 @@ static ChanopenResult chan_open_forwarded_tcpip(
     if (realpf == NULL) {
         CHANOPEN_RETURN_FAILURE(
             SSH2_OPEN_ADMINISTRATIVELY_PROHIBITED,
-            ("Remote port is not recognised"));
+            ("无法识别远端端口"));
     }
 
     if (realpf->share_ctx) {
@@ -79,10 +79,10 @@ static ChanopenResult chan_open_forwarded_tcpip(
         sfree(err);
         CHANOPEN_RETURN_FAILURE(
             SSH2_OPEN_CONNECT_FAILED,
-            ("Port open failed"));
+            ("端口打开失败"));
     }
 
-    ppl_logevent("Forwarded port opened successfully");
+    ppl_logevent("转发端口已成功打开");
     CHANOPEN_RETURN_SUCCESS(ch);
 }
 
@@ -92,7 +92,7 @@ static ChanopenResult chan_open_auth_agent(
     if (!ssh_agent_forwarding_permitted(&s->cl)) {
         CHANOPEN_RETURN_FAILURE(
             SSH2_OPEN_ADMINISTRATIVELY_PROHIBITED,
-            ("Agent forwarding is not enabled"));
+            ("未启用代理转发"));
     }
 
     /*
@@ -139,7 +139,7 @@ ChanopenResult ssh2_connection_parse_channel_open(
     } else {
         CHANOPEN_RETURN_FAILURE(
             SSH2_OPEN_UNKNOWN_CHANNEL_TYPE,
-            ("Unsupported channel type requested"));
+            ("请求了不受支持的通道类型"));
     }
 }
 
@@ -184,7 +184,7 @@ PktOut *ssh2_portfwd_chanopen(
      * We make up values for the originator data; partly it's too much
      * hassle to keep track, and partly I'm not convinced the server
      * should be told details like that about my local network
-     * configuration. The "originator IP address" is syntactically a
+     * configuration. The "发起方 IP 地址" is syntactically a
      * numeric IP address, and some servers (e.g., Tectia) get upset
      * if it doesn't match this syntax.
      */
@@ -312,7 +312,7 @@ SshChannel *ssh2_session_open(ConnectionLayer *cl, Channel *chan)
     c->halfopen = true;
     c->chan = chan;
 
-    ppl_logevent("Opening main session channel");
+    ppl_logevent("正在打开主会话通道");
 
     pktout = ssh2_chanopen_init(c, "session");
     pq_push(s->ppl.out_pq, pktout);
@@ -323,12 +323,12 @@ SshChannel *ssh2_session_open(ConnectionLayer *cl, Channel *chan)
 SshChannel *ssh2_serverside_x11_open(
     ConnectionLayer *cl, Channel *chan, const SocketEndpointInfo *pi)
 {
-    unreachable("Should never be called in the client");
+    unreachable("不应在客户端调用（内部错误）");
 }
 
 SshChannel *ssh2_serverside_agent_open(ConnectionLayer *cl, Channel *chan)
 {
-    unreachable("Should never be called in the client");
+    unreachable("不应在客户端调用（内部错误）");
 }
 
 static void ssh2_channel_response(
@@ -379,19 +379,19 @@ bool ssh2channel_start_subsystem(
 
 void ssh2channel_send_exit_status(SshChannel *sc, int status)
 {
-    unreachable("Should never be called in the client");
+    unreachable("不应在客户端调用（内部错误）");
 }
 
 void ssh2channel_send_exit_signal(
     SshChannel *sc, ptrlen signame, bool core_dumped, ptrlen msg)
 {
-    unreachable("Should never be called in the client");
+    unreachable("不应在客户端调用（内部错误）");
 }
 
 void ssh2channel_send_exit_signal_numeric(
     SshChannel *sc, int signum, bool core_dumped, ptrlen msg)
 {
-    unreachable("Should never be called in the client");
+    unreachable("不应在客户端调用（内部错误）");
 }
 
 void ssh2channel_request_x11_forwarding(

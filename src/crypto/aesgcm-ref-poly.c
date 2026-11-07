@@ -360,5 +360,5 @@ static inline void aesgcm_ref_poly_output(aesgcm_ref_poly *ctx,
 }
 
 #define AESGCM_FLAVOUR ref_poly
-#define AESGCM_NAME "reference polynomial-based implementation"
+#define AESGCM_NAME "基于参考多项式的实现"
 #include "aesgcm-footer.h"

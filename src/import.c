@@ -355,7 +355,7 @@ static struct openssh_pem_key *load_openssh_pem_key(BinarySource *src,
         goto error;
     }
     if (!strstartswith(line, "-----BEGIN ") ||
-        !strendswith(line, "PRIVATE KEY-----")) {
+        !strendswith(line, "〔保留原文〕PRIVATE KEY-----")) {
         errmsg = "文件未以 OpenSSH 密钥头开头";
         goto error;
     }
@@ -392,7 +392,7 @@ static struct openssh_pem_key *load_openssh_pem_key(BinarySource *src,
             goto error;
         }
         if (strstartswith(line, "-----END ") &&
-            strendswith(line, "PRIVATE KEY-----")) {
+            strendswith(line, "〔保留原文〕PRIVATE KEY-----")) {
             sfree(line);
             line = NULL;
             break;                     /* done */

@@ -180,7 +180,7 @@ static inline bool is_dedicated_byte(char c, InputType type)
          */
         return c == '\r';
       default:
-        unreachable("those values should be exhaustive");
+        unreachable("这些取值应已穷尽所有情况（内部错误）");
     }
 }
 

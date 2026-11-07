@@ -12,5 +12,5 @@ void term_nopaste(Terminal *term)
 
 SeatPromptResult term_get_userpass_input(Terminal *term, prompts_t *p)
 {
-    return SPR_SW_ABORT("No terminal to send interactive prompts to");
+    return SPR_SW_ABORT("没有可发送交互式提示的终端");
 }

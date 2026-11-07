@@ -77,7 +77,7 @@ SeatPromptResult console_get_userpass_input_diagnostic(prompts_t *p)
                        p->prompts[i]->prompt, p->prompts[i]->result->s);
         } else {
             promptsgot++;           /* track number of requests anyway */
-            ret = SPR_SW_ABORT("preloaded prompt unavailable in cgtest");
+            ret = SPR_SW_ABORT("cgtest 中不提供预加载提示");
             if (cgtest_verbose)
                 printf("  prompt \"%s\": no response preloaded\n",
                        p->prompts[i]->prompt);

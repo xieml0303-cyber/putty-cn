@@ -23,7 +23,7 @@ struct bufchain_granule {
 
 static void uninitialised_queue_idempotent_callback(IdempotentCallback *ic)
 {
-    unreachable("bufchain callback used while uninitialised");
+    unreachable("未初始化时使用了 bufchain 回调（内部错误）");
 }
 
 void bufchain_init(bufchain *ch)

@@ -180,8 +180,8 @@ static char *conpty_init(const BackendVtable *vt, Seat *seat,
     memset(&si, 0, sizeof(si));
 
     if (!init_conpty_api()) {
-        err = dupprintf("Pseudo-console API is not available on this "
-                        "Windows system");
+        err = dupprintf("此"
+                        "Windows 系统不支持伪控制台 API");
         goto out;
     }
 

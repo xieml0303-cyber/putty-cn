@@ -28,7 +28,7 @@ void backend_socket_log(Seat *seat, LogContext *logctx, Socket *sock,
         if (addr)
             sk_getaddr(addr, addrbuf, lenof(addrbuf));
         else /* fallback if address unavailable */
-            sprintf(addrbuf, "remote host");
+            sprintf(addrbuf, "远端主机");
         msg = dupprintf("Connected to %s", addrbuf);
         if (sock) {
             SocketEndpointInfo *local_end = sk_endpoint_info(sock, false);

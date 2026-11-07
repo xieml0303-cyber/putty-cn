@@ -1904,7 +1904,7 @@ SockAddr *platform_get_x11_unix_address(const char *display, int displaynum)
 {
     SockAddr *addr = snew(SockAddr);
     memset(addr, 0, sizeof(SockAddr));
-    addr->error = "unix sockets for X11 not supported on this platform";
+    addr->error = "此平台不支持 X11 所需的 Unix 域套接字";
     addr->refcount = 1;
     return addr;
 }

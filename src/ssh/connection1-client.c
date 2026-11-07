@@ -126,7 +126,7 @@ bool ssh1_handle_direction_specific_packet(
                 s->ppl.bpp, SSH1_MSG_CHANNEL_OPEN_FAILURE);
             put_uint32(pktout, remid);
             pq_push(s->ppl.out_pq, pktout);
-            ppl_logevent("Rejected X11 connect request");
+            ppl_logevent("已拒绝 X11 连接请求");
         } else {
             c = snew(struct ssh1_channel);
             c->connlayer = s;
@@ -142,7 +142,7 @@ bool ssh1_handle_direction_specific_packet(
             put_uint32(pktout, c->remoteid);
             put_uint32(pktout, c->localid);
             pq_push(s->ppl.out_pq, pktout);
-            ppl_logevent("Opened X11 forward channel");
+            ppl_logevent("已打开 X11 转发通道");
         }
 
         return true;
@@ -239,7 +239,7 @@ bool ssh1_handle_direction_specific_packet(
                 put_uint32(pktout, c->remoteid);
                 put_uint32(pktout, c->localid);
                 pq_push(s->ppl.out_pq, pktout);
-                ppl_logevent("Forwarded port opened successfully");
+                ppl_logevent("转发端口已成功打开");
             }
         }
 
@@ -533,12 +533,12 @@ struct ssh_rportfwd *ssh1_rportfwd_alloc(
 SshChannel *ssh1_serverside_x11_open(
     ConnectionLayer *cl, Channel *chan, const SocketEndpointInfo *pi)
 {
-    unreachable("Should never be called in the client");
+    unreachable("不应在客户端调用（内部错误）");
 }
 
 SshChannel *ssh1_serverside_agent_open(ConnectionLayer *cl, Channel *chan)
 {
-    unreachable("Should never be called in the client");
+    unreachable("不应在客户端调用（内部错误）");
 }
 
 bool ssh1_connection_need_antispoof_prompt(struct ssh1_connection_state *s)

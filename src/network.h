@@ -262,7 +262,7 @@ static inline void plug_closing_normal(Plug *p)
 static inline void plug_closing_error(Plug *p, const char *msg)
 { p->vt->closing(p, PLUGCLOSE_ERROR, msg); }
 static inline void plug_closing_user_abort(Plug *p)
-{ p->vt->closing(p, PLUGCLOSE_USER_ABORT, "User aborted connection setup"); }
+{ p->vt->closing(p, PLUGCLOSE_USER_ABORT, "用户中止了连接建立"); }
 static inline void plug_receive(Plug *p, int urg, const char *data, size_t len)
 { p->vt->receive(p, urg, data, len); }
 static inline void plug_sent (Plug *p, size_t bufsize)

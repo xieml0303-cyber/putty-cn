@@ -688,25 +688,25 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
     strbuf *tmp = strbuf_new();
 
     seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                            "Certificate type");
+                            "证书类型");
     switch (ck->type) {
       case SSH_CERT_TYPE_HOST:
         seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT,
                                 "host key");
         seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                                "Valid host names");
+                                "有效主机名");
         break;
       case SSH_CERT_TYPE_USER:
         seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT,
-                                "user authentication key");
+                                "用户认证密钥");
         seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                                "Valid user names");
+                                "有效用户名");
         break;
       default:
         seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT,
                                 "unknown type %" PRIu32, ck->type);
         seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                                "Valid principals");
+                                "有效主体名（principals）");
         break;
     }
 
@@ -729,7 +729,7 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
     }
 
     seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                            "Validity period");
+                            "有效期");
     strbuf_clear(tmp);
     if (ck->valid_after == 0) {
         if (ck->valid_before == 0xFFFFFFFFFFFFFFFF) {
@@ -775,7 +775,7 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
                 BinarySource_BARE_INIT_PL(src2, value);
                 ptrlen addresslist = get_string(src2);
                 seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                                        "Permitted client IP addresses");
+                                        "允许的客户端 IP 地址");
                 seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT,
                                         "%.*s", PTRLEN_PRINTF(addresslist));
             } else if (ck->type == SSH_CERT_TYPE_USER &&
@@ -784,7 +784,7 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
                 BinarySource_BARE_INIT_PL(src2, value);
                 ptrlen command = get_string(src2);
                 seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                                        "Forced remote command");
+                                        "强制执行的远程命令");
                 seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT,
                                         "%.*s", PTRLEN_PRINTF(command));
             }
@@ -829,22 +829,22 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
     if (ck->type == SSH_CERT_TYPE_USER) {
         if (!x11_ok) {
             seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                                    "X11 forwarding permitted");
+                                    "允许 X11 转发");
             seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT, "no");
         }
         if (!agent_ok) {
             seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                                    "Agent forwarding permitted");
+                                    "允许代理转发");
             seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT, "no");
         }
         if (!portfwd_ok) {
             seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                                    "Port forwarding permitted");
+                                    "允许端口转发");
             seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT, "no");
         }
         if (!pty_ok) {
             seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                                    "PTY allocation permitted");
+                                    "允许分配伪终端（PTY）");
             seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT, "no");
         }
         if (!user_rc_ok) {
@@ -855,18 +855,18 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
     }
 
     seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                            "Certificate ID string");
+                            "证书 ID 字符串");
     seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT,
                             "%s", ck->key_id->s);
     seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                            "Certificate serial number");
+                            "证书序列号");
     seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT,
                             "%" PRIu64, ck->serial);
 
     char *fp = ssh2_fingerprint_blob(ptrlen_from_strbuf(ck->signature_key),
                                      SSH_FPTYPE_DEFAULT);
     seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
-                            "Fingerprint of signing CA key");
+                            "签名 CA 密钥的指纹");
     seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT, "%s", fp);
     sfree(fp);
 
@@ -969,7 +969,7 @@ static bool opensshcert_check_cert(
      */
     ca_key = opensshcert_ca_pub_key(ck, make_ptrlen(NULL, 0), NULL);
     if (!ca_key) {
-        put_fmt(error, "Certificate's signing key is invalid");
+        put_fmt(error, "证书的签名密钥无效");
         goto out;
     }
     if (ssh_key_alg(ca_key)->is_certificate) {
@@ -986,8 +986,8 @@ static bool opensshcert_check_cert(
     ssh_key_free(ca_key);
     ca_key = opensshcert_ca_pub_key(ck, signature, NULL);
     if (!ca_key) {
-        put_fmt(error, "Certificate's signing key does not match "
-                "signature type");
+        put_fmt(error, "证书的签名密钥与"
+                "签名类型不匹配");
         goto out;
     }
 
@@ -1006,7 +1006,7 @@ static bool opensshcert_check_cert(
     opensshcert_signature_preimage(ck, BinarySink_UPCAST(preimage));
 
     if (!ssh_key_verify(ca_key, signature, ptrlen_from_strbuf(preimage))) {
-        put_fmt(error, "Certificate's signature is invalid");
+        put_fmt(error, "证书的签名无效");
         goto out;
     }
 
@@ -1032,7 +1032,7 @@ static bool opensshcert_check_cert(
      * Check the time bounds on the certificate.
      */
     if (time < ck->valid_after) {
-        put_fmt(error, "Certificate is not valid until ");
+        put_fmt(error, "证书自以下时间起生效");
         opensshcert_time_to_iso8601(BinarySink_UPCAST(error),
                                     ck->valid_after);
         goto out;
@@ -1058,8 +1058,8 @@ static bool opensshcert_check_cert(
         while (get_avail(src)) {
             ptrlen valid_principal = get_string(src);
             if (get_err(src)) {
-                put_fmt(error, "Certificate's valid principals list is "
-                        "incorrectly formatted");
+                put_fmt(error, "证书的有效主体名列表"
+                        "格式错误");
                 goto out;
             }
             if (ptrlen_eq_ptrlen(valid_principal, principal))
@@ -1075,7 +1075,7 @@ static bool opensshcert_check_cert(
          * (If you've typed the wrong spelling of the host name, you
          * really need to see "This cert is for 'foo.example.com' and
          * I was trying to match it against 'foo'", rather than just
-         * "Computer says no".)
+         * "①计算机说不行（直译，保留幽默）；②校验不通过（意译，正式语体）".)
          */
         put_fmt(error, "Certificate's %s list [",
                 host ? "hostname" : "username");
@@ -1108,8 +1108,8 @@ static bool opensshcert_check_cert(
             ptrlen option = get_string(src);
             ptrlen data = get_string(src);
             if (get_err(src)) {
-                put_fmt(error, "Certificate's critical options list is "
-                        "incorrectly formatted");
+                put_fmt(error, "证书的关键选项列表"
+                        "格式错误");
                 goto out;
             }
 

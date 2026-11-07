@@ -1928,7 +1928,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
                 else if (state->keytype == ECDSA || state->keytype == EDDSA)
                     raw_entropy_required = (state->curve_bits / 2) * 2;
                 else
-                    unreachable("we must have initialised keytype by now");
+                    unreachable("此时应已初始化 keytype（内部错误）");
 
                 /* Bound the entropy collection above by the amount of
                  * data we can actually fit into the PRNG. Any more

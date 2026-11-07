@@ -92,7 +92,7 @@ struct terminal_tag {
     int disptop;                       /* distance scrolled back (0 or -ve) */
     int tempsblines;                   /* number of lines of .scrollback that
                                           can be retrieved onto the terminal
-                                          ("temporary scrollback") */
+                                          ("临时回滚缓冲区") */
 
     termline **disptext;               /* buffer of text on real screen */
 

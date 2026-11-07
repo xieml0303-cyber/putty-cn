@@ -456,7 +456,7 @@ static void do_cmd(char *host, char *user, char *cmd)
                          " exec /usr/lib/sftp-server\n"
                          "test -x /usr/local/lib/sftp-server &&"
                          " exec /usr/local/lib/sftp-server\n"
-                         "exec sftp-server");
+                         "〔保留原文〕exec sftp-server");
             conf_set_bool(conf, CONF_ssh_subsys2, false);
         }
     } else {

@@ -695,7 +695,7 @@ const ssh_cipheralg ssh_des = {
     .real_keybits = 56,
     .padded_keybytes = 8,
     .flags = SSH_CIPHER_IS_CBC,
-    .text_name = "single-DES CBC",
+    .text_name = "①〔保留原文〕single-DES CBC；②单重 DES CBC 模式",
 };
 
 const ssh_cipheralg ssh_des_sshcom_ssh2 = {
@@ -712,7 +712,7 @@ const ssh_cipheralg ssh_des_sshcom_ssh2 = {
     .real_keybits = 56,
     .padded_keybytes = 8,
     .flags = SSH_CIPHER_IS_CBC,
-    .text_name = "single-DES CBC",
+    .text_name = "①〔保留原文〕single-DES CBC；②单重 DES CBC 模式",
 };
 
 static const ssh_cipheralg *const des_list[] = {
@@ -816,7 +816,7 @@ const ssh_cipheralg ssh_3des_ssh2 = {
     .real_keybits = 168,
     .padded_keybytes = 24,
     .flags = SSH_CIPHER_IS_CBC,
-    .text_name = "triple-DES CBC",
+    .text_name = "①〔保留原文〕triple-DES CBC；②三重 DES CBC 模式",
 };
 
 /* ----------------------------------------------------------------------
@@ -914,7 +914,7 @@ const ssh_cipheralg ssh_3des_ssh2_ctr = {
     .real_keybits = 168,
     .padded_keybytes = 24,
     .flags = 0,
-    .text_name = "triple-DES SDCTR",
+    .text_name = "①〔保留原文〕triple-DES SDCTR；②三重 DES SDCTR 模式",
 };
 
 static const ssh_cipheralg *const des3_list[] = {
@@ -1049,5 +1049,5 @@ const ssh_cipheralg ssh_3des_ssh1 = {
     .real_keybits = 168,
     .padded_keybytes = 24,
     .flags = SSH_CIPHER_IS_CBC,
-    .text_name = "triple-DES inner-CBC",
+    .text_name = "①〔保留原文〕triple-DES inner-CBC；②三重 DES 内层 CBC 模式",
 };

@@ -377,7 +377,7 @@ static void ssh1_connection_process_queue(PacketProtocolLayer *ppl)
         s->antispoof_prompt = ssh_ppl_new_prompts(&s->ppl);
         s->antispoof_prompt->to_server = true;
         s->antispoof_prompt->from_server = false;
-        s->antispoof_prompt->name = dupstr("Authentication successful");
+        s->antispoof_prompt->name = dupstr("认证成功");
         add_prompt(
             s->antispoof_prompt,
             dupstr("Access granted. Press Return to begin session. "), false);
@@ -542,7 +542,7 @@ bool ssh1_check_termination(struct ssh1_connection_state *s)
             s->ppl.bpp, SSH1_CMSG_EXIT_CONFIRMATION);
         pq_push(s->ppl.out_pq, pktout);
 
-        ssh_user_close(s->ppl.ssh, "Session finished");
+        ssh_user_close(s->ppl.ssh, "会话已结束");
         return true;
     }
 

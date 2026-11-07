@@ -87,7 +87,7 @@ static int conf_cmp(void *av, void *bv)
       case CONF_TYPE_NONE:
         return 0;
       default:
-        unreachable("Unsupported subkey type");
+        unreachable("不支持的子项类型");
     }
 }
 
@@ -113,7 +113,7 @@ static int conf_cmp_constkey(void *av, void *bv)
       case CONF_TYPE_NONE:
         return 0;
       default:
-        unreachable("Unsupported subkey type");
+        unreachable("不支持的子项类型");
     }
 }
 

@@ -110,7 +110,7 @@ bool chan_no_change_window_size(
 
 void chan_no_request_response(Channel *chan, bool success)
 {
-    unreachable("this channel type should never send a want-reply request");
+    unreachable("此通道类型不应发送 want-reply 请求（内部错误）");
 }
 
 /* ----------------------------------------------------------------------

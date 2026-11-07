@@ -130,7 +130,7 @@ bool dotest(const char *file, int line, const char *input, size_t ninput,
         if (wc == 0xFFFD) {
             /* In the 'chars' array, any occurrence of 0xFFFD is followed
              * by the expected error code */
-            assert(noutput < nchars && "bad test data");
+            assert(noutput < nchars && "测试数据有误（内部错误）");
             expected_err = chars[noutput++];
         } else {
             /* Expect success status to go with any non-FFFD character */

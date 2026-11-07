@@ -356,4 +356,4 @@ NEON_ENC_DEC(192)
 NEON_ENC_DEC(256)
 
 AES_EXTRA(_neon);
-AES_ALL_VTABLES(_neon, "NEON accelerated");
+AES_ALL_VTABLES(_neon, "NEON 加速");

@@ -736,7 +736,7 @@ struct BackendVtable {
      * connection-sharing upstream exists for a given configuration. */
     bool (*test_for_upstream)(const char *host, int port, Conf *conf);
     /* Special-purpose function to return additional information to put
-     * in a "are you sure you want to close this session" dialog;
+     * in a "确定要关闭此会话吗" dialog;
      * return NULL if no such info, otherwise caller must free.
      * Only implemented in the SSH protocol, to warn about downstream
      * connections that would be lost if this one were terminated. */
@@ -1018,7 +1018,7 @@ typedef struct truecolour {
  */
 #define CROSS_PLATFORM_CLIPBOARDS(X)                    \
     X(CLIP_NULL, "null clipboard")                      \
-    X(CLIP_LOCAL, "last text selected in terminal")     \
+    X(CLIP_LOCAL, "终端中最后选中的文本")     \
     /* end of list */
 
 #define ALL_CLIPBOARDS(X)                       \

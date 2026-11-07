@@ -267,15 +267,15 @@ wchar_t *decode_utf8_to_wide_string(const char *ustr);
  * error indicator on the source, of course). */
 #define DECODE_UTF8_FAILURE_LIST(X) \
     X(DUTF8_SUCCESS, "success")                                      \
-    X(DUTF8_SPURIOUS_CONTINUATION, "spurious continuation byte")     \
-    X(DUTF8_ILLEGAL_BYTE, "illegal UTF-8 byte value")                \
-    X(DUTF8_E_OUT_OF_DATA, "unfinished multibyte encoding at end of string") \
-    X(DUTF8_TRUNCATED_SEQUENCE, "multibyte encoding interrupted by " \
-      "non-continuation byte")                                       \
-    X(DUTF8_OVERLONG_ENCODING, "overlong encoding")                  \
+    X(DUTF8_SPURIOUS_CONTINUATION, "多余的续字节")     \
+    X(DUTF8_ILLEGAL_BYTE, "非法的 UTF-8 字节值")                \
+    X(DUTF8_E_OUT_OF_DATA, "字符串末尾的多字节编码未完成") \
+    X(DUTF8_TRUNCATED_SEQUENCE, "多字节编码被" \
+      "非续字节中断")                                       \
+    X(DUTF8_OVERLONG_ENCODING, "超长编码")                  \
     X(DUTF8_ENCODED_SURROGATE, "Unicode surrogate character encoded in " \
       "UTF-8")                                                       \
-    X(DUTF8_CODE_POINT_TOO_BIG, "code point outside the Unicode range") \
+    X(DUTF8_CODE_POINT_TOO_BIG, "码点超出 Unicode 范围") \
     /* end of list */
 typedef enum DecodeUTF8Failure {
     #define ENUM_DECL(sym, string) sym,
@@ -309,7 +309,7 @@ char *buildinfo(const char *newline);
 /*
  * A function you can put at points in the code where execution should
  * never reach in the first place. Better than assert(false), or even
- * assert(false && "some explanatory message"), because some compilers
+ * assert(false && "示例说明文字"), because some compilers
  * don't interpret assert(false) as a declaration of unreachability,
  * so they may still warn about pointless things like some variable
  * not being initialised on the unreachable code path.

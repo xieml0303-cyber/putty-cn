@@ -120,7 +120,7 @@ struct X11Display *x11_setup_display(const char *display, Conf *conf,
 
         if ((err = sk_addr_error(disp->addr)) != NULL) {
             *error_msg = dupprintf("unable to resolve host name '%s' in "
-                                   "display name", disp->hostname);
+                                   "显示器名称", disp->hostname);
 
             sk_addr_free(disp->addr);
             sfree(disp->hostname);

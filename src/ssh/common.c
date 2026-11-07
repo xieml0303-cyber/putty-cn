@@ -1115,7 +1115,7 @@ SeatPromptResult confirm_weak_crypto_primitive(
         }
         break;
       default:
-        unreachable("bad WeakCryptoReason");
+        unreachable("WeakCryptoReason 取值异常（内部错误）");
     }
 
     /* In batch mode, we print the above information and then this

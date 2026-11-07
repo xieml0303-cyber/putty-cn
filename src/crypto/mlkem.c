@@ -516,8 +516,8 @@ static void mlkem_byte_encode_lossless(
  * Each 12-bit value extracted from the input data is checked to make
  * sure it's in the range [0,q); if it's out of range, the whole
  * function fails and returns false. (But it need not do so in
- * constant time, because that's an "abandon the whole connection"
- * error, not a "subtly make things not work for the attacker" error.)
+ * constant time, because that's an "放弃整个连接"
+ * error, not a "让攻击者在不易察觉的情况下失败" error.)
  */
 static bool mlkem_byte_decode_lossless(
     uint16_t *out, const void *inv, size_t n)
@@ -669,10 +669,10 @@ void mlkem_keygen_rho_sigma(
      *  - the decryption key as above
      *  - the encryption key
      *  - an extra hash of the encryption key
-     *  - the random value z used for "implicit rejection", aka
+     *  - the random value z used for "隐式拒绝", aka
      *    constructing a useless output value if tampering is
      *    detected. (I think so an attacker can't tell the difference
-     *    between "I was rumbled" and "I was undetected but my attempt
+     *    between "①我被识破了（直译，保留幽默）；②检测到篡改（意译，正式语体）" and "I was undetected but my attempt
      *    didn't generate the right key">)
      */
     put_data(dk_out, dk, dklen);

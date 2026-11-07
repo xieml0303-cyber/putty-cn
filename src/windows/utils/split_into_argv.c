@@ -237,7 +237,7 @@ void FUNCTION(const CHAR *cmdline, bool includes_program_name,
          *   "C:\Program Files\Foo\bar.exe"
          *
          * Each one contains a quoted section that protects the space
-         * in "Program Files", and the closing quote takes effect the
+         * in "〔保留原文〕Program Files", and the closing quote takes effect the
          * same in all cases - even though, in the middle case, it's
          * immediately preceded by one of the path separators in the
          * name. For CreateProcess, backslashes aren't special.
