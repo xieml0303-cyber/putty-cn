@@ -89,7 +89,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
             s->g = get_mp_ssh2(pktin);
             if (get_err(pktin)) {
                 ssh_proto_error(s->ppl.ssh,
-                                "无法解析 Diffie-Hellman 组包");
+                                "无法解析 Diffie-Hellman 组参数包");
                 *aborted = true;
                 return;
             }
@@ -142,7 +142,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
         s->sigdata = get_string(pktin);
         if (get_err(pktin)) {
             ssh_proto_error(s->ppl.ssh,
-                            "无法解析 Diffie-Hellman 应答包");
+                            "无法解析 Diffie-Hellman 应答数据包");
             *aborted = true;
             return;
         }
@@ -240,7 +240,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
 
         s->sigdata = get_string(pktin);
         if (get_err(pktin)) {
-            ssh_proto_error(s->ppl.ssh, "无法解析 ECDH 应答包");
+            ssh_proto_error(s->ppl.ssh, "无法解析 ECDH 应答数据包");
             *aborted = true;
             return;
         }
@@ -317,7 +317,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
             s->g = get_mp_ssh2(pktin);
             if (get_err(pktin)) {
                 ssh_proto_error(s->ppl.ssh,
-                                "无法解析 Diffie-Hellman 组包");
+                                "无法解析 Diffie-Hellman 组参数包");
                 *aborted = true;
                 return;
             }
@@ -597,7 +597,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
         s->rsa_kex_key = ssh_rsakex_newkey(rsakeydata);
         if (!s->rsa_kex_key) {
             ssh_proto_error(s->ppl.ssh,
-                            "无法解析 RSA 公钥包");
+                            "无法解析 RSA 公钥数据包");
             *aborted = true;
             return;
         }
@@ -704,11 +704,11 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
             if (s->shgss->lib->display_status(
                     s->shgss->lib, s->shgss->ctx, &s->gss_buf) == SSH_GSS_OK) {
                 char *err = s->gss_buf.value;
-                ssh_sw_abort(s->ppl.ssh, "GSSAPI 密钥交换 MIC"
+                ssh_sw_abort(s->ppl.ssh, "GSSAPI 密钥交换的 MIC 校验结果为"
                              "not valid: %s", err);
                 sfree(err);
             } else {
-                ssh_sw_abort(s->ppl.ssh, "GSSAPI 密钥交换 MIC"
+                ssh_sw_abort(s->ppl.ssh, "GSSAPI 密钥交换的 MIC 校验结果为"
                              "not valid");
             }
             *aborted = true;
@@ -845,8 +845,8 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
                              "used host key:");
                 ppl_logevent("%s", fingerprint);
                 sfree(fingerprint);
-                ssh_sw_abort(s->ppl.ssh, "服务器主机密钥与此前 GSS 密钥交换"
-                             "使用过的任何密钥都不匹配");
+                ssh_sw_abort(s->ppl.ssh, "服务器主机密钥与任何"
+                             "此前 GSS 密钥交换中使用的密钥都不匹配");
                 *aborted = true;
                 return;
             }
@@ -888,7 +888,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
                     ppl_logevent("Server also has %s host key%s, but we "
                                  "don't know %s", list,
                                  nkeys > 1 ? "s" : "",
-                                 nkeys > 1 ? "其中任何一个" : "it");
+                                 nkeys > 1 ? "其中任何一个" : "①它；②该密钥");
                     sfree(list);
                 }
             }
@@ -998,7 +998,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
                      * explain why we chose to continue with the
                      * connection anyway!
                      */
-                    ppl_logevent("依据缓存仍接受证书化主机密钥："
+                    ppl_logevent("①仍接受已认证的主机密钥，依据：；②（依据缓存）仍接受已认证的主机密钥"
                                  "on cache");
                 }
             }

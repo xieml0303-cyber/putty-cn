@@ -66,7 +66,7 @@ static const DeferredSocketOpenerVtable LocalProxyOpener_openervt = {
 
 static char *local_proxy_opener_description(Interactor *itr)
 {
-    return dupstr("经本地命令转发连接");
+    return dupstr("通过本地命令建立的连接");
 }
 
 static LogPolicy *local_proxy_opener_logpolicy(Interactor *itr)

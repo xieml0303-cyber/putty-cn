@@ -737,10 +737,10 @@ ssh2_userkey *ppk_load_s(BinarySource *src, const char *passphrase,
     } else if (0 == strncmp(header, "PuTTY-User-Key-File-", 20)) {
         /* this is a key file FROM THE FUTURE; refuse it, but with a
          * more specific error message than the generic one below */
-        error = "PuTTY 密钥格式过新";
+        error = "密钥文件中未找到头部行";
         goto error;
     } else {
-        error = "不是 PuTTY SSH-2 私钥";
+        error = "PuTTY 密钥格式版本过新";
         goto error;
     }
     error = "文件格式错误";
@@ -1119,7 +1119,7 @@ static bool rfc4716_loadpub(BinarySource *src, char **algorithm,
      * Finally, check the END line makes sense.
      */
     if (!line || 0 != strcmp(line, "---- END SSH2 PUBLIC KEY ----")) {
-        error = "SSH-2 公钥文件的结束行无效";
+        error = "SSH-2 公钥文件中有无法识别的头部行";
         goto error;
     }
     sfree(line); line = NULL;
@@ -1194,7 +1194,7 @@ static bool openssh_loadpub(BinarySource *src, char **algorithm,
         base64 += 4;
     }
     if (*base64) {
-        error = "OpenSSH 公钥文件中 base64 数据长度无效";
+        error = "OpenSSH 公钥文件中没有密钥数据块";
         goto error;
     }
 
@@ -1253,7 +1253,7 @@ bool ppk_loadpub_s(BinarySource *src, char **algorithm, BinarySink *bs,
         bool ret = openssh_loadpub(src, algorithm, bs, commentptr, errorstr);
         return ret;
     } else if (type != SSH_KEYTYPE_SSH2) {
-        error = "不是公钥也不是 PuTTY SSH-2 私钥";
+        error = "PuTTY 密钥格式版本过新";
         goto error;
     }
 
@@ -1263,9 +1263,9 @@ bool ppk_loadpub_s(BinarySource *src, char **algorithm, BinarySink *bs,
             0 != strcmp(header, "PuTTY-User-Key-File-2") &&
             0 != strcmp(header, "PuTTY-User-Key-File-1"))) {
         if (0 == strncmp(header, "PuTTY-User-Key-File-", 20))
-            error = "PuTTY 密钥格式过新";
+            error = "密钥文件中未找到头部行";
         else
-            error = "不是公钥也不是 PuTTY SSH-2 私钥";
+            error = "PuTTY 密钥格式版本过新";
         goto error;
     }
     error = "文件格式错误";
@@ -1604,11 +1604,11 @@ char *ppk_params_bad(const ppk_save_parameters *params, bool encrypted,
     if (params->fmt_version < 2)
         return dupprintf(
             "PPK 格式版本 %u 低于"
-            "本程序支持的最早版本（2）", params->fmt_version);
+            "①本程序支持的最新版本（3）；②本程序支持的最高版本（3）", params->fmt_version);
     if (params->fmt_version > 3)
         return dupprintf(
             "PPK 格式版本 %u 高于"
-            "本程序支持的最早版本（2）", params->fmt_version);
+            "①本程序支持的最新版本（3）；②本程序支持的最高版本（3）", params->fmt_version);
     if (params->fmt_version == 3 && encrypted) {
         const struct ppk_cipher *ciphertype = &ppk_cipher_aes256_cbc;
         uint32_t taglen = ciphertype->keylen + ciphertype->ivlen + 32;

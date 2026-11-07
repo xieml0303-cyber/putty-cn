@@ -76,7 +76,7 @@ InteractionReadySeat interactor_announce(Interactor *itr)
 {
     Seat *seat = interactor_get_seat(itr);
     assert(!is_tempseat(seat) &&
-           "在他人正占用 seat 时调用了 announce（内部错误）");
+           "①在 seat 已被其他调用方占用时不应调用 announce（内部错误）；②seat 已被占用时仍调用 announce，属内部错误");
 
     InteractionReadySeat iseat;
     iseat.seat = seat;

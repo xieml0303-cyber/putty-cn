@@ -280,7 +280,7 @@ static void plug_proxy_sent (Plug *p, size_t bufsize)
 static int plug_proxy_accepting(Plug *p,
                                 accept_fn_t constructor, accept_ctx_t ctx)
 {
-    unreachable("代理套接字从不创建监听套接字（内部错误）");
+    unreachable("ProxySocket 不会创建监听 Socket（内部错误）");
 }
 
 /*

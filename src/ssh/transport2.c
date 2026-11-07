@@ -1247,10 +1247,10 @@ static void ssh2_report_scan_kexinits_error(Ssh *ssh, ScanKexinitsResult skr)
         /* Report a better error than the spurious "Couldn't
          * agree" that we'd generate if we pressed on regardless
          * and treated the empty get_string() result as genuine */
-        ssh_proto_error(ssh, "KEXINIT 包不完整");
+        ssh_proto_error(ssh, "KEXINIT 数据包不完整");
         break;
       case SKR_UNKNOWN_ID:
-        ssh_sw_abort(ssh, "Selected %s \"%.*s\"，不是任何受支持的"
+        ssh_sw_abort(ssh, "所选 %s \"%.*s\" 不对应任何受支持的"
                      "算法",
                      skr.kind, PTRLEN_PRINTF(skr.desc));
         break;
@@ -1259,7 +1259,7 @@ static void ssh2_report_scan_kexinits_error(Ssh *ssh, ScanKexinitsResult skr)
                      skr.kind, PTRLEN_PRINTF(skr.desc));
         break;
       default:
-        unreachable("ScanKexinitsResult 结果异常（内部错误）");
+        unreachable("ScanKexinitsResult 取值异常（内部错误）");
     }
 }
 
@@ -1563,8 +1563,8 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
         if (!s->got_session_id && s->strict_kex) {
             ppl_logevent("启用严格密钥交换语义");
             if (s->seen_non_kexinit) {
-                ssh_proto_error(s->ppl.ssh, "严格 KEX 模式下在 KEXINIT 之前"
-                                "收到了数据包");
+                ssh_proto_error(s->ppl.ssh, "在 KEXINIT 之前收到了数据包"
+                                "（严格 KEX 模式下）");
                 return;
             }
         }
@@ -2581,7 +2581,7 @@ static const char *terrapin_vulnerable(
      * and probabilistically exploitable.
      */
     if (d->etm_mode && (d->cipher->flags & SSH_CIPHER_IS_CBC))
-        return "OpenSSH ETM 模式下的 CBC 加密";
+        return "OpenSSH ETM 模式下使用 CBC 模式加密算法";
 
     return NULL;
 }

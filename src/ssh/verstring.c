@@ -302,7 +302,7 @@ void ssh_verstring_handle_input(BinaryPacketProtocol *bpp)
         if (s->vstring->len > 1024) {
             bpp_logevent("Remote version begins: \"%.256s...\"",
                          s->vstring->s);
-            ssh_sw_abort(s->bpp.ssh, "远端 SSH 问候串过长");
+            ssh_sw_abort(s->bpp.ssh, "远端 SSH 问候字符串过长");
             crStopV;
         }
         bufchain_consume(s->bpp.in_raw, data.len);

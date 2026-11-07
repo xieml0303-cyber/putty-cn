@@ -379,10 +379,10 @@ static SeatPromptResult sshproxy_get_userpass_input(Seat *seat, prompts_t *p)
      * reject all attempts to present a prompt to the user, and log in
      * the Event Log to say why not.
      */
-    sshproxy_error(sp, "无法提供代理 SSH 连接要求的"
-                   "交互式认证");
+    sshproxy_error(sp, "无法提供交互式认证"
+                   "（代理 SSH 连接所要求）");
     return SPR_SW_ABORT("非交互式 SSH 代理无法执行"
-                        "交互式认证");
+                        "（代理 SSH 连接所要求）");
 }
 
 static void sshproxy_connection_fatal_callback(void *vctx)
@@ -483,7 +483,7 @@ static SeatPromptResult sshproxy_confirm_weak_crypto_primitive(
     strbuf_free(sb);
 
     return SPR_SW_ABORT("非交互式 SSH 代理无法确认"
-                        "弱加密原语");
+                        "弱密码学原语");
 }
 
 static SeatPromptResult sshproxy_confirm_weak_cached_hostkey(
@@ -511,7 +511,7 @@ static SeatPromptResult sshproxy_confirm_weak_cached_hostkey(
     strbuf_free(sb);
 
     return SPR_SW_ABORT("非交互式 SSH 代理无法确认"
-                        "弱缓存主机密钥");
+                        "①缓存中的弱主机密钥；②缓存的主机密钥强度不足");
 }
 
 static const SeatDialogPromptDescriptions *sshproxy_prompt_descriptions(

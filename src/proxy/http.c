@@ -320,13 +320,13 @@ static HttpAuthDetails *parse_http_auth_header(HttpProxyNegotiator *s)
             } else if (!stricmp(s->token->s, "userhash")) {
                 if (!get_separator(s, '=') ||
                     !get_token(s))
-                    return auth_error(d, "Digest userhash 字段"
+                    return auth_error(d, "Digest userhash 字段解析错误"
                                       "field");
                 d->hash_username = !stricmp(s->token->s, "true");
             } else if (!stricmp(s->token->s, "algorithm")) {
                 if (!get_separator(s, '=') ||
                     (!get_token(s) && !get_quoted_string(s)))
-                    return auth_error(d, "Digest algorithm 字段"
+                    return auth_error(d, "Digest algorithm 字段解析错误"
                                       "field");
                 bool found = false;
                 size_t i;
@@ -393,7 +393,7 @@ static HttpAuthDetails *parse_http_auth_header(HttpProxyNegotiator *s)
                         ok = true;
                 if (!ok)
                     return auth_error(d, "quality-of-protection list \"%s\" "
-                                      "未包含我方唯一支持的"
+                                      "未包含本客户端唯一支持的"
                                       "option \"auth\"", s->token->s);
             } else {
                 /* Ignore any other auth-param */
@@ -535,8 +535,8 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
              */
             http_auth_details_free(s->next_auth);
             s->next_auth = http_auth_details_new();
-            auth_error(s->next_auth, "在 HTTP 407 代理认证要求响应中"
-                       "未见 Proxy-Authenticate 头");
+            auth_error(s->next_auth, "未在以下响应中看到 Proxy-Authenticate 头："
+                       "HTTP 407 Proxy Authentication Required（需代理认证）响应");
         }
 
         /*
@@ -691,7 +691,7 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
                                           pn->input, buf, 2));
                     if (memcmp(buf, "\r\n", 2)) {
                         pn->error = dupprintf(
-                            "分块之后缺少 CRLF"
+                            "分块数据之后缺少 CRLF（回车换行）"
                             "（HTTP 分块传输编码期间）");
                         crStopV;
                     }
@@ -741,7 +741,7 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
              * questions. */
             if (!pn->itr) {
                 pn->error = dupprintf("HTTP 代理要求的认证方式"
-                                      "我方无法提供");
+                                      "①本客户端无法提供；②本程序不支持");
                 crStopV;
             }
 

@@ -170,7 +170,7 @@ static void ssh1_login_process_queue(PacketProtocolLayer *ppl)
     crMaybeWaitUntilV((pktin = ssh1_login_pop(s)) != NULL);
 
     if (pktin->type != SSH1_SMSG_PUBLIC_KEY) {
-        ssh_proto_error(s->ppl.ssh, "未收到公钥包");
+        ssh_proto_error(s->ppl.ssh, "未收到公钥数据包");
         return;
     }
 
@@ -201,7 +201,7 @@ static void ssh1_login_process_queue(PacketProtocolLayer *ppl)
     s->supported_auths_mask = get_uint32(pktin);
 
     if (get_err(pktin)) {
-        ssh_proto_error(s->ppl.ssh, "SSH-1 公钥包格式错误");
+        ssh_proto_error(s->ppl.ssh, "SSH-1 公钥数据包格式错误");
         return;
     }
 
@@ -316,7 +316,7 @@ static void ssh1_login_process_queue(PacketProtocolLayer *ppl)
                                 "不支持 3DES 加密");
             } else {
                 /* shouldn't happen */
-                ssh_sw_abort(s->ppl.ssh, "找不到受支持的加密算法");
+                ssh_sw_abort(s->ppl.ssh, "未找到受支持的加密算法");
             }
             return;
         }
@@ -528,7 +528,7 @@ static void ssh1_login_process_queue(PacketProtocolLayer *ppl)
                         blobstart, blobend - blobstart);
                 }
 
-                ppl_logevent("Pageant has %"SIZEu" 个 SSH-1 密钥", nkeys);
+                ppl_logevent("①Pageant 中有 %；②Pageant 已加载 %"SIZEu" 个 SSH-1 密钥", nkeys);
 
                 if (s->publickey_blob) {
                     /*
@@ -645,7 +645,7 @@ static void ssh1_login_process_queue(PacketProtocolLayer *ppl)
                             sfree((char *)ret);
                         }
                     } else {
-                        ppl_logevent("未收到 Pageant 的回复");
+                        ppl_logevent("未收到 Pageant 的应答");
                     }
                 }
                 if (s->authed)
@@ -790,7 +790,7 @@ static void ssh1_login_process_queue(PacketProtocolLayer *ppl)
                                   != NULL);
                 if (pktin->type == SSH1_SMSG_FAILURE) {
                     if (seat_verbose(s->ppl.seat))
-                        ppl_printf("认证失败："
+                        ppl_printf("使用以下方式认证失败："
                                    " our public key.\r\n");
                     continue;          /* go and try something else */
                 } else if (pktin->type != SSH1_SMSG_SUCCESS) {
@@ -829,7 +829,7 @@ static void ssh1_login_process_queue(PacketProtocolLayer *ppl)
             } else if (pktin->type == SSH1_SMSG_AUTH_TIS_CHALLENGE) {
                 ptrlen challenge = get_string(pktin);
                 if (get_err(pktin)) {
-                    ssh_proto_error(s->ppl.ssh, "TIS 挑战包"
+                    ssh_proto_error(s->ppl.ssh, "TIS 挑战数据包"
                                     "格式错误");
                     return;
                 }
@@ -883,7 +883,7 @@ static void ssh1_login_process_queue(PacketProtocolLayer *ppl)
             } else if (pktin->type == SSH1_SMSG_AUTH_CCARD_CHALLENGE) {
                 ptrlen challenge = get_string(pktin);
                 if (get_err(pktin)) {
-                    ssh_proto_error(s->ppl.ssh, "CryptoCard 挑战包"
+                    ssh_proto_error(s->ppl.ssh, "CryptoCard 挑战数据包"
                                     "格式错误");
                     return;
                 }
@@ -1030,7 +1030,7 @@ static void ssh1_login_process_queue(PacketProtocolLayer *ppl)
                         pq_push(s->ppl.out_pq, pkt);
                     }
                 }
-                ppl_logevent("以伪装包发送密码");
+                ppl_logevent("发送密码时附带伪装数据包");
             }
             else if (!(s->ppl.remote_bugs & BUG_NEEDS_SSH1_PLAIN_PASSWORD)) {
                 /*
