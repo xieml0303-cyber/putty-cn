@@ -23,16 +23,16 @@ static inline const char *socks5_response_text(unsigned char m)
 {
     switch (m) {
       case SOCKS5_RESP_SUCCESS: return "success";
-      case SOCKS5_RESP_FAILURE: return "unspecified failure";
+      case SOCKS5_RESP_FAILURE: return "未指明的失败";
       case SOCKS5_RESP_CONNECTION_NOT_ALLOWED_BY_RULESET:
-        return "connection not allowed by ruleset";
-      case SOCKS5_RESP_NETWORK_UNREACHABLE: return "network unreachable";
-      case SOCKS5_RESP_HOST_UNREACHABLE: return "host unreachable";
-      case SOCKS5_RESP_CONNECTION_REFUSED: return "connection refused";
-      case SOCKS5_RESP_TTL_EXPIRED: return "TTL expired";
-      case SOCKS5_RESP_COMMAND_NOT_SUPPORTED: return "command not supported";
+        return "连接被规则集禁止";
+      case SOCKS5_RESP_NETWORK_UNREACHABLE: return "网络不可达";
+      case SOCKS5_RESP_HOST_UNREACHABLE: return "主机不可达";
+      case SOCKS5_RESP_CONNECTION_REFUSED: return "连接被拒绝";
+      case SOCKS5_RESP_TTL_EXPIRED: return "TTL 过期";
+      case SOCKS5_RESP_COMMAND_NOT_SUPPORTED: return "命令不受支持";
       case SOCKS5_RESP_ADDRTYPE_NOT_SUPPORTED:
-        return "address type not supported";
+        return "地址类型不受支持";
       default: return "unknown";
     }
 }
@@ -129,15 +129,15 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
         crMaybeWaitUntilV(bufchain_try_fetch_consume(pn->input, data, 2));
 
         if (data[0] != SOCKS5_REPLY_VERSION) {
-            pn->error = dupprintf("SOCKS proxy returned unexpected "
+            pn->error = dupprintf("SOCKS 代理返回了意外的"
                                   "reply version %d (expected %d)",
                                   (int)data[0], SOCKS5_REPLY_VERSION);
             crStopV;
         }
 
         if (data[1] == SOCKS5_AUTH_REJECTED) {
-            pn->error = dupstr("SOCKS server rejected every authentication "
-                               "method we offered");
+            pn->error = dupstr("SOCKS 服务器拒绝了"
+                               "我方提供的全部认证方式");
             crStopV;
         }
 
@@ -176,7 +176,7 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
         s->prompts = proxy_new_prompts(pn->ps);
         s->prompts->to_server = true;
         s->prompts->from_server = false;
-        s->prompts->name = dupstr("SOCKS proxy authentication");
+        s->prompts->name = dupstr("SOCKS 代理认证");
         if (!s->username->len) {
             s->username_prompt_index = s->prompts->n_prompts;
             add_prompt(s->prompts, dupstr("Proxy username: "), true);
@@ -236,13 +236,13 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
          */
         put_byte(pn->output, SOCKS5_AUTH_PASSWORD_VERSION);
         if (!put_pstring(pn->output, s->username->s)) {
-            pn->error = dupstr("SOCKS 5 authentication cannot support "
-                               "usernames longer than 255 chars");
+            pn->error = dupstr("SOCKS 5 认证不支持超过 255 字符的"
+                               "用户名");
             crStopV;
         }
         if (!put_pstring(pn->output, s->password->s)) {
-            pn->error = dupstr("SOCKS 5 authentication cannot support "
-                               "passwords longer than 255 chars");
+            pn->error = dupstr("SOCKS 5 认证不支持超过 255 字符的"
+                               "密码");
             crStopV;
         }
 
@@ -263,7 +263,7 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
         }
 
         if (data[1] != 0) {
-            pn->error = dupstr("SOCKS 5 server rejected our password");
+            pn->error = dupstr("SOCKS 5 服务器拒绝了我方密码");
             crStopV;
         }
     } else if (s->auth_method == SOCKS5_AUTH_CHAP) {
@@ -303,8 +303,8 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
             put_byte(pn->output, SOCKS5_AUTH_CHAP_ATTR_USERNAME);
             if (!put_pstring(pn->output, s->username->s)) {
                 pn->error = dupstr(
-                    "SOCKS 5 CHAP authentication cannot support "
-                    "usernames longer than 255 chars");
+                    "SOCKS 5 CHAP 认证不支持超过 255 字符的"
+                    "用户名");
                 crStopV;
             }
         }
@@ -332,7 +332,7 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
                  * before, and can't make further progress.
                  */
                 pn->error = dupprintf(
-                    "SOCKS 5 CHAP reply sent no attributes");
+                    "SOCKS 5 CHAP 应答未携带任何属性");
                 crStopV;
             }
             while (s->n_chap_attrs-- > 0) {
@@ -350,7 +350,7 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
                         goto authenticated;
                     } else {
                         pn->error = dupstr(
-                            "SOCKS 5 CHAP authentication failed");
+                            "SOCKS 5 CHAP 认证失败");
                         crStopV;
                     }
                 } else if (s->chap_attr == SOCKS5_AUTH_CHAP_ATTR_CHALLENGE) {
@@ -372,7 +372,7 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
             }
         }
     } else {
-        unreachable("bad auth method in SOCKS 5 negotiation");
+        unreachable("SOCKS 5 协商中出现异常认证方式");
     }
 
   authenticated:
@@ -416,13 +416,13 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
         sk_getaddr(pn->ps->remote_addr, hostname, lenof(hostname));
         if (!put_pstring(pn->output, hostname)) {
             pn->error = dupstr(
-                "SOCKS 5 cannot support host names longer than 255 chars");
+                "SOCKS 5 不支持超过 255 字符的主机名");
             crStopV;
         }
         break;
       }
       default:
-        unreachable("Unexpected addrtype in SOCKS 5 proxy");
+        unreachable("SOCKS 5 代理返回了意外的地址类型");
     }
 
     put_uint16(pn->output, pn->ps->remote_port);
@@ -445,7 +445,7 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
         crMaybeWaitUntilV(bufchain_try_fetch_consume(pn->input, data, 4));
 
         if (data[0] != SOCKS5_REPLY_VERSION) {
-            pn->error = dupprintf("SOCKS proxy returned unexpected "
+            pn->error = dupprintf("SOCKS 代理返回了意外的"
                                   "reply version %d (expected %d)",
                                   (int)data[0], SOCKS5_REPLY_VERSION);
             crStopV;
@@ -475,7 +475,7 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
             s->response_addr_length = len;
             break;
         } else {
-            pn->error = dupprintf("SOCKS proxy response included unknown "
+            pn->error = dupprintf("SOCKS 代理响应包含未知的"
                                   "address type %d", (int)data[3]);
             crStopV;
         }

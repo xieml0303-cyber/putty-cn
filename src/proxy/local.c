@@ -66,7 +66,7 @@ static const DeferredSocketOpenerVtable LocalProxyOpener_openervt = {
 
 static char *local_proxy_opener_description(Interactor *itr)
 {
-    return dupstr("connection via local command");
+    return dupstr("经本地命令转发连接");
 }
 
 static LogPolicy *local_proxy_opener_logpolicy(Interactor *itr)
@@ -134,7 +134,7 @@ static void local_proxy_opener_coroutine(void *vctx)
             lp->prompts->callback_ctx = lp;
             lp->prompts->to_server = true;
             lp->prompts->from_server = false;
-            lp->prompts->name = dupstr("Local proxy authentication");
+            lp->prompts->name = dupstr("本地代理认证");
             if (flags & TELNET_CMD_MISSING_USERNAME) {
                 lp->username_prompt_index = lp->prompts->n_prompts;
                 add_prompt(lp->prompts, dupstr("Proxy username: "), true);

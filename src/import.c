@@ -351,12 +351,12 @@ static struct openssh_pem_key *load_openssh_pem_key(BinarySource *src,
     key->keyblob = strbuf_new_nm();
 
     if (!(line = bsgetline(src))) {
-        errmsg = "unexpected end of file";
+        errmsg = "意外的文件结束";
         goto error;
     }
     if (!strstartswith(line, "-----BEGIN ") ||
         !strendswith(line, "PRIVATE KEY-----")) {
-        errmsg = "file does not begin with OpenSSH key header";
+        errmsg = "文件未以 OpenSSH 密钥头开始";
         goto error;
     }
     /*
@@ -372,10 +372,10 @@ static struct openssh_pem_key *load_openssh_pem_key(BinarySource *src,
     } else if (!strcmp(line, "-----BEGIN EC PRIVATE KEY-----")) {
         key->keytype = OP_ECDSA;
     } else if (!strcmp(line, "-----BEGIN OPENSSH PRIVATE KEY-----")) {
-        errmsg = "this is a new-style OpenSSH key";
+        errmsg = "这是新式 OpenSSH 密钥";
         goto error;
     } else {
-        errmsg = "unrecognised key type";
+        errmsg = "无法识别的密钥类型";
         goto error;
     }
     smemclr(line, strlen(line));
@@ -388,7 +388,7 @@ static struct openssh_pem_key *load_openssh_pem_key(BinarySource *src,
     headers_done = false;
     while (1) {
         if (!(line = bsgetline(src))) {
-            errmsg = "unexpected end of file";
+            errmsg = "意外的文件结束";
             goto error;
         }
         if (strstartswith(line, "-----END ") &&
@@ -399,7 +399,7 @@ static struct openssh_pem_key *load_openssh_pem_key(BinarySource *src,
         }
         if ((p = strchr(line, ':')) != NULL) {
             if (headers_done) {
-                errmsg = "header found in body of key data";
+                errmsg = "密钥数据主体中出现头信息";
                 goto error;
             }
             *p++ = '\0';
@@ -422,21 +422,21 @@ static struct openssh_pem_key *load_openssh_pem_key(BinarySource *src,
                     key->encryption = OP_E_AES;
                     ivlen = 16;
                 } else {
-                    errmsg = "unsupported cipher";
+                    errmsg = "加密算法不受支持";
                     goto error;
                 }
                 p = strchr(p, ',') + 1;/* always non-NULL, by above checks */
                 for (i = 0; i < ivlen; i++) {
                     unsigned j;
                     if (1 != sscanf(p, "%2x", &j)) {
-                        errmsg = "expected more iv data in DEK-Info";
+                        errmsg = "DEK-Info 中 IV 数据不足";
                         goto error;
                     }
                     key->iv[i] = j;
                     p += 2;
                 }
                 if (*p) {
-                    errmsg = "more iv data than expected in DEK-Info";
+                    errmsg = "DEK-Info 中 IV 数据超出预期";
                     goto error;
                 }
             }
@@ -455,7 +455,7 @@ static struct openssh_pem_key *load_openssh_pem_key(BinarySource *src,
                     len = base64_decode_atom(base64_bit, out);
 
                     if (len <= 0) {
-                        errmsg = "invalid base64 encoding";
+                        errmsg = "base64 编码无效";
                         goto error;
                     }
 
@@ -473,13 +473,13 @@ static struct openssh_pem_key *load_openssh_pem_key(BinarySource *src,
     }
 
     if (!key->keyblob || key->keyblob->len == 0) {
-        errmsg = "key body not present";
+        errmsg = "缺少密钥主体";
         goto error;
     }
 
     if (key->encrypted && key->keyblob->len % 8 != 0) {
-        errmsg = "encrypted key blob is not a multiple of "
-            "cipher block size";
+        errmsg = "加密的密钥 blob 不是"
+            "加密块大小的整数倍";
         goto error;
     }
 
@@ -700,7 +700,7 @@ static ssh2_userkey *openssh_pem_read(
 
         if (!retkey->key) {
             sfree(retkey);
-            errmsg = "unable to create key data structure";
+            errmsg = "无法创建密钥数据结构";
             goto error;
         }
 
@@ -726,7 +726,7 @@ static ssh2_userkey *openssh_pem_read(
                  */
                 if (integer.data.len != 1 ||
                     ((const unsigned char *)integer.data.ptr)[0] != 0) {
-                    errmsg = "version number mismatch";
+                    errmsg = "版本号不匹配";
                     goto error;
                 }
             } else if (key->keytype == OP_RSA) {
@@ -771,7 +771,7 @@ static ssh2_userkey *openssh_pem_read(
 
         if (!retkey->key) {
             sfree(retkey);
-            errmsg = "unable to create key data structure";
+            errmsg = "无法创建密钥数据结构";
             goto error;
         }
 
@@ -1133,11 +1133,11 @@ static struct openssh_new_key *load_openssh_new_key(BinarySource *filesrc,
     key->keyblob = strbuf_new_nm();
 
     if (!(line = bsgetline(filesrc))) {
-        errmsg = "unexpected end of file";
+        errmsg = "意外的文件结束";
         goto error;
     }
     if (0 != strcmp(line, "-----BEGIN OPENSSH PRIVATE KEY-----")) {
-        errmsg = "file does not begin with OpenSSH new-style key header";
+        errmsg = "文件未以 OpenSSH 新式密钥头开始";
         goto error;
     }
     smemclr(line, strlen(line));
@@ -1146,7 +1146,7 @@ static struct openssh_new_key *load_openssh_new_key(BinarySource *filesrc,
 
     while (1) {
         if (!(line = bsgetline(filesrc))) {
-            errmsg = "unexpected end of file";
+            errmsg = "意外的文件结束";
             goto error;
         }
         if (0 == strcmp(line, "-----END OPENSSH PRIVATE KEY-----")) {
@@ -1167,7 +1167,7 @@ static struct openssh_new_key *load_openssh_new_key(BinarySource *filesrc,
                 len = base64_decode_atom(base64_bit, out);
 
                 if (len <= 0) {
-                    errmsg = "invalid base64 encoding";
+                    errmsg = "base64 编码无效";
                     goto error;
                 }
 
@@ -1184,14 +1184,14 @@ static struct openssh_new_key *load_openssh_new_key(BinarySource *filesrc,
     }
 
     if (key->keyblob->len == 0) {
-        errmsg = "key body not present";
+        errmsg = "缺少密钥主体";
         goto error;
     }
 
     BinarySource_BARE_INIT_PL(src, ptrlen_from_strbuf(key->keyblob));
 
     if (strcmp(get_asciz(src), "openssh-key-v1") != 0) {
-        errmsg = "new-style OpenSSH magic number missing";
+        errmsg = "缺少新式 OpenSSH 魔数";
         goto error;
     }
 
@@ -1206,8 +1206,8 @@ static struct openssh_new_key *load_openssh_new_key(BinarySource *filesrc,
     } else if (ptrlen_eq_string(str, "aes256-gcm@openssh.com")) {
         key->cipher = ON_E_AES256GCM;
     } else {
-        errmsg = get_err(src) ? "no cipher name found" :
-            "unrecognised cipher name";
+        errmsg = get_err(src) ? "找不到加密算法名" :
+            "无法识别的加密算法名";
         goto error;
     }
 
@@ -1218,8 +1218,8 @@ static struct openssh_new_key *load_openssh_new_key(BinarySource *filesrc,
     } else if (ptrlen_eq_string(str, "bcrypt")) {
         key->kdf = ON_K_BCRYPT;
     } else {
-        errmsg = get_err(src) ? "no kdf name found" :
-            "unrecognised kdf name";
+        errmsg = get_err(src) ? "找不到 KDF 名称" :
+            "无法识别的 KDF 名称";
         goto error;
     }
 
@@ -1228,7 +1228,7 @@ static struct openssh_new_key *load_openssh_new_key(BinarySource *filesrc,
     switch (key->kdf) {
       case ON_K_NONE:
         if (str.len != 0) {
-            errmsg = "expected empty options string for 'none' kdf";
+            errmsg = "'none' KDF 应为空选项串";
             goto error;
         }
         break;
@@ -1240,7 +1240,7 @@ static struct openssh_new_key *load_openssh_new_key(BinarySource *filesrc,
         key->kdfopts.bcrypt.rounds = get_uint32(opts);
 
         if (get_err(opts)) {
-            errmsg = "failed to parse bcrypt options string";
+            errmsg = "解析 bcrypt 选项串失败";
             goto error;
         }
         break;
@@ -1261,8 +1261,8 @@ static struct openssh_new_key *load_openssh_new_key(BinarySource *filesrc,
      */
     key->nkeys = toint(get_uint32(src));
     if (key->nkeys != 1) {
-        errmsg = get_err(src) ? "no key count found" :
-            "multiple keys in new-style OpenSSH key file not supported";
+        errmsg = get_err(src) ? "找不到密钥数量" :
+            "不支持新式 OpenSSH 文件含多把密钥";
         goto error;
     }
     key->key_wanted = 0;
@@ -1277,7 +1277,7 @@ static struct openssh_new_key *load_openssh_new_key(BinarySource *filesrc,
      */
     key->private = get_string(src);
     if (get_err(src)) {
-        errmsg = "no private key container string found";
+        errmsg = "找不到私钥容器串";
         goto error;
     }
 
@@ -1351,7 +1351,7 @@ static ssh2_userkey *openssh_new_read(
             keysize = 48;              /* 32 byte key + 16 byte IV */
             break;
           default:
-            unreachable("Bad cipher enumeration value");
+            unreachable("加密算法枚举值异常");
         }
         assert(keysize <= sizeof(keybuf));
         switch (key->kdf) {
@@ -1365,7 +1365,7 @@ static ssh2_userkey *openssh_new_read(
                            keybuf, keysize);
             break;
           default:
-            unreachable("Bad kdf enumeration value");
+            unreachable("KDF 枚举值异常");
         }
         switch (key->cipher) {
           case ON_E_NONE:
@@ -1374,8 +1374,8 @@ static ssh2_userkey *openssh_new_read(
           case ON_E_AES256CTR:
           case ON_E_AES256GCM:
             if (key->private.len % 16 != 0) {
-                errmsg = "private key container length is not a"
-                    " multiple of AES block size";
+                errmsg = "私钥容器长度不是"
+                    "AES 块大小的整数倍";
                 goto error;
             }
             {
@@ -1421,7 +1421,7 @@ static ssh2_userkey *openssh_new_read(
             }
             break;
           default:
-            unreachable("Bad cipher enumeration value");
+            unreachable("加密算法枚举值异常");
         }
     }
 
@@ -1433,7 +1433,7 @@ static ssh2_userkey *openssh_new_read(
 
     checkint = get_uint32(src);
     if (get_uint32(src) != checkint || get_err(src)) {
-        errmsg = "decryption check failed";
+        errmsg = "解密校验失败";
         goto error;
     }
 
@@ -1449,7 +1449,7 @@ static ssh2_userkey *openssh_new_read(
          */
         alg = find_pubkey_alg_len(get_string(src));
         if (!alg) {
-            errmsg = "private key type not recognised";
+            errmsg = "私钥类型无法识别";
             goto error;
         }
 
@@ -1460,11 +1460,11 @@ static ssh2_userkey *openssh_new_read(
          */
         retkey->key = ssh_key_new_priv_openssh(alg, src);
         if (get_err(src)) {
-            errmsg = "unable to read entire private key";
+            errmsg = "无法读取完整私钥";
             goto error;
         }
         if (!retkey->key) {
-            errmsg = "unable to create key data structure";
+            errmsg = "无法创建密钥数据结构";
             goto error;
         }
         if (key_index != key->key_wanted) {
@@ -1480,7 +1480,7 @@ static ssh2_userkey *openssh_new_read(
          */
         comment = get_string(src);
         if (get_err(src)) {
-            errmsg = "unable to read key comment";
+            errmsg = "无法读取密钥注释";
             goto error;
         }
         if (key_index == key->key_wanted) {
@@ -1490,7 +1490,7 @@ static ssh2_userkey *openssh_new_read(
     }
 
     if (!retkey->key) {
-        errmsg = "key index out of range";
+        errmsg = "密钥下标越界";
         goto error;
     }
 
@@ -1501,7 +1501,7 @@ static ssh2_userkey *openssh_new_read(
         unsigned char expected_pad_byte = 1;
         while (get_avail(src) > 0)
             if (get_byte(src) != expected_pad_byte++) {
-                errmsg = "padding at end of private string did not match";
+                errmsg = "私钥串末尾的填充不匹配";
                 goto error;
             }
     }
@@ -1772,7 +1772,7 @@ static struct sshcom_key *load_sshcom_key(BinarySource *src,
     key->keyblob = strbuf_new_nm();
 
     if (!(line = bsgetline(src))) {
-        errmsg = "unexpected end of file";
+        errmsg = "意外的文件结束";
         goto error;
     }
     if (0 != strcmp(line, "---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----")) {
@@ -1786,7 +1786,7 @@ static struct sshcom_key *load_sshcom_key(BinarySource *src,
     headers_done = false;
     while (1) {
         if (!(line = bsgetline(src))) {
-            errmsg = "unexpected end of file";
+            errmsg = "意外的文件结束";
             goto error;
         }
         if (!strcmp(line, "---- END SSH2 ENCRYPTED PRIVATE KEY ----")) {
@@ -1796,7 +1796,7 @@ static struct sshcom_key *load_sshcom_key(BinarySource *src,
         }
         if ((p = strchr(line, ':')) != NULL) {
             if (headers_done) {
-                errmsg = "header found in body of key data";
+                errmsg = "密钥数据主体中出现头信息";
                 goto error;
             }
             *p++ = '\0';
@@ -1815,7 +1815,7 @@ static struct sshcom_key *load_sshcom_key(BinarySource *src,
 
                 line2 = bsgetline(src);
                 if (!line2) {
-                    errmsg = "unexpected end of file";
+                    errmsg = "意外的文件结束";
                     goto error;
                 }
 
@@ -1853,7 +1853,7 @@ static struct sshcom_key *load_sshcom_key(BinarySource *src,
                     len = base64_decode_atom(base64_bit, out);
 
                     if (len <= 0) {
-                        errmsg = "invalid base64 encoding";
+                        errmsg = "base64 编码无效";
                         goto error;
                     }
 
@@ -1869,7 +1869,7 @@ static struct sshcom_key *load_sshcom_key(BinarySource *src,
     }
 
     if (key->keyblob->len == 0) {
-        errmsg = "key body not present";
+        errmsg = "缺少密钥主体";
         goto error;
     }
 
@@ -1997,7 +1997,7 @@ static ssh2_userkey *sshcom_read(
     BinarySource_BARE_INIT_PL(src, ptrlen_from_strbuf(key->keyblob));
 
     if (get_uint32(src) != SSHCOM_MAGIC_NUMBER) {
-        errmsg = "key does not begin with magic number";
+        errmsg = "密钥未以魔数开始";
         goto error;
     }
     get_uint32(src);                   /* skip length field */
@@ -2013,7 +2013,7 @@ static ssh2_userkey *sshcom_read(
                !memcmp(str.ptr, prefix_dsa, sizeof(prefix_dsa) - 1)) {
         type = DSA;
     } else {
-        errmsg = "key is of unknown type";
+        errmsg = "密钥类型未知";
         goto error;
     }
 
@@ -2026,7 +2026,7 @@ static ssh2_userkey *sshcom_read(
     else if (ptrlen_eq_string(str, "3des-cbc"))
         encrypted = true;
     else {
-        errmsg = "key encryption is of unknown type";
+        errmsg = "密钥加密方式未知";
         goto error;
     }
 
@@ -2035,7 +2035,7 @@ static ssh2_userkey *sshcom_read(
      */
     ciphertext = get_string(src);
     if (ciphertext.len == 0) {
-        errmsg = "no key data found";
+        errmsg = "找不到密钥数据";
         goto error;
     }
 
@@ -2054,7 +2054,7 @@ static ssh2_userkey *sshcom_read(
         unsigned char keybuf[32], iv[8];
 
         if (ciphertext.len % 8 != 0) {
-            errmsg = "encrypted part of key is not a multiple of cipher block"
+            errmsg = "密钥的加密部分不是加密块大小的整数倍"
                 " size";
             goto error;
         }
@@ -2088,7 +2088,7 @@ static ssh2_userkey *sshcom_read(
     BinarySource_BARE_INIT_PL(src, ciphertext);
     str = get_string(src);
     if (get_err(src)) {
-        errmsg = "containing string was ill-formed";
+        errmsg = "包含串格式错误";
         goto error;
     }
     BinarySource_BARE_INIT_PL(src, str);
@@ -2109,7 +2109,7 @@ static ssh2_userkey *sshcom_read(
         p = get_mp_sshcom_as_string(src);
         q = get_mp_sshcom_as_string(src);
         if (get_err(src)) {
-            errmsg = "key data did not contain six integers";
+            errmsg = "密钥数据未含六个整数";
             goto error;
         }
 
@@ -2128,7 +2128,7 @@ static ssh2_userkey *sshcom_read(
         assert(type == DSA); /* the only other option from the if above */
 
         if (get_uint32(src) != 0) {
-            errmsg = "predefined DSA parameters not supported";
+            errmsg = "不支持预定义 DSA 参数";
             goto error;
         }
         p = get_mp_sshcom_as_string(src);
@@ -2137,7 +2137,7 @@ static ssh2_userkey *sshcom_read(
         y = get_mp_sshcom_as_string(src);
         x = get_mp_sshcom_as_string(src);
         if (get_err(src)) {
-            errmsg = "key data did not contain five integers";
+            errmsg = "密钥数据未含五个整数";
             goto error;
         }
 
@@ -2157,7 +2157,7 @@ static ssh2_userkey *sshcom_read(
         make_ptrlen(blob->u + publen, blob->len - publen));
     if (!retkey->key) {
         sfree(retkey);
-        errmsg = "unable to create key data structure";
+        errmsg = "无法创建密钥数据结构";
         goto error;
     }
     retkey->comment = dupstr(key->comment);

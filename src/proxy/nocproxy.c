@@ -17,7 +17,7 @@ const bool http_digest_available = false;
 
 strbuf *chap_response(ptrlen challenge, ptrlen password)
 {
-    unreachable("CHAP is not built into this binary");
+    unreachable("此程序未内建 CHAP 支持");
 }
 
 /* dummy arrays to prevent link error */
@@ -29,5 +29,5 @@ void http_digest_response(BinarySink *bs, ptrlen username, ptrlen password,
                           ptrlen nonce, ptrlen opaque, uint32_t nonce_count,
                           HttpDigestHash hash, bool hash_username)
 {
-    unreachable("HTTP DIGEST is not built into this binary");
+    unreachable("此程序未内建 HTTP DIGEST 支持");
 }

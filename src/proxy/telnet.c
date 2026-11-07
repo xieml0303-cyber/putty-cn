@@ -86,7 +86,7 @@ static void proxy_telnet_process_queue(ProxyNegotiator *pn)
             s->prompts = proxy_new_prompts(pn->ps);
             s->prompts->to_server = true;
             s->prompts->from_server = false;
-            s->prompts->name = dupstr("Telnet proxy authentication");
+            s->prompts->name = dupstr("Telnet 代理认证");
             if (flags & TELNET_CMD_MISSING_USERNAME) {
                 s->username_prompt_index = s->prompts->n_prompts;
                 add_prompt(s->prompts, dupstr("Proxy username: "), true);

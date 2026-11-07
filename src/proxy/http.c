@@ -81,7 +81,7 @@ static inline HttpAuthDetails *auth_error(HttpAuthDetails *d,
                                           const char *fmt, ...)
 {
     d->auth_type = AUTH_ERROR;
-    put_fmt(d->error, "Unable to parse auth header from HTTP proxy");
+    put_fmt(d->error, "无法解析 HTTP 代理的认证头");
     if (fmt) {
         va_list ap;
         va_start(ap, fmt);
@@ -275,7 +275,7 @@ static HttpAuthDetails *parse_http_auth_header(HttpProxyNegotiator *s)
     d->digest_hash = HTTP_DIGEST_MD5;
 
     if (!get_token(s))
-        return auth_error(d, "parse error");
+        return auth_error(d, "解析错误");
 
     if (!stricmp(s->token->s, "Basic")) {
         /* For Basic authentication, we don't need anything else. The
@@ -287,46 +287,46 @@ static HttpAuthDetails *parse_http_auth_header(HttpProxyNegotiator *s)
     if (!stricmp(s->token->s, "Digest")) {
         /* Parse all the additional parts of the Digest header. */
         if (!http_digest_available)
-            return auth_error(d, "Digest authentication not supported");
+            return auth_error(d, "不支持 Digest 认证");
 
         /* Parse the rest of the Digest header */
         while (true) {
             if (!get_token(s))
-                return auth_error(d, "parse error in Digest header");
+                return auth_error(d, "Digest 头解析错误");
 
             if (!stricmp(s->token->s, "realm")) {
                 if (!get_separator(s, '=') ||
                     !get_quoted_string(s))
-                    return auth_error(d, "parse error in Digest realm field");
+                    return auth_error(d, "Digest realm 字段解析错误");
                 put_datapl(d->realm, ptrlen_from_strbuf(s->token));
             } else if (!stricmp(s->token->s, "nonce")) {
                 if (!get_separator(s, '=') ||
                     !get_quoted_string(s))
-                    return auth_error(d, "parse error in Digest nonce field");
+                    return auth_error(d, "Digest nonce 字段解析错误");
                 put_datapl(d->nonce, ptrlen_from_strbuf(s->token));
             } else if (!stricmp(s->token->s, "opaque")) {
                 if (!get_separator(s, '=') ||
                     !get_quoted_string(s))
-                    return auth_error(d, "parse error in Digest opaque field");
+                    return auth_error(d, "Digest opaque 字段解析错误");
                 put_datapl(d->opaque,
                            ptrlen_from_strbuf(s->token));
                 d->got_opaque = true;
             } else if (!stricmp(s->token->s, "stale")) {
                 if (!get_separator(s, '=') ||
                     !get_token(s))
-                    return auth_error(d, "parse error in Digest stale field");
+                    return auth_error(d, "Digest stale 字段解析错误");
                 d->digest_nonce_was_stale = !stricmp(
                     s->token->s, "true");
             } else if (!stricmp(s->token->s, "userhash")) {
                 if (!get_separator(s, '=') ||
                     !get_token(s))
-                    return auth_error(d, "parse error in Digest userhash "
+                    return auth_error(d, "Digest userhash 字段"
                                       "field");
                 d->hash_username = !stricmp(s->token->s, "true");
             } else if (!stricmp(s->token->s, "algorithm")) {
                 if (!get_separator(s, '=') ||
                     (!get_token(s) && !get_quoted_string(s)))
-                    return auth_error(d, "parse error in Digest algorithm "
+                    return auth_error(d, "Digest algorithm 字段"
                                       "field");
                 bool found = false;
                 size_t i;
@@ -355,11 +355,11 @@ static HttpAuthDetails *parse_http_auth_header(HttpProxyNegotiator *s)
             } else if (!stricmp(s->token->s, "qop")) {
                 if (!get_separator(s, '=') ||
                     !get_quoted_string(s))
-                    return auth_error(d, "parse error in Digest qop field");
+                    return auth_error(d, "Digest qop 字段解析错误");
 
                 /*
                  * RFC 7616 section 3.3: "qop" specifies one or more
-                 * options for the "quality of protection" offered by
+                 * options for the "保护质量（qop）" offered by
                  * the digest authentication. These options vary what
                  * goes into the message digest: e.g. RFC 7616 defines
                  * "auth-int", authentication with integrity
@@ -393,19 +393,19 @@ static HttpAuthDetails *parse_http_auth_header(HttpProxyNegotiator *s)
                         ok = true;
                 if (!ok)
                     return auth_error(d, "quality-of-protection list \"%s\" "
-                                      "does not include our only supported "
+                                      "未包含我方唯一支持的"
                                       "option \"auth\"", s->token->s);
             } else {
                 /* Ignore any other auth-param */
                 if (!get_separator(s, '=') ||
                     (!get_quoted_string(s) && !get_token(s)))
-                    return auth_error(d, "parse error in Digest header");
+                    return auth_error(d, "Digest 头解析错误");
             }
 
             if (get_end_of_header(s))
                 break;
             if (!get_separator(s, ','))
-                return auth_error(d, "parse error in Digest header");
+                return auth_error(d, "Digest 头解析错误");
         }
         d->auth_type = AUTH_DIGEST;
         return d;
@@ -515,7 +515,7 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
                 &maj_ver, &min_ver, &s->http_status_pos, &s->http_status);
 
             if (n_scanned < 3) {
-                pn->error = dupstr("HTTP response was absent or malformed");
+                pn->error = dupstr("HTTP 响应缺失或格式错误");
                 crStopV;
             }
 
@@ -535,8 +535,8 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
              */
             http_auth_details_free(s->next_auth);
             s->next_auth = http_auth_details_new();
-            auth_error(s->next_auth, "no Proxy-Authenticate header seen in "
-                       "HTTP 407 Proxy Authentication Required response");
+            auth_error(s->next_auth, "在 HTTP 407 代理认证要求响应中"
+                       "未见 Proxy-Authenticate 头");
         }
 
         /*
@@ -672,7 +672,7 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
                     } else {
                         pn->error = dupprintf(
                             "Received bad character 0x%02X in chunk length "
-                            "during HTTP chunked transfer encoding",
+                            "（HTTP 分块传输编码期间）",
                             (unsigned)(unsigned char)c);
                         crStopV;
                     }
@@ -691,8 +691,8 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
                                           pn->input, buf, 2));
                     if (memcmp(buf, "\r\n", 2)) {
                         pn->error = dupprintf(
-                            "Missing CRLF after chunk "
-                            "during HTTP chunked transfer encoding");
+                            "分块之后缺少 CRLF"
+                            "（HTTP 分块传输编码期间）");
                         crStopV;
                     }
                 }
@@ -740,8 +740,8 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
              * proceed from here if we have a way to ask the user
              * questions. */
             if (!pn->itr) {
-                pn->error = dupprintf("HTTP proxy requested authentication "
-                                      "which we do not have");
+                pn->error = dupprintf("HTTP 代理要求的认证方式"
+                                      "我方无法提供");
                 crStopV;
             }
 
@@ -755,7 +755,7 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
             s->prompts = proxy_new_prompts(pn->ps);
             s->prompts->to_server = true;
             s->prompts->from_server = false;
-            s->prompts->name = dupstr("HTTP proxy authentication");
+            s->prompts->name = dupstr("HTTP 代理认证");
             if (!s->username->len) {
                 s->username_prompt_index = s->prompts->n_prompts;
                 add_prompt(s->prompts, dupstr("Proxy username: "), true);

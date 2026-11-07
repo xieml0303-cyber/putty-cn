@@ -66,7 +66,7 @@ static void proxy_socks4_process_queue(ProxyNegotiator *pn)
             write_hostname = true;
             break;
           case ADDRTYPE_IPV6:
-            pn->error = dupstr("SOCKS version 4 does not support IPv6");
+            pn->error = dupstr("SOCKS 版本 4 不支持 IPv6");
             crStopV;
         }
 
@@ -94,7 +94,7 @@ static void proxy_socks4_process_queue(ProxyNegotiator *pn)
          */
 
         if (data[0] != SOCKS4_REPLY_VERSION) {
-            pn->error = dupprintf("SOCKS proxy response contained reply "
+            pn->error = dupprintf("SOCKS 代理响应包含"
                                   "version number %d (expected %d)",
                                   (int)data[0], SOCKS4_REPLY_VERSION);
             crStopV;
@@ -106,19 +106,19 @@ static void proxy_socks4_process_queue(ProxyNegotiator *pn)
             break;
 
           case SOCKS4_RESP_FAILURE:
-            pn->error = dupstr("SOCKS server reported failure to connect");
+            pn->error = dupstr("SOCKS 服务器报告连接失败");
             break;
 
           case SOCKS4_RESP_WANT_IDENTD:
-            pn->error = dupstr("SOCKS server wanted IDENTD on client");
+            pn->error = dupstr("SOCKS 服务器要求客户端运行 IDENTD");
             break;
 
           case SOCKS4_RESP_IDENTD_MISMATCH:
-            pn->error = dupstr("Username and IDENTD on client don't agree");
+            pn->error = dupstr("客户端的用户名与 IDENTD 不一致");
             break;
 
           default:
-            pn->error = dupprintf("SOCKS server sent unrecognised error "
+            pn->error = dupprintf("SOCKS 服务器返回了无法识别的错误"
                                   "code %d", (int)data[1]);
             break;
         }

@@ -379,10 +379,10 @@ static SeatPromptResult sshproxy_get_userpass_input(Seat *seat, prompts_t *p)
      * reject all attempts to present a prompt to the user, and log in
      * the Event Log to say why not.
      */
-    sshproxy_error(sp, "Unable to provide interactive authentication "
-                   "requested by proxy SSH connection");
-    return SPR_SW_ABORT("Noninteractive SSH proxy cannot perform "
-                        "interactive authentication");
+    sshproxy_error(sp, "无法提供代理 SSH 连接要求的"
+                   "交互式认证");
+    return SPR_SW_ABORT("非交互式 SSH 代理无法执行"
+                        "交互式认证");
 }
 
 static void sshproxy_connection_fatal_callback(void *vctx)
@@ -431,7 +431,7 @@ static SeatPromptResult sshproxy_confirm_ssh_host_key(
      * option in the absence of interactive confirmation, i.e. abort
      * the connection.
      */
-    return SPR_SW_ABORT("Noninteractive SSH proxy cannot confirm host key");
+    return SPR_SW_ABORT("非交互式 SSH 代理无法确认主机密钥");
 }
 
 static void sshproxy_format_seatdialogtext(strbuf *sb, SeatDialogText *text)
@@ -482,8 +482,8 @@ static SeatPromptResult sshproxy_confirm_weak_crypto_primitive(
     sshproxy_error(sp, sb->s);
     strbuf_free(sb);
 
-    return SPR_SW_ABORT("Noninteractive SSH proxy cannot confirm "
-                        "weak crypto primitive");
+    return SPR_SW_ABORT("非交互式 SSH 代理无法确认"
+                        "弱加密原语");
 }
 
 static SeatPromptResult sshproxy_confirm_weak_cached_hostkey(
@@ -510,8 +510,8 @@ static SeatPromptResult sshproxy_confirm_weak_cached_hostkey(
     sshproxy_error(sp, sb->s);
     strbuf_free(sb);
 
-    return SPR_SW_ABORT("Noninteractive SSH proxy cannot confirm "
-                        "weak cached host key");
+    return SPR_SW_ABORT("非交互式 SSH 代理无法确认"
+                        "弱缓存主机密钥");
 }
 
 static const SeatDialogPromptDescriptions *sshproxy_prompt_descriptions(
@@ -731,7 +731,7 @@ Socket *sshproxy_new_connection(SockAddr *addr, const char *hostname,
       }
 
       default:
-        unreachable("bad SSH proxy type");
+        unreachable("SSH 代理类型异常（内部错误）");
     }
 
     /*

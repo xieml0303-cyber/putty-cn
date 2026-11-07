@@ -108,8 +108,8 @@ static void preconn_cmdplug_closing(
       case PLUGCLOSE_ERROR:
       case PLUGCLOSE_BROKEN_PIPE:
         /* But if it terminates _confusedly_, at least log that. */
-        logeventf(wr->logctx, "Error reading output from "
-                  "pre-connect command: %s", error_msg);
+        logeventf(wr->logctx, "读取预连接命令的输出出错："
+                  "%s", error_msg);
         break;
 
       case PLUGCLOSE_USER_ABORT:
@@ -348,7 +348,7 @@ Socket *new_main_connection(
     wr->itr = itr;
     wr->logctx = logctx;
     psb_init(&wr->psb);
-    psb_set_prefix(&wr->psb, "pre-connect command stdout");
+    psb_set_prefix(&wr->psb, "预连接命令的标准输出");
     bufchain_init(&wr->writebuf);
     bufchain_init(&wr->oobbuf);
 
@@ -356,9 +356,9 @@ Socket *new_main_connection(
     wr->mainplugimpl.vt = &preconn_main_plugvt;
     wr->sockimpl.vt = &preconn_sockvt;
 
-    logeventf(logctx, "Running pre-connect command: %s", command);
+    logeventf(logctx, "正在运行预连接命令：%s", command);
     wr->preconn = platform_start_subprocess(
-        command, &wr->cmdplugimpl, "pre-connect command stderr", &wr->waiter);
+        command, &wr->cmdplugimpl, "预连接命令的标准错误", &wr->waiter);
     subproc_waiter_set_callback(wr->waiter, preconn_subproc_terminated, wr);
     sk_write_eof(wr->preconn);
 
