@@ -145,8 +145,7 @@ static char *serial_configure(Serial *serial, HANDLE serport, Conf *conf)
           case 2: dcb.StopBits = ONESTOPBIT; str = "1 stop bit"; break;
           case 3: dcb.StopBits = ONE5STOPBITS; str = "1.5 stop bits"; break;
           case 4: dcb.StopBits = TWOSTOPBITS; str = "2 stop bits"; break;
-          default: return dupstr("Invalid number of stop bits "
-                                 "(need 1, 1.5 or 2)");
+          default: return dupstr("停止位数量无效（应为 1、1.5 或 2）");
         }
         logeventf(serial->logctx, "Configuring %s", str);
 

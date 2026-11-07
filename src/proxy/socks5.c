@@ -129,7 +129,7 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
         crMaybeWaitUntilV(bufchain_try_fetch_consume(pn->input, data, 2));
 
         if (data[0] != SOCKS5_REPLY_VERSION) {
-            pn->error = dupprintf("①SOCKS 代理返回了意外的；②SOCKS 代理返回了非预期的内容"
+            pn->error = dupprintf("SOCKS 代理返回了意外的应答版本号 %d（应为 %d）"
                                   "应答版本号 %d（应为 %d）",
                                   (int)data[0], SOCKS5_REPLY_VERSION);
             crStopV;
@@ -445,7 +445,7 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
         crMaybeWaitUntilV(bufchain_try_fetch_consume(pn->input, data, 4));
 
         if (data[0] != SOCKS5_REPLY_VERSION) {
-            pn->error = dupprintf("①SOCKS 代理返回了意外的；②SOCKS 代理返回了非预期的内容"
+            pn->error = dupprintf("SOCKS 代理返回了意外的应答版本号 %d（应为 %d）"
                                   "应答版本号 %d（应为 %d）",
                                   (int)data[0], SOCKS5_REPLY_VERSION);
             crStopV;

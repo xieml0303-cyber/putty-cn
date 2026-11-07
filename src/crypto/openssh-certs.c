@@ -973,8 +973,7 @@ static bool opensshcert_check_cert(
         goto out;
     }
     if (ssh_key_alg(ca_key)->is_certificate) {
-        put_fmt(error, "Certificate is signed with a certified key "
-                "(forbidden by OpenSSH certificate specification)");
+        put_fmt(error, "证书由一张证书化密钥签名（OpenSSH 证书规范禁止此行为）");
         goto out;
     }
 
@@ -1012,7 +1011,7 @@ static bool opensshcert_check_cert(
 
     uint32_t expected_type = host ? SSH_CERT_TYPE_HOST : SSH_CERT_TYPE_USER;
     if (ck->type != expected_type) {
-        put_fmt(error, "Certificate type is ");
+        put_fmt(error, "证书类型为 ");
         switch (ck->type) {
           case SSH_CERT_TYPE_HOST:
             put_fmt(error, "host");
@@ -1038,7 +1037,7 @@ static bool opensshcert_check_cert(
         goto out;
     }
     if (time >= ck->valid_before) {
-        put_fmt(error, "Certificate expired at ");
+        put_fmt(error, "证书已于以下时间过期：");
         opensshcert_time_to_iso8601(BinarySink_UPCAST(error),
                                     ck->valid_before);
         goto out;
@@ -1128,8 +1127,7 @@ static bool opensshcert_check_cert(
             /*
              * Report an unrecognised literal.
              */
-            put_fmt(error, "Certificate specifies an unsupported critical "
-                    "option \"");
+            put_fmt(error, "证书指定了不受支持的关键选项 \"");
             put_c_string_literal(error, option);
             put_fmt(error, "\"");
             goto out;

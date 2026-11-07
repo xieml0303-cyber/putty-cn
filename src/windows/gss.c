@@ -38,7 +38,7 @@
 
 const int ngsslibs = 3;
 const char *const gsslibnames[3] = {
-    "①〔保留原文〕MIT Kerberos GSSAPI；②MIT Kerberos GSSAPI 库"MIT_KERB_SUFFIX".DLL",
+    "MIT Kerberos GSSAPI 库"MIT_KERB_SUFFIX".DLL",
     "Microsoft SSPI SECUR32.DLL",
     "用户指定的 GSSAPI DLL",
 };

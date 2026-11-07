@@ -116,10 +116,10 @@ static void logfopen_callback(void *vctx, int mode)
                   " =~=~=~=~=~=~=~=~=~=~=~=\r\n", buf);
     }
 
-    event = dupprintf("%s session log (%s mode) to file: %s",
+    event = dupprintf("会话日志%s（%s 模式）写入文件：%s",
                       ctx->state == L_ERROR ?
-                      (mode == 0 ? "Disabled writing" : "Error writing") :
-                      (mode == 1 ? "Appending" : "Writing new"),
+                      (mode == 0 ? "已停止写入" : "写入出错") :
+                      (mode == 1 ? "追加" : "正在写入新文件"),
                       (ctx->logtype == LGTYP_ASCII ? "ASCII" :
                        ctx->logtype == LGTYP_DEBUG ? "raw" :
                        ctx->logtype == LGTYP_PACKETS ? "SSH 数据包" :

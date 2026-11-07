@@ -225,8 +225,7 @@ static char *x11_verify(unsigned long peer_ip, int peer_port,
         struct XDMSeen *seen, *ret;
 
         if (dlen != 24)
-            return dupprintf("XDM-AUTHORIZATION-1 data was wrong length "
-                             "(%d, expected 24)", dlen);
+            return dupprintf("XDM-AUTHORIZATION-1 数据长度错误（实际 %d，应为 24）", dlen);
         if (peer_port == -1)
             return dupstr("缺少远端"
                           "地址数据，无法执行 XDM-AUTHORIZATION-1 校验");
@@ -291,8 +290,7 @@ static void x11_closing(Plug *plug, PlugCloseType type, const char *error_msg)
          * construct an X11 error packet passing on the problem.
          */
         if (xconn->no_data_sent_to_x_client) {
-            char *err_message = dupprintf("unable to connect to forwarded "
-                                          "X server: %s", error_msg);
+            char *err_message = dupprintf("无法连接到被转发的 X 服务器：%s", error_msg);
             x11_send_init_error(xconn, err_message);
             sfree(err_message);
         }

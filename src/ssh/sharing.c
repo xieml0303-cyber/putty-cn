@@ -1286,8 +1286,7 @@ void share_got_pkt_from_server(ssh_sharing_connstate *cs, int type,
         break;
 
       default:
-        unreachable("This packet type should never have come from "
-                    "connection2.c");
+        unreachable("此数据包类型不应来自 connection2.c（内部错误）");
     }
 }
 
@@ -1612,8 +1611,7 @@ static void share_got_pkt_from_downstream(struct ssh_sharing_connstate *cs,
                         packet->s, packet->len, NULL);
                     strbuf_free(packet);
                 } else {
-                    char *buf = dupprintf("Agent forwarding request for "
-                                          "unrecognised channel %u", server_id);
+                    char *buf = dupprintf("针对未识别通道 %u 的代理转发请求", server_id);
                     share_disconnect(cs, buf);
                     sfree(buf);
                     return;
@@ -1638,8 +1636,7 @@ static void share_got_pkt_from_downstream(struct ssh_sharing_connstate *cs,
 
                 chan = share_find_channel_by_server(cs, server_id);
                 if (!chan) {
-                    char *buf = dupprintf("X11 forwarding request for "
-                                          "unrecognised channel %u", server_id);
+                    char *buf = dupprintf("针对未识别通道 %u 的 X11 转发请求", server_id);
                     share_disconnect(cs, buf);
                     sfree(buf);
                     return;

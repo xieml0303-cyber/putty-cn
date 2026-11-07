@@ -1069,8 +1069,7 @@ static void ssh2_connection_process_queue(PacketProtocolLayer *ppl)
              * Anything that reaches here must be bogus.
              */
 
-            ssh_proto_error(s->ppl.ssh, "Received unexpected connection-layer "
-                            "packet, type %d (%s)", pktin->type,
+            ssh_proto_error(s->ppl.ssh, "收到意料之外的连接层数据包，类型 %d（%s）", pktin->type,
                             ssh2_pkt_type(s->ppl.bpp->pls->kctx,
                                           s->ppl.bpp->pls->actx,
                                           pktin->type));

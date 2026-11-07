@@ -273,8 +273,7 @@ wchar_t *decode_utf8_to_wide_string(const char *ustr);
     X(DUTF8_TRUNCATED_SEQUENCE, "多字节编码被" \
       "非续字节中断")                                       \
     X(DUTF8_OVERLONG_ENCODING, "超长编码")                  \
-    X(DUTF8_ENCODED_SURROGATE, "Unicode surrogate character encoded in " \
-      "UTF-8")                                                       \
+    X(DUTF8_ENCODED_SURROGATE, "UTF-8 中编码了 Unicode 代理项字符")                                                       \
     X(DUTF8_CODE_POINT_TOO_BIG, "码点超出 Unicode 范围") \
     /* end of list */
 typedef enum DecodeUTF8Failure {

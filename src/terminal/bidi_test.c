@@ -337,8 +337,7 @@ int main(int argc, char **argv)
             const char *filename = arg;
 
             if (!testfn) {
-                fprintf(stderr, "no mode argument provided before filename "
-                        "'%s'\n", filename);
+                fprintf(stderr, "在文件名 '%s' 之前未提供模式参数\n", filename);
                 return 1;
             }
 

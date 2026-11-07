@@ -615,9 +615,7 @@ static void ssh2_bpp_handle_input(BinaryPacketProtocol *bpp)
                 /* See EXT_INFO handler below */
                 if (type != SSH2_MSG_USERAUTH_SUCCESS) {
                     ssh_proto_error(s->bpp.ssh,
-                                    "Remote side sent SSH2_MSG_EXT_INFO "
-                                    "not either preceded by NEWKEYS or "
-                                    "followed by USERAUTH_SUCCESS");
+                                    "远端发送了 SSH2_MSG_EXT_INFO，其既未先于 NEWKEYS 也未后随 USERAUTH_SUCCESS");
                     return;
                 }
                 s->enforce_next_packet_is_userauth_success = false;

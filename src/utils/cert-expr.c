@@ -531,8 +531,7 @@ static ExprNode *parse_expr(ParserState *ps)
             return en;
 
         if (ps->tok != operator) {
-            error(ps, dupstr("expected parentheses to disambiguate && and || "
-                             "on either side of expression"), subexpr->text);
+            error(ps, dupstr("请在表达式两侧的 && 与 || 附近加括号以消除歧义"), subexpr->text);
             exprnode_free(en);
             return NULL;
         }

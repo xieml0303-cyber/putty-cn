@@ -418,12 +418,10 @@ static void authplugin_bad_packet(struct ssh2_userauth_state *s,
         put_dataz(msg, "读取认证辅助插件输出时文件意外结束");
         break;
       case PLUGIN_NOTYPE:
-        put_dataz(msg, "Received malformed packet from auth helper plugin "
-                  "(too short to have a type code)");
+        put_dataz(msg, "收到来自认证辅助插件的格式错误数据包（过短，连类型码都没有）");
         break;
       default:
-        put_fmt(msg, "Received unknown message type %u "
-                "from auth helper plugin", type);
+        put_fmt(msg, "收到来自认证辅助插件的未知消息类型 %u", type);
         break;
 
       #define CASEDECL(name, value)                                     \
@@ -685,8 +683,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
             s->authplugin_version = get_uint32(src);
             ptrlen username = get_string(src);
             if (get_err(src)) {
-                ssh_sw_abort(s->ppl.ssh, "Received malformed "
-                             "PLUGIN_INIT_RESPONSE from auth helper plugin");
+                ssh_sw_abort(s->ppl.ssh, "收到来自认证辅助插件的格式错误 PLUGIN_INIT_RESPONSE");
                 return;
             }
             if (s->authplugin_version > PLUGIN_PROTOCOL_MAX_VERSION) {
@@ -706,8 +703,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
           case PLUGIN_INIT_FAILURE: {
             ptrlen message = get_string(src);
             if (get_err(src)) {
-                ssh_sw_abort(s->ppl.ssh, "Received malformed "
-                             "PLUGIN_INIT_FAILURE from auth helper plugin");
+                ssh_sw_abort(s->ppl.ssh, "收到来自认证辅助插件的格式错误 PLUGIN_INIT_FAILURE");
                 return;
             }
             /* This is a controlled error, so we need not completely
@@ -853,9 +849,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
 
             if (pktin && pktin->type != SSH2_MSG_USERAUTH_FAILURE &&
                 s->type != AUTH_TYPE_GSSAPI) {
-                ssh_proto_error(s->ppl.ssh, "Received unexpected packet "
-                                "in response to authentication request, "
-                                "type %d (%s)", pktin->type,
+                ssh_proto_error(s->ppl.ssh, "在认证请求的应答中收到意料之外的数据包，类型 %d（%s）", pktin->type,
                                 ssh2_pkt_type(s->ppl.bpp->pls->kctx,
                                               s->ppl.bpp->pls->actx,
                                               pktin->type));
@@ -912,8 +906,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                                      " despite accepting key!");
                     } else if (s->type==AUTH_TYPE_KEYBOARD_INTERACTIVE_QUIET) {
                         /* quiet, so no ppl_printf */
-                        ppl_logevent("Server refused keyboard-interactive "
-                                     "authentication");
+                        ppl_logevent("服务器拒绝了键盘交互认证");
                     } else if (s->type==AUTH_TYPE_GSSAPI) {
                         /* always quiet, so no ppl_printf */
                         /* also, the code down in the GSSAPI block has
@@ -1052,8 +1045,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                         s->agent_keys[s->agent_key_index].comment);
 
                     if (seat_verbose(s->ppl.seat))
-                        ppl_printf("Authenticating with public key "
-                                   "\"%.*s\" from agent\r\n",
+                        ppl_printf("正在使用代理中的公钥 \"%.*s\" 进行认证\r\n",
                                    PTRLEN_PRINTF(comment));
 
                     /*
@@ -1107,16 +1099,14 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                             s->is_trivial_auth = false;
                         } else {
                             ppl_logevent("Pageant 拒绝了签名请求");
-                            ppl_printf("Pageant failed to "
-                                       "provide a signature\r\n");
+                            ppl_printf("Pageant 未能提供签名\r\n");
                             s->suppress_wait_for_response_packet = true;
                             ssh_free_pktout(s->pktout);
                         }
                     } else {
                         ppl_logevent("Pageant 未能应答"
                                      "签名请求");
-                        ppl_printf("Pageant failed to "
-                                   "respond to signing request\r\n");
+                        ppl_printf("Pageant 未能响应签名请求\r\n");
                         s->suppress_wait_for_response_packet = true;
                         ssh_free_pktout(s->pktout);
                     }
@@ -1393,8 +1383,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 s->gss_stat = s->shgss->lib->acquire_cred(
                     s->shgss->lib, &s->shgss->ctx, NULL);
                 if (s->gss_stat != SSH_GSS_OK) {
-                    ppl_logevent("GSSAPI authentication failed to get "
-                                 "credentials");
+                    ppl_logevent("GSSAPI 认证未能获取凭据");
                     /* The failure was on our side, so the server
                      * won't be sending a response packet indicating
                      * failure. Avoid waiting for it next time round
@@ -1425,8 +1414,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
 
                     if (s->gss_stat!=SSH_GSS_S_COMPLETE &&
                         s->gss_stat!=SSH_GSS_S_CONTINUE_NEEDED) {
-                        ppl_logevent("GSSAPI authentication initialisation "
-                                     "failed");
+                        ppl_logevent("GSSAPI 认证初始化失败");
 
                         if (s->shgss->lib->display_status(
                                 s->shgss->lib, s->shgss->ctx, &s->gss_buf)
@@ -1555,9 +1543,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                             message = get_string(src);
                         }
                         if (get_err(src)) {
-                            ssh_sw_abort(s->ppl.ssh, "Received malformed "
-                                         "PLUGIN_PROTOCOL_REJECT from auth "
-                                         "helper plugin");
+                            ssh_sw_abort(s->ppl.ssh, "收到来自认证辅助插件的格式错误 PLUGIN_PROTOCOL_REJECT");
                             return;
                         }
                         if (message.len) {
@@ -1572,9 +1558,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                             seat_set_trust_status(s->ppl.seat, false);
                             ppl_printf("%.*s\r\n", PTRLEN_PRINTF(message));
                             seat_set_trust_status(s->ppl.seat, true);
-                            ppl_logevent("Authentication plugin declined to "
-                                         "help with keyboard-interactive: "
-                                         "%.*s", PTRLEN_PRINTF(message));
+                            ppl_logevent("认证插件拒绝协助键盘交互认证：%.*s", PTRLEN_PRINTF(message));
                         } else {
                             ppl_logevent("认证插件拒绝"
                                          "协助键盘交互认证");

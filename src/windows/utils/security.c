@@ -146,8 +146,7 @@ static bool getsids(char **error)
     if (!networksid) {
         if (!AllocateAndInitializeSid(&nt_auth, 1, SECURITY_NETWORK_RID,
                                       0, 0, 0, 0, 0, 0, 0, &networksid)) {
-            *error = dupprintf("unable to construct SID for "
-                               "local same-user access only: %s",
+            *error = dupprintf("无法为「仅限本地同用户访问」构造 SID：%s",
                                win_strerror(GetLastError()));
             goto cleanup;
         }

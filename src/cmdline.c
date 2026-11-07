@@ -513,8 +513,7 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
         SAVEABLE(0);
         dup = dupstr(value);
         if (!validate_manual_hostkey(dup)) {
-            cmdline_error("'%s' is not a valid format for a manual host "
-                          "key specification", value);
+            cmdline_error("'%s' 不是有效的手动主机密钥规格格式", value);
             sfree(dup);
             return ret;
         }
