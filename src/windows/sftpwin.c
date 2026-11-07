@@ -2478,14 +2478,12 @@ static int cn_confirm_batch(SftpWin *sw, ConflictItem *items, size_t n)
 }
 
 /*
- * cn: 「确认保存」弹窗（配置框保存按钮用）——完全照「确认覆盖」弹窗
- * 的画法：首行文案顶格（标题栏正下方），第二行起大问号图标 + 改动
- * 清单，底部大按钮。返回 IDOK / IDCANCEL。
- *
- * 清单行数不定，窗口高度按行数自适应；超过 CN_CONFIRM_SAVE_MAX_LINES
- * 的行由只读多行 EDITTEXT 滚动承接，样式仍保持无边框的清爽画法。
+ * cn: 「确认保存」弹窗（配置框保存按钮用）——与「确认覆盖」弹窗完全
+ * 同款：首行文案顶格，第二行起 48px 问号图标 + 无边框清单，底部大按钮。
+ * 清单最多显示三行，超出的行折叠成省略行（同一画法）。
+ * 返回 IDOK / IDCANCEL。
  */
-#define CN_CONFIRM_SAVE_MAX_LINES 10
+#define CN_CONFIRM_SAVE_MAX_LINES 3
 
 typedef struct ConfirmSaveBox {
     HWND dlg;
@@ -2535,56 +2533,127 @@ int cn_confirm_save_dialog(HWND parent, const char *changes)
     ConfirmSaveBox cb;
     HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     HDC hdc;
-    TEXTMETRICW tm;
-    int m, lh, w, h, cw, ch, x, y;
-    int nlines, list_h, ytop;
+    SIZE sz = { 0, 0 };
+    int m, lh, list_h, w, h, cw, ch, x, y, ytop;
+    int qicon_size = cn_dpi(48);
+    int needw = 0;
     POINT pt;
     wchar_t *wtitle, *whead, *wlist;
-    char *head;
+    char *listtxt;
 
     memset(&cb, 0, sizeof(cb));
+    cb.result = IDCANCEL;
 
     {
         WNDCLASSW wc;
-        if (!GetClassInfoW(hinst, classname, &wc)) {
-            wc.style = 0;
+        if (!GetClassInfoW(inst, classname, &wc)) {
+            memset(&wc, 0, sizeof(wc));
             wc.lpfnWndProc = cn_confirm_save_proc;
-            wc.cbClsExtra = 0;
-            wc.cbWndExtra = 0;
             wc.hInstance = inst;
-            wc.hIcon = NULL;
             wc.hCursor = LoadCursor(NULL, IDC_ARROW);
             wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
-            wc.lpszMenuName = NULL;
             wc.lpszClassName = classname;
             RegisterClassW(&wc);
         }
     }
 
-    /* 字体度量：行高与边距，与确认覆盖弹窗同一套口径。 */
+    /* 行高实测，与确认覆盖同一口径。 */
     hdc = GetDC(NULL);
-    SelectObject(hdc, font);
-    GetTextMetricsW(hdc, &tm);
-    SelectObject(hdc, GetStockObject(SYSTEM_FONT));
-    ReleaseDC(NULL, hdc);
-    lh = tm.tmHeight + tm.tmExternalLeading + cn_dpi(4);
+    if (hdc) {
+        HFONT old = SelectObject(hdc, font);
+        GetTextExtentPoint32W(hdc, L"国Ag", 3, &sz);
+        SelectObject(hdc, old);
+        ReleaseDC(NULL, hdc);
+    }
+    lh = sz.cy > 0 ? sz.cy : cn_dpi(16);
+
     m = cn_dpi(14);
 
-    /* 清单行数 → 窗口高度自适应。 */
-    nlines = 1;
-    for (const char *p = changes; *p; p++)
-        if (*p == '\n')
-            nlines++;
+    /*
+     * 清单折叠：只留前三行，超出的行并成一个「.......」。
+     */
     {
-        int vis = nlines > CN_CONFIRM_SAVE_MAX_LINES ?
-            CN_CONFIRM_SAVE_MAX_LINES : nlines;
-        list_h = vis * lh;
+        int n = 0;
+        size_t len = strlen(changes);
+        char *tmp = dupstr(changes);
+        char *p = tmp, *nl;
+        strbuf *sb = strbuf_new();
+        while (p < tmp + len && n < CN_CONFIRM_SAVE_MAX_LINES) {
+            nl = strchr(p, '\n');
+            if (nl) {
+                *nl = 0;
+                if (nl > p && nl[-1] == '\r')
+                    nl[-1] = 0;
+            }
+            if (*p) {
+                put_fmt(sb, "%s\r\n", p);
+                n++;
+            }
+            p = nl ? nl + 1 : tmp + len;
+        }
+        if (n == CN_CONFIRM_SAVE_MAX_LINES)
+            put_fmt(sb, ".......");
+        listtxt = strbuf_to_str(sb);
+        sfree(tmp);
+        /* 按行拼接后最后一行也带换行，去掉。 */
+        {
+            size_t l2 = strlen(listtxt);
+            if (l2 >= 2 && listtxt[l2-1] == '\n' && listtxt[l2-2] == '\r')
+                listtxt[l2-2] = 0;
+            else if (l2 >= 1 && listtxt[l2-1] == '\n')
+                listtxt[l2-1] = 0;
+        }
+    }
+    {
+        int lines = 1;
+        for (const char *p = listtxt; *p; p++)
+            if (*p == '\n')
+                lines++;
+        list_h = lines * lh + cn_dpi(6);
     }
 
-    /* 首行 1 行 + 图标/清单区 + 按钮行，宽按内容保守取 340。 */
-    w = cn_dpi(340);
-    ytop = m + lh + cn_dpi(6);
-    h = ytop + list_h + cn_dpi(10) + cn_dpi(26) + m;
+    /* 窗口宽：清单最长一行 + 按钮行下限 + 边距（同确认覆盖公式）。 */
+    hdc = GetDC(NULL);
+    if (hdc) {
+        HFONT old = SelectObject(hdc, font);
+        {
+            const char *p = listtxt;
+            while (p && *p) {
+                char *nl = strchr(p, '\n');
+                int wlen = nl ? (int)(nl - p) : (int)strlen(p);
+                if (wlen > 0) {
+                    wchar_t *wl = dup_mb_to_wc(DEFAULT_CODEPAGE, p);
+                    SIZE s2;
+                    GetTextExtentPoint32W(hdc, wl, wlen, &s2);
+                    if (s2.cx > needw)
+                        needw = s2.cx;
+                    sfree(wl);
+                }
+                p = nl ? nl + 1 : NULL;
+            }
+        }
+        {
+            SIZE s3;
+            GetTextExtentPoint32W(hdc, L".......", 7, &s3);
+            if (s3.cx > needw)
+                needw = s3.cx;
+        }
+        SelectObject(hdc, old);
+        ReleaseDC(NULL, hdc);
+    }
+    {
+        int btnmin = cn_dpi(96) * 2 + cn_dpi(8);
+        if (needw < btnmin)
+            needw = btnmin;
+    }
+    w = needw + 2 * m + cn_dpi(12);
+    if (w < cn_dpi(360))
+        w = cn_dpi(360);
+    if (w > cn_dpi(720))
+        w = cn_dpi(720);
+
+    h = m + lh + cn_dpi(6) + (list_h > qicon_size ? list_h : qicon_size) +
+        cn_dpi(12) + cn_dpi(26) + m;
     cw = w;
     ch = h;
     {
@@ -2606,44 +2675,46 @@ int cn_confirm_save_dialog(HWND parent, const char *changes)
     wtitle = dup_mb_to_wc(DEFAULT_CODEPAGE, "确认保存");
     cb.dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, classname, wtitle,
                              WS_POPUP | WS_CAPTION | WS_SYSMENU,
-                             x, y, w, h, parent, NULL, hinst, &cb);
+                             x, y, w, h, parent, NULL, inst, &cb);
     sfree(wtitle);
-    if (!cb.dlg)
+    if (!cb.dlg) {
+        sfree(listtxt);
         return IDCANCEL;
+    }
     SetWindowLongPtrW(cb.dlg, GWLP_USERDATA, (LONG_PTR)&cb);
 
     /* 首行：顶格说明。 */
-    head = "当前改动尚未保存，改动清单：";
-    whead = dup_mb_to_wc(DEFAULT_CODEPAGE, head);
-    CreateWindowExW(0, L"STATIC", whead,
-                    WS_CHILD | WS_VISIBLE | SS_LEFTNOWORDWRAP,
-                    m, m, cw - 2 * m, lh,
-                    cb.dlg, NULL, hinst, NULL);
-    sfree(whead);
-
-    /* 第二行：大问号图标 + 改动清单。 */
     {
-        int icon = cn_dpi(40);
-        int lx = m + icon + cn_dpi(6);
+        char *head = "当前改动尚未保存，改动清单：";
+        wchar_t *whead = dup_mb_to_wc(DEFAULT_CODEPAGE, head);
+        CreateWindowExW(0, L"STATIC", whead,
+                        WS_CHILD | WS_VISIBLE | SS_LEFTNOWORDWRAP,
+                        m, m, cw - 2 * m, lh,
+                        cb.dlg, NULL, inst, NULL);
+        sfree(whead);
+    }
+
+    /* 第二行：48px 问号图标 + 无边框清单 STATIC（与确认覆盖一致）。 */
+    {
+        int lx = m + qicon_size + cn_dpi(6);
         HWND qicon;
 
-        wlist = dup_mb_to_wc(DEFAULT_CODEPAGE, changes);
-        CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", wlist,
-                        WS_CHILD | WS_VISIBLE | WS_VSCROLL |
-                        ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
+        wlist = dup_mb_to_wc(DEFAULT_CODEPAGE, listtxt);
+        CreateWindowExW(0, L"STATIC", wlist,
+                        WS_CHILD | WS_VISIBLE | SS_LEFTNOWORDWRAP,
                         lx, ytop, cw - lx - m, list_h,
-                        cb.dlg, NULL, hinst, NULL);
+                        cb.dlg, NULL, inst, NULL);
         sfree(wlist);
 
         qicon = CreateWindowExW(0, L"STATIC", NULL,
                                 WS_CHILD | WS_VISIBLE | SS_ICON,
-                                m, ytop, icon, icon,
-                                cb.dlg, NULL, hinst, NULL);
+                                m, ytop, qicon_size, qicon_size,
+                                cb.dlg, NULL, inst, NULL);
         SendMessageW(qicon, STM_SETICON,
-                     (WPARAM)cn_question_icon(icon), 0);
+                     (WPARAM)cn_question_icon(qicon_size), 0);
     }
 
-    /* 按钮行：确定靠左，取消靠右，宽度按文字算。 */
+    /* 按钮行：确定靠左，取消靠右，高度 26、宽度按文字算、下限 96。 */
     {
         int bh = cn_dpi(26);
         int bw[2], by;
@@ -2657,8 +2728,8 @@ int cn_confirm_save_dialog(HWND parent, const char *changes)
                 SIZE s2;
                 GetTextExtentPoint32W(hdc, cap[i], (int)wcslen(cap[i]), &s2);
                 bw[i] = s2.cx + cn_dpi(24);
-                if (bw[i] < cn_dpi(72))
-                    bw[i] = cn_dpi(72);
+                if (bw[i] < cn_dpi(96))
+                    bw[i] = cn_dpi(96);
             }
             SelectObject(hdc, old);
             ReleaseDC(NULL, hdc);
@@ -2669,12 +2740,12 @@ int cn_confirm_save_dialog(HWND parent, const char *changes)
             L"BUTTON", cap[0],
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
             m, by, bw[0], bh, cb.dlg,
-            (HMENU)IDC_CNC_OVERWRITE, hinst, NULL);
+            (HMENU)IDC_CNC_OVERWRITE, inst, NULL);
         cb.b_cancel = CreateWindowW(
             L"BUTTON", cap[1],
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
             cw - m - bw[1], by, bw[1], bh, cb.dlg,
-            (HMENU)IDC_CNC_CANCEL, hinst, NULL);
+            (HMENU)IDC_CNC_CANCEL, inst, NULL);
     }
 
     {
@@ -2683,7 +2754,6 @@ int cn_confirm_save_dialog(HWND parent, const char *changes)
             SendMessageW(all[i], WM_SETFONT, (WPARAM)font, TRUE);
     }
 
-    /* 标题栏问号小图标，与内容区同一份资源。 */
     {
         HICON ico = cn_question_icon(cn_dpi(16));
         if (ico) {
@@ -2697,7 +2767,6 @@ int cn_confirm_save_dialog(HWND parent, const char *changes)
     ShowWindow(cb.dlg, SW_SHOW);
     SetForegroundWindow(cb.dlg);
 
-    /* 模态循环：Enter=确定、Esc=取消，其余消息照常派发。 */
     {
         MSG msg;
         while (IsWindow(cb.dlg) && GetMessageW(&msg, NULL, 0, 0)) {
@@ -2726,6 +2795,7 @@ int cn_confirm_save_dialog(HWND parent, const char *changes)
         ShowWindow(parent, SW_RESTORE);
         SetForegroundWindow(parent);
     }
+    sfree(listtxt);
     return cb.result;
 }
 
