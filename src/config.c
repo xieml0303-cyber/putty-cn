@@ -1338,7 +1338,7 @@ static char *cn_ssh_creds_missing(Conf *conf)
         return dupstr("文件传输需要用户名，请先填写「用户名」。");
     if (!cmdline_have_password() &&
         !conf_get_filename(conf, CONF_keyfile)->utf8path[0])
-        return dupstr("文件传输需要凭据，请在「登录凭据（密码）」框中填写"
+        return dupstr("文件传输需要凭据，请在「凭据（密码）」框中填写"
                       "密码，或点「密钥」选择私钥文件。");
     return NULL;
 }
@@ -2966,7 +2966,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
         ctrl_columns(s, 3, 50, 35, 15);
         c = ctrl_text(s, "用户名：", HELPCTX(session_hostname));
         c->column = 0;
-        c = ctrl_text(s, "登录凭据（密码）：", HELPCTX(session_hostname));
+        c = ctrl_text(s, "凭据（密码）：", HELPCTX(session_hostname));
         c->column = 1;
         /* 第三列这一行留空，给下一行的按钮让位。 */
         c = ctrl_text(s, "", HELPCTX(no_help));
