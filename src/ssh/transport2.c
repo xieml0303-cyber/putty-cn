@@ -2002,7 +2002,7 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
         if ((pktin = ssh2_transport_pop(s)) != NULL) {
             if (pktin->type != SSH2_MSG_KEXINIT) {
                 ssh_proto_error(s->ppl.ssh, "收到了意外的传输"
-                                "layer packet outside a key exchange, "
+                                "层数据包，且此时不在密钥交换过程中，"
                                 "type %d (%s)", pktin->type,
                                 ssh2_pkt_type(s->ppl.bpp->pls->kctx,
                                               s->ppl.bpp->pls->actx,

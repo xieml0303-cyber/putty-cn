@@ -2029,7 +2029,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     "没有可用的受支持认证方式",
                     SSH2_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE);
                 ssh_sw_abort(s->ppl.ssh, "没有受支持的认证方式"
-                             "available (server sent: %s)",
+                             "可用（服务器发送：%s）",
                              s->last_methods_string->s);
                 return;
             }

@@ -77,7 +77,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
             crMaybeWaitUntilV((pktin = ssh2_transport_pop(s)) != NULL);
             if (pktin->type != SSH2_MSG_KEX_DH_GEX_GROUP) {
                 ssh_proto_error(s->ppl.ssh, "在以下阶段收到意料之外的数据包："
-                                "expecting Diffie-Hellman group, type %d (%s)",
+                                "等待 Diffie-Hellman 组，类型 %d（%s）",
                                 pktin->type,
                                 ssh2_pkt_type(s->ppl.bpp->pls->kctx,
                                               s->ppl.bpp->pls->actx,
@@ -127,7 +127,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
         crMaybeWaitUntilV((pktin = ssh2_transport_pop(s)) != NULL);
         if (pktin->type != s->kex_reply_value) {
             ssh_proto_error(s->ppl.ssh, "在以下阶段收到意料之外的数据包："
-                            "expecting Diffie-Hellman reply, type %d (%s)",
+                            "等待 Diffie-Hellman 应答，类型 %d（%s）",
                             pktin->type,
                             ssh2_pkt_type(s->ppl.bpp->pls->kctx,
                                           s->ppl.bpp->pls->actx,
@@ -305,7 +305,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
                 (pktin = ssh2_transport_pop(s)) != NULL);
             if (pktin->type != SSH2_MSG_KEXGSS_GROUP) {
                 ssh_proto_error(s->ppl.ssh, "在以下阶段收到意料之外的数据包："
-                                "expecting Diffie-Hellman group, type %d (%s)",
+                                "等待 Diffie-Hellman 组，类型 %d（%s）",
                                 pktin->type,
                                 ssh2_pkt_type(s->ppl.bpp->pls->kctx,
                                               s->ppl.bpp->pls->actx,
@@ -487,7 +487,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
                 goto wait_for_gss_token;
               default:
                 ssh_proto_error(s->ppl.ssh, "收到意料之外的数据包"
-                                "during GSSAPI key exchange, type %d (%s)",
+                                "GSSAPI 密钥交换期间，类型 %d（%s）",
                                 pktin->type,
                                 ssh2_pkt_type(s->ppl.bpp->pls->kctx,
                                               s->ppl.bpp->pls->actx,
@@ -579,7 +579,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
         crMaybeWaitUntilV((pktin = ssh2_transport_pop(s)) != NULL);
         if (pktin->type != SSH2_MSG_KEXRSA_PUBKEY) {
             ssh_proto_error(s->ppl.ssh, "在以下阶段收到意料之外的数据包："
-                            "expecting RSA public key, type %d (%s)",
+                            "等待 RSA 公钥，类型 %d（%s）",
                             pktin->type,
                             ssh2_pkt_type(s->ppl.bpp->pls->kctx,
                                           s->ppl.bpp->pls->actx,
@@ -672,7 +672,7 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
         crMaybeWaitUntilV((pktin = ssh2_transport_pop(s)) != NULL);
         if (pktin->type != SSH2_MSG_KEXRSA_DONE) {
             ssh_proto_error(s->ppl.ssh, "在以下阶段收到意料之外的数据包："
-                            "expecting RSA kex signature, type %d (%s)",
+                            "等待 RSA 密钥交换签名，类型 %d（%s）",
                             pktin->type,
                             ssh2_pkt_type(s->ppl.bpp->pls->kctx,
                                           s->ppl.bpp->pls->actx,

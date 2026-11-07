@@ -207,7 +207,7 @@ static int fxp_got_status(struct sftp_packet *pktin)
         "文件结束",
         "文件或目录不存在",
         "权限不足",
-        "failure",
+        "失败",
         "消息格式错误",
         "未建立连接",
         "连接已断开",
