@@ -1515,30 +1515,6 @@ static void select_history_entry(struct sessionsaver_data *ssd,
 }
 
 /*
- * 「退出时关闭窗口」：仅作展示，固定为「从不」。用户即使尝试改选，
- * 也会立即被回退，底层的 CONF_close_on_exit 始终为 FORCE_OFF。
- */
-static void config_coe_handler(dlgcontrol *ctrl, dlgparam *dlg,
-                               void *data, int event)
-{
-    Conf *conf = (Conf *)data;
-
-    if (event == EVENT_REFRESH) {
-        dlg_update_start(ctrl, dlg);
-        dlg_listbox_clear(ctrl, dlg);
-        dlg_listbox_addwithid(ctrl, dlg, "总是", FORCE_ON);
-        dlg_listbox_addwithid(ctrl, dlg, "仅正常退出", AUTO);
-        dlg_listbox_addwithid(ctrl, dlg, "从不", FORCE_OFF);
-        dlg_listbox_select(ctrl, dlg, 2);
-        dlg_update_done(ctrl, dlg);
-        conf_set_int(conf, CONF_close_on_exit, FORCE_OFF);
-    } else if (event == EVENT_SELCHANGE) {
-        dlg_listbox_select(ctrl, dlg, 2);
-        conf_set_int(conf, CONF_close_on_exit, FORCE_OFF);
-    }
-}
-
-/*
  * cn: Persist the "默认设置" session with the same protections as the
  * save button: the auto-fallback serial port is not baked in (H3),
  * and the connection targets (host/port/protocol) are written as the
@@ -2894,8 +2870,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
      * cn: 「文件传输」紧挨在「连接」左侧。前置条件与「连接」相同，
      * 点下去不进终端而是直接开传输窗口。
      *
-     * 快捷键用 'f'：这一页的 a/c/d/n/o/p/r/s/t/u/v/w/x 都已被占用，
-     * 尤其 'x' 是下面「退出时关闭窗口」的，撞了会争抢。
+     * 快捷键用 'f'：这一页的 a/c/d/n/o/p/r/s/t/u/v/w/x 都已被占用。
      */
     if (!midsession) {
         ssd->xferbutton = ctrl_pushbutton(s, "文件传输(F)", 'f',
@@ -3070,16 +3045,14 @@ void setup_config_box(struct controlbox *b, bool midsession,
                                 sessionsaver_handler, P(ssd));
     ssd->listbox->column = 0;
     /*
-     * cn: 行数从 13 降到 10 —— 会话页上方新增了「用户名 / 凭据」两行
-     * 输入框，整个面板被往下推了约 42px。列表若仍按 13 行撑开，页面
-     * 总高会超出配置框客户区，把底部的「退出时关闭窗口」挤到按钮行
-     * 上重叠显示。减 3 行（实测每行约 12.6px，共省约 38px）正好把
-     * 溢出的约 31px 吃掉，列表仍有 10 行可视高度。
+     * cn: 行数 11 —— 会话页上方新增了「用户名 / 凭据」两行输入框，
+     * 整个面板被往下推了约 42px；「退出时关闭窗口」下拉已移除，
+     * 腾出的高度正好容纳 11 行列表（2026-11-07，主人指示）。
      *
      * WS_VSCROLL（由 Windows listbox 助手设置）会在历史条目超出可视
-     * 范围时自动出现滚动条，因此行数减少不影响可访问的会话数量。
+     * 范围时自动出现滚动条，因此行数不影响可访问的会话数量。
      */
-    ssd->listbox->listbox.height = 10;
+    ssd->listbox->listbox.height = 11;
     /* 每行下方画一条细分隔线，让历史列表看起来像表格。 */
     ssd->listbox->listbox.ruledlines = true;
     /* 主机名与端口分两列显示，中间一条竖线，端口列宽固定。 */
@@ -3091,8 +3064,8 @@ void setup_config_box(struct controlbox *b, bool midsession,
                                          sessionsaver_handler, P(ssd));
         ssd->delbutton->column = 1;
         /* cn: 一键恢复到设置初始化快照（快照由配置框打开时自动建立）。
-         * 按钮贴历史列表框底边，尺寸与删除键一致；字体小一号保证
-         * 五个字完整显示。 */
+         * 按钮贴历史列表框底边（cn_style_snapshot_buttons 定位），
+         * 尺寸与删除键一致；字体小一号保证五个字完整显示。 */
         ssd->initbutton = ctrl_pushbutton(s, "初始化设置", NO_SHORTCUT,
                                           HELPCTX(no_help),
                                           sessionsaver_handler, P(ssd));
@@ -3103,11 +3076,11 @@ void setup_config_box(struct controlbox *b, bool midsession,
         ssd->delbutton = NULL;
     }
     ctrl_columns(s, 1, 100);
-    if (!midsession) {
-        /* 「退出时关闭窗口」固定显示「从不」，见 config_coe_handler。 */
-        c = ctrl_droplist(s, "退出时关闭窗口(X)", 'x', 45,
-                          HELPCTX(session_coe), config_coe_handler, I(0));
-    }
+    /*
+     * cn: 「退出时关闭窗口」下拉已按主人指示移除——会话页高度紧张，
+     * 这行本来就只是固定「从不」的展示。行为保障在 sessionsaver_handler
+     * 的 okbutton 分支里继续强制 CONF_close_on_exit = FORCE_OFF。
+     */
 
     /*
      * The Session/Logging panel.

@@ -258,6 +258,9 @@ static void cn_style_snapshot_buttons(HWND hwnd)
 {
     HWND hdel = NULL, hinit = NULL, hlist = NULL;
     HWND h = 0;
+    /* cn: 按钮尺寸调整（宽+5/高-2）只在首次执行时做一次——本函数会被
+     * repin 定时器重复调用，反复做会越缩越小。 */
+    bool cn_resize = !GetProp(hwnd, "cn_btn_styled");
     while (true) {
         h = FindWindowEx(hwnd, h, "Button", NULL);
         if (!h)
@@ -285,28 +288,37 @@ static void cn_style_snapshot_buttons(HWND hwnd)
     }
 
     /* Balanced button size: a touch wider than the layout default so
-     * 设置初始化 fits on one line (68 px), a touch shorter than the
+     * 初始化设置 fits on one line (68 px), a touch shorter than the
      * standard height, and safely inside the group frame. */
-    HWND btns[2] = { hdel, hinit };
-    for (int i = 0; i < 2; i++) {
-        RECT r;
-        if (!btns[i])
-            continue;
-        GetWindowRect(btns[i], &r);
-        POINT tl = { r.left, r.top }, br = { r.right, r.bottom };
-        ScreenToClient(hwnd, &tl);
-        ScreenToClient(hwnd, &br);
-        SetWindowPos(btns[i], NULL, tl.x, tl.y, br.x - tl.x + 5,
-                     br.y - tl.y - 2, SWP_NOZORDER);
+    if (cn_resize) {
+        SetProp(hwnd, "cn_btn_styled", (HANDLE)1);
+        HWND btns[2] = { hdel, hinit };
+        for (int i = 0; i < 2; i++) {
+            RECT r;
+            if (!btns[i])
+                continue;
+            GetWindowRect(btns[i], &r);
+            POINT tl = { r.left, r.top }, br = { r.right, r.bottom };
+            ScreenToClient(hwnd, &tl);
+            ScreenToClient(hwnd, &br);
+            SetWindowPos(btns[i], NULL, tl.x, tl.y, br.x - tl.x + 5,
+                         br.y - tl.y - 2, SWP_NOZORDER);
+        }
     }
 
     /* Pin 删除 to the top of the history list box (next to the
-     * entries it acts on), 设置初始化 to the bottom. */
+     * entries it acts on), 初始化设置 to the bottom. */
     if (hlist) {
         RECT rl, rd, ri;
         GetWindowRect(hlist, &rl);
         GetWindowRect(hdel, &rd);
         GetWindowRect(hinit, &ri);
+        /*
+         * cn: 首次执行时列表高度尚未终态（自绘行高随后还会把它缩一行
+         * 增量），此时 pin 出来的位置会偏高。挂一个一次性定时器在窗口
+         * 完全稳定后重调一次（幂等）；终态后这一次才是有效定位。
+         */
+        SetTimer(hwnd, 1231, 50, NULL);
         POINT p1 = { rd.left, rd.top }, p2 = { ri.left, ri.top };
         ScreenToClient(hwnd, &p1);
         ScreenToClient(hwnd, &p2);
@@ -316,6 +328,34 @@ static void cn_style_snapshot_buttons(HWND hwnd)
         int dy_bottom = rl.bottom - (ri.bottom - ri.top) - ri.top;
         SetWindowPos(hinit, NULL, p2.x, p2.y + dy_bottom, 0, 0,
                      SWP_NOSIZE | SWP_NOZORDER);
+
+        /*
+         * cn: 组框底边收紧到「列表底 + 5px」——布局 ypos 给组框留的
+         * 空隙偏大（历史遗留约 20px），主人指定收窄到 5px。
+         */
+        HWND hgrp = NULL;
+        h = 0;
+        while ((h = FindWindowEx(hwnd, h, "Button", NULL)) != NULL) {
+            char text[64];
+            GetWindowText(h, text, sizeof(text));
+            if (strncmp(text, "已保存的会话", 18) == 0) {
+                hgrp = h;
+                break;
+            }
+        }
+        if (hgrp) {
+            RECT rg;
+            GetWindowRect(hgrp, &rg);
+            POINT gp = { rg.left, rg.top }, gb = { rg.right, rg.bottom };
+            ScreenToClient(hwnd, &gp);
+            ScreenToClient(hwnd, &gb);
+            /* 目标底边 = 列表底（转客户区坐标）+ 5px；宽度沿用原值。 */
+            POINT lb = { rl.left, rl.bottom };
+            ScreenToClient(hwnd, &lb);
+            int cn_h = (lb.y + 5) - gp.y;
+            SetWindowPos(hgrp, NULL, gp.x, gp.y, gb.x - gp.x,
+                         cn_h, SWP_NOZORDER);
+        }
 
         /*
          * cn: 「载入密钥」不再在这里定位。它现在由会话页的列布局摆到
@@ -1159,6 +1199,42 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
         return 0;
 
       case WM_TIMER:
+        if ((UINT_PTR)wParam == 1231) {
+            /*
+             * cn: 列表高度终态后补一次精确 pin（见 cn_style_snapshot_buttons）。
+             * 列表 rect 可能在首次 pin 之后仍被调整（自绘行高等），所以
+             * 这里校验按钮与列表的底边是否真的齐平，不齐就再挂一次定时
+             * 器重调，直到齐平（上限 5 轮，防意外死循环）。
+             */
+            HWND cn_list = NULL, cn_init = NULL, h = 0;
+            KillTimer(hwnd, 1231);
+            if (pds->dp->apply_cb)
+                return 0;
+            while ((h = FindWindowEx(hwnd, h, "ListBox", NULL)) != NULL) {
+                if (GetWindowLong(h, GWL_STYLE) & LBS_NOTIFY) {
+                    cn_list = h;
+                    break;
+                }
+            }
+            h = 0;
+            while ((h = FindWindowEx(hwnd, h, "Button", NULL)) != NULL) {
+                char text[64];
+                GetWindowText(h, text, sizeof(text));
+                if (strncmp(text, "初始化设置", 15) == 0)
+                    cn_init = h;
+            }
+            if (cn_list && cn_init) {
+                RECT rl, ri;
+                GetWindowRect(cn_list, &rl);
+                GetWindowRect(cn_init, &ri);
+                cn_style_snapshot_buttons(hwnd);
+                GetWindowRect(cn_list, &rl);
+                GetWindowRect(cn_init, &ri);
+                if (rl.bottom != ri.bottom && ri.bottom - rl.bottom < 100)
+                    SetTimer(hwnd, 1231, 50, NULL);
+            }
+            return 0;
+        }
         if (dialog_box_demo_screenshot_filename &&
             (UINT_PTR)wParam == DEMO_SCREENSHOT_TIMER_ID) {
             KillTimer(hwnd, DEMO_SCREENSHOT_TIMER_ID);
