@@ -469,12 +469,16 @@ static void config_host_handler(dlgcontrol *ctrl, dlgparam *dlg,
                                   conf_get_str(conf, CONF_serline));
         } else {
             /*
-             * cn: 网络模式下该控件退化为纯输入（不再灌历史条目，
-             * 下拉列表保持为空——箭头盖绘依赖空列表判定）。没有
-             * 列表操作，dlg_listbox_* 会触发 has_list 断言。
+             * cn: 网络模式下不再灌历史条目，且必须清空列表——串口
+             * 模式灌进来的端口条目若不清，切回 SSH 后列表非空，
+             * 盖绘放行（箭头重现）且下拉弹出的还是 COM 残留。
+             * 控件本体是 ctrl_combobox（has_list=true），列表操作
+             * 合法；断言只在控件被换成无列表 editbox 时才会炸。
              */
-            dlg_label_change(ctrl, dlg, HOST_BOX_TITLE);
+            dlg_update_start(ctrl, dlg);
+            dlg_listbox_clear(ctrl, dlg);
             dlg_editbox_set(ctrl, dlg, conf_get_str(conf, CONF_host));
+            dlg_update_done(ctrl, dlg);
         }
     } else if (event == EVENT_VALCHANGE) {
         char *s = dlg_editbox_get(ctrl, dlg);
