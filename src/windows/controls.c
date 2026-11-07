@@ -1972,6 +1972,27 @@ void winctrl_layout(struct dlgparam *dp, struct winctrls *wc,
                 actual_base_id = IDCANCEL;
             num_ids = 1;
             button(&pos, escaped, actual_base_id, ctrl->button.isdefault);
+            if (ctrl->button.cn_smallfont && pos.hwnd) {
+                /* cn: one pixel smaller so the label fits unclipped */
+                HWND cn_btn = GetDlgItem(pos.hwnd, actual_base_id);
+                if (cn_btn) {
+                    HFONT cn_font = (HFONT)SendMessage(cn_btn, WM_GETFONT,
+                                                       0, 0);
+                    LOGFONT cn_lf;
+                    static HFONT cn_small = NULL;
+                    if (cn_font &&
+                        GetObject(cn_font, sizeof(cn_lf), &cn_lf)) {
+                        if (cn_lf.lfHeight < 0)
+                            cn_lf.lfHeight += 1;   /* slightly smaller */
+                        else if (cn_lf.lfHeight > 0)
+                            cn_lf.lfHeight -= 1;
+                        if (!cn_small)
+                            cn_small = CreateFontIndirect(&cn_lf);
+                        SendMessage(cn_btn, WM_SETFONT,
+                                    (WPARAM)cn_small, MAKELPARAM(true, 0));
+                    }
+                }
+            }
             sfree(escaped);
             break;
           case CTRL_LISTBOX:

@@ -286,6 +286,11 @@ struct dlgcontrol {
              * Escape.
              */
             bool iscancel;
+            /*
+             * cn: render the button label with a slightly smaller
+             * font so long labels fit without truncation.
+             */
+            bool cn_smallfont;
         } button;
         struct { /* for CTRL_LISTBOX */
             char shortcut;                 /* keyboard shortcut */
