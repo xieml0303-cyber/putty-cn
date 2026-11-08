@@ -13,6 +13,12 @@ IDI_LISTDIR ICON "icon_list_dir.ico"
 IDI_LISTFILE ICON "icon_list_file.ico"
 /* cn: 自建模态弹窗的问号图标 */
 IDI_QHELP ICON "icon_question.ico"
+/* cn: 确认类弹窗清单行首的动作图标（叉 / 勾） */
+IDI_CN_CROSS ICON "icon_cn_cross.ico"
+IDI_CN_CHECK ICON "icon_cn_check.ico"
+/* cn: 冲突类清单行首图标 —— 警告（红圈叹号）/ 中性圆点 */
+IDI_CN_WARN ICON "icon_cn_warn.ico"
+IDI_CN_DOT ICON "icon_cn_dot.ico"
 
 #include "help.rc2"
 #include "putty-common.rc2"

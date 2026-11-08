@@ -320,7 +320,7 @@ CnQuitChoice dlg_confirm_quit(dlgparam *dp)
 
     char *changes = conf_describe_changes(dp->baseline, dp->data);
     /* cn: 文案取自 cn_quit_texts（唯一定义处），与看图入口同源。 */
-    int mbret = cn_confirm_dialog_texts(dp->hwnd, changes, &cn_quit_texts,
+    int mbret = cn_confirm_dialog_texts(dp->hwnd, changes, NULL, &cn_quit_texts,
                                         NULL);
     sfree(changes);
 
@@ -353,7 +353,7 @@ CnLaunchChoice dlg_confirm_launch(dlgparam *dp)
     char *changes = conf_describe_changes(dp->baseline, dp->data);
     /* cn: 文案取自 cn_launch_texts（唯一定义处），与看图入口同源。 */
     bool closed_by_x = false;
-    int mbret = cn_confirm_dialog_texts(dp->hwnd, changes, &cn_launch_texts,
+    int mbret = cn_confirm_dialog_texts(dp->hwnd, changes, NULL, &cn_launch_texts,
                                         &closed_by_x);
     sfree(changes);
 

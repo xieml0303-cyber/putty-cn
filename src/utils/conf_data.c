@@ -607,16 +607,87 @@ static bool cn_map_equal_const(const Conf *a, const Conf *b, int key)
 }
 
 /*
- * cn: Emit one line per added, removed or altered mapping entry, in
+ * cn: 向结构化清单追加一条。name / oldval / newval 会被复制（调用方
+ * 传入的指针可能是 conf 树内部或临时缓冲区，生命周期不由我们掌控）。
+ */
+static void cn_change_add(CnChangeList *list, const char *name,
+                          const char *oldval, const char *newval,
+                          CnChangeKind kind)
+{
+    list->items = sresize(list->items, list->n + 1, CnChange);
+    list->items[list->n].name = dupstr(name);
+    list->items[list->n].oldval = dupstr(oldval);
+    list->items[list->n].newval = dupstr(newval);
+    list->items[list->n].kind = kind;
+    /*
+     * cn: 行首图标默认按 kind 走勾/叉，不用固定资源 ID。
+     * 用 sresize 扩出来的内存不会自动清零，这里必须显式写 0，
+     * 否则「确认覆盖」那种按目录/文件分图标的调用方没传值时，
+     * 行首会拿一个垃圾资源 ID 去 LoadImage —— 编译期不会报错，
+     * 只在运行时表现为「图标随机缺失」。
+     */
+    list->items[list->n].icon_id = 0;
+    list->n++;
+}
+
+void cn_change_list_free(CnChangeList *list)
+{
+    if (!list)
+        return;
+    for (size_t i = 0; i < list->n; i++) {
+        sfree(list->items[i].name);
+        sfree(list->items[i].oldval);
+        sfree(list->items[i].newval);
+    }
+    sfree(list->items);
+    sfree(list);
+}
+
+/*
+ * cn: 判断新值是否表示「开启」或「关闭」，决定行首画勾还是画叉。
+ *
+ * 主人指定：关闭类动作打叉，开启/切换类打勾；字符串与数字这类
+ * 非开关改动一律打勾（视为「修改」这个动作本身）。
+ *
+ * 只认明确的开关词，不做模糊匹配 —— 选项值里可能有「关闭时自动
+ * 断开」这类短语，contains 匹配会误判，所以要求整串相等。
+ */
+static CnChangeKind cn_classify_newval(const char *v)
+{
+    static const char *const on_words[] = {
+        "开", "启用", "开启", "勾选", "是", "真", "on", "yes", "true",
+    };
+    static const char *const off_words[] = {
+        "关", "禁用", "关闭", "取消勾选", "否", "假", "off", "no", "false",
+    };
+
+    if (!v)
+        return CN_CHG_OTHER;
+    for (size_t i = 0; i < lenof(on_words); i++)
+        if (!strcasecmp(v, on_words[i]))
+            return CN_CHG_TOGGLE_ON;
+    for (size_t i = 0; i < lenof(off_words); i++)
+        if (!strcasecmp(v, off_words[i]))
+            return CN_CHG_TOGGLE_OFF;
+    return CN_CHG_OTHER;
+}
+
+/*
+ * cn: Emit one entry per added, removed or altered mapping entry, in
  * the same "【name】 old → new" shape as the scalar cases. Keys only
  * present on one side are shown against "(无)" so the direction is
  * obvious.
+ *
+ * 收集到结构化清单里；字符串输出由 cn_change_list_to_text 统一拼，
+ * 两条路径同一份数据，格式不会分叉。
  */
-static int cn_map_describe(strbuf *sb, Conf *base, Conf *cur, int key)
+static int cn_map_collect(CnChangeList *list, Conf *base, Conf *cur, int key)
 {
     int n = 0;
     char *keypos = NULL;
     char *kb, *kc;
+    /* 子键要拼进旧值/新值（「子键：值」），临时缓冲够长即可。 */
+    char oldbuf[1024], newbuf[1024];
 
     for (;;) {
         char *vb = conf_get_str_strs(base, key, keypos, &kb);
@@ -626,8 +697,10 @@ static int cn_map_describe(strbuf *sb, Conf *base, Conf *cur, int key)
 
         if (vb && vc && strcmp(kb, kc) == 0) {
             if (strcmp(vb, vc) != 0) {
-                put_fmt(sb, "【%s】 %s：%s → %s\r\n",
-                        cn_option_display_name(key), kb, vb, vc);
+                snprintf(oldbuf, sizeof(oldbuf), "%s：%s", kb, vb);
+                snprintf(newbuf, sizeof(newbuf), "%s：%s", kb, vc);
+                cn_change_add(list, cn_option_display_name(key),
+                              oldbuf, newbuf, CN_CHG_OTHER);
                 n++;
             }
             keypos = kb;
@@ -638,15 +711,27 @@ static int cn_map_describe(strbuf *sb, Conf *base, Conf *cur, int key)
          * One side is missing this subkey, or the two sides have
          * diverged. Report the one that sorts first and advance only
          * that side, so insertions and deletions both come out.
+         *
+         * ⚠️ 子键前缀永远加在**左侧（旧值）**，右侧只写裸值。
+         *    这是原有文本格式，test_conf 的 mapchangelist 断言逐字
+         *    锁着它：
+         *      新增  【端口转发】 L8080：(无) → localhost:80
+         *      删除  【端口转发】 L8080：localhost:80 → (无)
+         *    两侧都加前缀（踩过）会变成「L8080：(无) → L8080：...」；
+         *    只在有值侧加（也踩过）会变成「(无) → L8080：...」。
          */
         if (vb && (!vc || strcmp(kb, kc) < 0)) {
-            put_fmt(sb, "【%s】 %s：%s → (无)\r\n",
-                    cn_option_display_name(key), kb, vb);
+            snprintf(oldbuf, sizeof(oldbuf), "%s：%s", kb, vb);
+            snprintf(newbuf, sizeof(newbuf), "(无)");
+            cn_change_add(list, cn_option_display_name(key),
+                          oldbuf, newbuf, CN_CHG_TOGGLE_OFF);
             n++;
             keypos = kb;
         } else {
-            put_fmt(sb, "【%s】 %s：(无) → %s\r\n",
-                    cn_option_display_name(key), kc, vc);
+            snprintf(oldbuf, sizeof(oldbuf), "%s：(无)", kc);
+            snprintf(newbuf, sizeof(newbuf), "%s", vc);
+            cn_change_add(list, cn_option_display_name(key),
+                          oldbuf, newbuf, CN_CHG_TOGGLE_ON);
             n++;
             keypos = kc;
         }
@@ -749,24 +834,26 @@ bool conf_equal(const Conf *a, const Conf *b)
 }
 
 /*
- * cn: Describe the differences between two configurations, one line
- * per changed option, formatted as "【关键字】 旧值 → 新值". Used by
- * the save-confirmation and close prompts so the user can see exactly
- * what is about to be persisted.
+ * cn: 收集两份配置的全部差异，产出结构化清单。
  *
- * The option name is wrapped in full-width brackets so it reads as a
- * heading and visually separates from the value that follows; these
- * prompts use plain-text controls that cannot carry per-character
- * styling (bold or underline), so the distinction has to come from
- * the characters themselves.
+ * 与 conf_describe_changes 是同一份遍历逻辑的两个出口：这个函数只
+ * 收集，不拼字符串。自绘弹窗要按段上色（选项名/旧值一色、箭头/新值
+ * 一色），必须拿到分段数据；靠解析纯字符串在值本身含「】」或「→」
+ * 时会出错，所以数据从源头结构化。
+ *
+ * 顺序与 conf_describe_changes 完全一致（按 conf_key_info 的 key
+ * 序号），保证两种输出逐行对得上。
  *
  * CONF_protocol is special-cased to display protocol names rather
  * than raw enum numbers.
  */
-char *conf_describe_changes(const Conf *baseline, const Conf *current)
+CnChangeList *conf_describe_changes_struct(const Conf *baseline,
+                                           const Conf *current)
 {
-    strbuf *sb = strbuf_new();
-    int nchanges = 0;
+    CnChangeList *list = snew(CnChangeList);
+    char buf[64];
+    list->items = NULL;
+    list->n = 0;
 
     for (size_t key = 0; key < N_CONFIG_OPTIONS; key++) {
         const ConfKeyInfo *info = &conf_key_info[key];
@@ -781,8 +868,7 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
         if (info->subkey_type != CONF_TYPE_NONE) {
             if (info->subkey_type == CONF_TYPE_STR &&
                 info->value_type == CONF_TYPE_STR)
-                nchanges += cn_map_describe(sb, (Conf *)baseline,
-                                            (Conf *)current, key);
+                cn_map_collect(list, (Conf *)baseline, (Conf *)current, key);
             continue;
         }
         if (cn_is_connection_target(key))
@@ -824,11 +910,11 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
             int b = conf_get_bool(current, CONF_nethack_keypad) ? 2 :
                 conf_get_bool(current, CONF_app_keypad);
             if (a != b) {
-                put_fmt(sb, "【%s】 %s → %s\r\n",
-                        cn_option_display_name(key),
-                        cn_option_value_name(key, a),
-                        cn_option_value_name(key, b));
-                nchanges++;
+                const char *an = cn_option_value_name(key, a);
+                const char *bn = cn_option_value_name(key, b);
+                cn_change_add(list, cn_option_display_name(key),
+                              an ? an : "", bn ? bn : "",
+                              cn_classify_newval(bn));
             }
             continue;
         }
@@ -837,24 +923,20 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
           case CONF_TYPE_STR: {
             const char *a = conf_get_str(baseline, key);
             const char *b = conf_get_str(current, key);
-            if (strcmp(a, b) != 0) {
-                put_fmt(sb, "【%s】 %s → %s\r\n",
-                        cn_option_display_name(key),
-                        *a ? a : "(空)", *b ? b : "(空)");
-                nchanges++;
-            }
+            if (strcmp(a, b) != 0)
+                cn_change_add(list, cn_option_display_name(key),
+                              *a ? a : "(空)", *b ? b : "(空)",
+                              CN_CHG_OTHER);
             break;
           }
           case CONF_TYPE_STR_AMBI: {
             bool a_utf8, b_utf8;
             const char *a = conf_get_str_ambi(baseline, key, &a_utf8);
             const char *b = conf_get_str_ambi(current, key, &b_utf8);
-            if (strcmp(a, b) != 0) {
-                put_fmt(sb, "【%s】 %s → %s\r\n",
-                        cn_option_display_name(key),
-                        *a ? a : "(空)", *b ? b : "(空)");
-                nchanges++;
-            }
+            if (strcmp(a, b) != 0)
+                cn_change_add(list, cn_option_display_name(key),
+                              *a ? a : "(空)", *b ? b : "(空)",
+                              CN_CHG_OTHER);
             break;
           }
           case CONF_TYPE_INT: {
@@ -867,13 +949,16 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
                     an = cn_enum_display_name(info, a);
                 if (!bn)
                     bn = cn_enum_display_name(info, b);
-                if (an && bn)
-                    put_fmt(sb, "【%s】 %s → %s\r\n",
-                            cn_option_display_name(key), an, bn);
-                else
-                    put_fmt(sb, "【%s】 %d → %d\r\n",
-                            cn_option_display_name(key), a, b);
-                nchanges++;
+                if (an && bn) {
+                    cn_change_add(list, cn_option_display_name(key), an, bn,
+                                  cn_classify_newval(bn));
+                } else {
+                    char abuf[32], bbuf[32];
+                    snprintf(abuf, sizeof(abuf), "%d", a);
+                    snprintf(bbuf, sizeof(bbuf), "%d", b);
+                    cn_change_add(list, cn_option_display_name(key),
+                                  abuf, bbuf, CN_CHG_OTHER);
+                }
             }
             break;
           }
@@ -889,37 +974,38 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
                     key, conf_get_bool(baseline, key));
                 const char *bn = cn_option_value_name(
                     key, conf_get_bool(current, key));
-                if (an && bn)
-                    put_fmt(sb, "【%s】 %s → %s\r\n",
-                            cn_option_display_name(key), an, bn);
-                else
-                    put_fmt(sb, "【%s】 %s → %s\r\n",
-                            cn_option_display_name(key),
-                            conf_get_bool(baseline, key) ? "开" : "关",
-                            conf_get_bool(current, key) ? "开" : "关");
-                nchanges++;
+                if (an && bn) {
+                    cn_change_add(list, cn_option_display_name(key), an, bn,
+                                  cn_classify_newval(bn));
+                } else {
+                    const char *ao = conf_get_bool(baseline, key)
+                        ? "开" : "关";
+                    const char *bo = conf_get_bool(current, key)
+                        ? "开" : "关";
+                    cn_change_add(list, cn_option_display_name(key), ao, bo,
+                                  cn_classify_newval(bo));
+                }
             }
             break;
           case CONF_TYPE_FILENAME: {
             const Filename *a = conf_get_filename(baseline, key);
             const Filename *b = conf_get_filename(current, key);
-            if (strcmp(a->utf8path, b->utf8path) != 0) {
-                put_fmt(sb, "【%s】 %s → %s\r\n",
-                        cn_option_display_name(key),
-                        *a->utf8path ? a->utf8path : "(空)",
-                        *b->utf8path ? b->utf8path : "(空)");
-                nchanges++;
-            }
+            if (strcmp(a->utf8path, b->utf8path) != 0)
+                cn_change_add(list, cn_option_display_name(key),
+                              *a->utf8path ? a->utf8path : "(空)",
+                              *b->utf8path ? b->utf8path : "(空)",
+                              CN_CHG_OTHER);
             break;
           }
           case CONF_TYPE_FONT: {
             const FontSpec *a = conf_get_fontspec(baseline, key);
             const FontSpec *b = conf_get_fontspec(current, key);
             if (strcmp(a->name, b->name) != 0 || a->height != b->height) {
-                put_fmt(sb, "【%s】 %s %d → %s %d\r\n",
-                        cn_option_display_name(key),
-                        a->name, a->height, b->name, b->height);
-                nchanges++;
+                char abuf[256], bbuf[256];
+                snprintf(abuf, sizeof(abuf), "%s %d", a->name, a->height);
+                snprintf(bbuf, sizeof(bbuf), "%s %d", b->name, b->height);
+                cn_change_add(list, cn_option_display_name(key),
+                              abuf, bbuf, CN_CHG_OTHER);
             }
             break;
           }
@@ -927,9 +1013,51 @@ char *conf_describe_changes(const Conf *baseline, const Conf *current)
             break;
         }
     }
+    (void)buf;
+    return list;
+}
 
-    if (nchanges == 0)
+/*
+ * cn: 把结构化清单拼成 "【名字】 旧值 → 新值" 文本（一行一条）。
+ *
+ * 保留这个文本出口是给不认识富文本的调用方用的（message_box 之类），
+ * 格式必须与旧版逐字节一致 —— test_conf 有一批断言锁着这个格式。
+ */
+static char *cn_change_list_to_text(const CnChangeList *list)
+{
+    strbuf *sb = strbuf_new();
+
+    if (!list || list->n == 0) {
+        strbuf_free(sb);
         return dupstr("(无可见改动)");
-
+    }
+    for (size_t i = 0; i < list->n; i++)
+        put_fmt(sb, "【%s】 %s → %s\r\n",
+                list->items[i].name, list->items[i].oldval,
+                list->items[i].newval);
     return strbuf_to_str(sb);
+}
+
+/*
+ * cn: Describe the differences between two configurations, one line
+ * per changed option, formatted as "【关键字】 旧值 → 新值". Used by
+ * the save-confirmation and close prompts so the user can see exactly
+ * what is about to be persisted.
+ *
+ * The option name is wrapped in full-width brackets so it reads as a
+ * heading and visually separates from the value that follows; these
+ * prompts use plain-text controls that cannot carry per-character
+ * styling (bold or underline), so the distinction has to come from
+ * the characters themselves.
+ *
+ * 实现上走 conf_describe_changes_struct + cn_change_list_to_text，
+ * 保证结构化版与文本版永远同源，不会出现「界面显示的和日志记的
+ * 不是一回事」。
+ */
+char *conf_describe_changes(const Conf *baseline, const Conf *current)
+{
+    CnChangeList *list = conf_describe_changes_struct(baseline, current);
+    char *ret = cn_change_list_to_text(list);
+    cn_change_list_free(list);
+    return ret;
 }

@@ -14,6 +14,12 @@
 #define IDI_LISTFILE     204
 /* cn: 自建模态弹窗用的问号图标（标题栏 + 内容区两处） */
 #define IDI_QHELP     205
+/* cn: 确认类弹窗清单行首的动作图标：叉 = 关闭/禁用，勾 = 开启/切换 */
+#define IDI_CN_CROSS  206
+#define IDI_CN_CHECK  207
+/* cn: 冲突/覆盖类清单的行首图标：警告（红圈叹号）与中性圆点 */
+#define IDI_CN_WARN   208
+#define IDI_CN_DOT    209
 
 #define IDD_MAINBOX      102
 #define IDD_LOGBOX       110

@@ -27,6 +27,8 @@ static bool confirm_launch_show = false;
 static bool confirm_save_show = false;
 /* cn: -confirm-quit-show 把退出确认（三按钮）真显示出来，供人工看图 */
 static bool confirm_quit_show = false;
+/* cn: -confirm-overwrite-show 把「确认覆盖」弹窗真显示出来，供人工看图 */
+static bool confirm_overwrite_show = false;
 /* cn: -sftp-recurse 目录递归传输自检的源与目标 */
 static char *sftp_recurse_src = NULL;
 static char *sftp_recurse_dst = NULL;
@@ -49,6 +51,8 @@ void sftp_show_confirm_launch(void);
 void sftp_show_confirm_quit(void);
 /* cn: 把「确认保存」弹窗真显示出来，供人工看图 */
 void sftp_show_confirm_save(void);
+/* cn: -confirm-overwrite-show 把「确认覆盖」弹窗显示出来供截图 */
+void sftp_show_confirm_overwrite(void);
 void sftp_selftest_recurse_run(Conf *conf, const char *src, const char *dst);
 void sftp_selftest_resume_run(Conf *conf, const char *localpath,
                               const char *remotepath);
@@ -229,6 +233,13 @@ void gui_term_process_cmdline(Conf *conf, char *cmdline)
                  * 弹窗正常等按钮，关掉即退出程序。
                  */
                 confirm_save_show = true;
+            } else if (!strcmp(p, "-confirm-overwrite-show")) {
+                /*
+                 * cn: 把「确认覆盖」弹窗（新走原始自绘模板）真显示出来，
+                 * 供人工看图。它平时由文件传输流程在扫描到同名项时弹，
+                 * 走一遍真实传输流程只为截一张图太重，所以留这个入口。
+                 */
+                confirm_overwrite_show = true;
             } else if (!strcmp(p, "-confirm-quit-show")) {
                 /*
                  * cn: 把退出确认（三按钮：直接退出 / 取消 / 保存并退出）
@@ -321,6 +332,10 @@ void gui_term_process_cmdline(Conf *conf, char *cmdline)
     } else if (confirm_quit_show) {
         /* cn: 真把退出确认（三按钮）显示出来，供人工看图/截图。 */
         sftp_show_confirm_quit();
+        cleanup_exit(0);
+    } else if (confirm_overwrite_show) {
+        /* cn: 真把「确认覆盖」弹窗（原始自绘模板）显示出来，供人工看图/截图。 */
+        sftp_show_confirm_overwrite();
         cleanup_exit(0);
     } else if (sftp_win_open_only) {
         /* cn: 只开窗口，等人看/截图，关窗后退出。 */

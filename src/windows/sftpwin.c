@@ -411,7 +411,7 @@ static bool cn_input_box(HWND parent, const char *title, const char *prompt,
      *
      * ⚠️ 别用 IsDialogMessageW：本窗是自绘 WS_POPUP，没有对话框模板，
      * 它会把消息按「父窗是对话框」去解释，实测会把文件传输主窗最小化
-     * （覆盖确认弹窗踩过同一个坑，见 cn_conflict_loop 的注释）。
+     * （历史遗留：早先「确认覆盖」弹窗也踩过同一个坑）。
      *
      * 这里只需要 Esc 取消、Enter 确认两条，其余（Tab 在输入框与按钮间
      * 切换）交给默认过程 —— 系统对 WS_TABSTOP 子控件本来就有基本支持。
@@ -1782,17 +1782,6 @@ typedef struct CnTipState {
 #define CN_TIP_BELOW 0
 #define CN_TIP_RIGHT 1
 
-typedef struct ConflictBox {
-    HWND dlg, head, list, b_ovw, b_skip, b_cancel;
-    HWND qicon;                 /* 内容区问号图标（STATIC + SS_ICON） */
-    HFONT font;
-    int result;                 /* CN_OVW_*，初值即「取消」 */
-    CnTipState tip;
-    ConflictItem *items;
-    size_t nitems;
-    HWND owner;                 /* owner 窗口，销毁后要把前台还回去 */
-} ConflictBox;
-
 static void cn_conflicts_free(ConflictItem *items, size_t n)
 {
     if (!items)
@@ -1820,6 +1809,249 @@ static HICON cn_question_icon(int size)
                                   size, size, LR_DEFAULTCOLOR);
     return *slot;
 }
+
+/*
+ * cn: 按资源 ID 取标题栏小图标（进程级按 ID 缓存，见 cn_question_icon）。
+ *
+ * 「确认覆盖」弹窗复用同一套模板，但标题栏该挂警告图标而不是问号 ——
+ * 它问的是「要不要覆盖掉对方已有的文件」，不是「要不要保存」。
+ * 缓存按资源 ID 分开存，几种图标各留一份，不必每次弹窗都 Load。
+ *
+ * 传 0 等价于 IDI_QHELP，方便调用方「不指定就用问号」。
+ */
+static HICON cn_title_icon(int id, int size)
+{
+    enum { CN_TITLE_ICON_MAX = 4 };
+    static HICON cache[CN_TITLE_ICON_MAX][2];
+    static int cache_id[CN_TITLE_ICON_MAX];
+    int slot_big = size >= cn_dpi(32);
+    int eff = id ? id : IDI_QHELP;
+
+    for (int i = 0; i < CN_TITLE_ICON_MAX; i++) {
+        if (cache_id[i] == eff) {
+            if (!cache[i][slot_big])
+                cache[i][slot_big] =
+                    (HICON)LoadImageW(GetModuleHandle(NULL),
+                                      MAKEINTRESOURCEW(eff), IMAGE_ICON,
+                                      size, size, LR_DEFAULTCOLOR);
+            return cache[i][slot_big];
+        }
+    }
+    /* 找空槽；满了就退回不缓存（图标就那几个，正常不会满）。 */
+    for (int i = 0; i < CN_TITLE_ICON_MAX; i++) {
+        if (cache_id[i] == 0) {
+            cache_id[i] = eff;
+            cache[i][slot_big] =
+                (HICON)LoadImageW(GetModuleHandle(NULL),
+                                  MAKEINTRESOURCEW(eff), IMAGE_ICON,
+                                  size, size, LR_DEFAULTCOLOR);
+            return cache[i][slot_big];
+        }
+    }
+    return cn_question_icon(size);
+}
+
+/* ===================================================================
+ * cn: 确认类弹窗的新视觉体系（照主人给的设计图）。
+ *
+ * 设计图要点：浅灰内容区 + 白色圆角卡片 + 自绘标题栏（深蓝粗体标题、
+ * 左侧蓝问号、右侧大 X）+ 清单每行按段上色（选项名与旧值同色、
+ * 箭头与新值同色、行首勾/叉、右侧橙色装饰折角）+ 蓝框确定/灰框取消。
+ *
+ * 配色取自设计图像素采样，不是凭感觉调的：
+ *   标题文字/图标   #002168   （采样 (0,33,104) 一档）
+ *   内容区灰底      #F7F7F5   （采样 (247,247,245)）
+ *   白卡片          #FFFFFF
+ *   选项名+旧值     #4C4B49   （采样 (76,75,73)）
+ *   箭头+新值       #00307C   （采样 (0,48,124)）
+ *   装饰折角        #F3761A   （采样 (243,118,26)）
+ *   确定按钮蓝框    #0863AB   （采样 (7,98,171)）
+ * =================================================================== */
+
+#define CN_CLR_BG         RGB(0xF7, 0xF7, 0xF5)
+#define CN_CLR_CARD       RGB(0xFF, 0xFF, 0xFF)
+#define CN_CLR_TEXT       RGB(0x4C, 0x4B, 0x49)
+#define CN_CLR_ACCENT     RGB(0x00, 0x30, 0x7C)
+#define CN_CLR_CHEVRON    RGB(0xF3, 0x76, 0x1A)
+#define CN_CLR_BTN_BLUE   RGB(0x08, 0x63, 0xAB)
+#define CN_CLR_CARD_EDGE  RGB(0xE4, 0xE4, 0xE1)
+#define CN_CLR_HEAD_TEXT  RGB(0x1A, 0x1A, 0x1A)
+/* 大问号圆环与字形（设计图里是近黑的深灰，不是蓝） */
+#define CN_CLR_RING       RGB(0x3C, 0x3C, 0x3C)
+
+/*
+ * cn: 确认弹窗整体字号放大比例（主人 2026-11 要求「字体整体增大 10%」）。
+ *
+ * 只放大字号，不换字族 —— 字族仍取系统消息字体 lfMessageFont，换族会
+ * 在不同系统上出现中文回退跳变。
+ *
+ * ⚠️ 弹窗里有三处按 lfMessageFont 建字体：正文 font、新值加粗
+ *    font_value、以及建窗时测折行用的临时 meas_font。三处必须走同一个
+ *    宏，否则会出现「量的是一套字号、画的是另一套」，折行行数算错。
+ */
+#define CN_FONT_SCALE_NUM 11
+#define CN_FONT_SCALE_DEN 10
+
+/*
+ * cn: 底部按钮的实际高度（逻辑像素，走 cn_dpi 缩放）。
+ *
+ * 建窗算按钮带高度、创建按钮控件两处都必须用它 —— 历史上算高度用的
+ * 是 32（槽位）、创建用的是 26（实际），多出的 6px 全压在按钮下方，
+ * 造成「按钮贴底、上方空太多」的观感。
+ */
+#define CN_BTN_H 26
+
+/*
+ * cn: 文字相对基线（baseline）的视觉垂直中心偏移。
+ *
+ * 为什么需要它：GDI 的 TextOutW 以**字符框顶部**为 y 传入，而
+ * GetTextExtentPoint32W 返回的 sz.cy 是整个字符框高度（含 ascent +
+ * descent + 外部行距）。汉字墨迹并不在字符框正中 —— 它偏下，因为
+ * ascent 里有一部分是给拉丁字母上伸部留的空白。
+ *
+ * 以前用 `y - sz.cy / 2` 居中，结果文字整体比左侧图标低约 4px（放大
+ * 截图逐像素量出来的：图标墨迹 88..109，文字墨迹 80..109，底边齐平
+ * 而顶边差 8px，视觉上就是「字往下掉」）。
+ *
+ * 正确做法：拿字体真实度量 tmAscent / tmDescent，文字视觉中心相对
+ * 基线的位置是 (tmAscent - tmDescent) / 2。要让这个中心落在 cy 上，
+ * 基线就该在 cy + (tmAscent - tmDescent) / 2，再用 TA_BASELINE 输出。
+ *
+ * 返回「基线 y」，调用方配 SetTextAlign(TA_BASELINE) 使用。
+ */
+static int cn_text_baseline_for_center(HDC hdc, int cy)
+{
+    TEXTMETRICW tm;
+
+    if (!GetTextMetricsW(hdc, &tm))
+        return cy;                 /* 取不到度量就退回原样，不崩 */
+
+    return cy + (tm.tmAscent - tm.tmDescent) / 2;
+}
+
+/*
+ * cn: 按放大比例调整 LOGFONT 的字高。
+ *
+ * lfHeight 为负表示「字高（字符框高度）」，为正表示「字符高度」，
+ * 两种含义都是数值越大字越大，所以直接按比例缩放绝对值即可。
+ * 值为 0 表示「用默认」，不去动它。
+ */
+static void cn_scale_logfont(LOGFONTW *lf)
+{
+    if (lf->lfHeight != 0)
+        lf->lfHeight = lf->lfHeight * CN_FONT_SCALE_NUM / CN_FONT_SCALE_DEN;
+}
+
+/*
+ * cn: 确认弹窗首行说明的唯一文案来源。
+ *
+ * ⚠️ 这个字符串同时被三处使用：文案常量（cn_launch_texts /
+ *    cn_quit_texts）、构建函数的默认值、以及宽度测量里量首行宽度那段。
+ *    以前三处各写一份字面量，改文案时测量那份忘了同步，窗口宽度就会
+ *    按旧文案算、新版面被裁。统一到宏，改一处即可。
+ */
+#define CN_HEAD_TEXT  "以下配置项已被修改，请核对后保存或撤销："
+
+/*
+ * cn: 卡片左侧大问号的尺寸宏（CN_QICON_MIN / MAX）已随图标一起删除
+ * （主人 2026-11：只保留标题栏的小问号）。宽度预留、卡片高度下限、
+ * 绘制三条路径上的引用都已清掉，恢复时需一并加回。
+ */
+
+/*
+ * cn: 窗口圆角裁剪（SetWindowRgn）已随自绘外壳一起撤掉。
+ * 现在窗口走原生 WS_CAPTION | WS_SYSMENU，圆角由系统按当前 Windows
+ * 版本自行处理；再手动裁剪只会把系统边框切出锯齿。
+ * 唯一保留的圆角是内容区白卡片（见 cn_fill_round_rect）。
+ */
+
+/* 画一个圆角矩形填充（含 1px 描边）。 */
+static void cn_fill_round_rect(HDC hdc, RECT *rc, int radius,
+                               COLORREF fill, COLORREF edge)
+{
+    HBRUSH br = CreateSolidBrush(fill);
+    HPEN pen = CreatePen(PS_SOLID, 1, edge);
+    HBRUSH oldbr = SelectObject(hdc, br);
+    HPEN oldpen = SelectObject(hdc, pen);
+
+    RoundRect(hdc, rc->left, rc->top, rc->right, rc->bottom,
+              radius, radius);
+
+    SelectObject(hdc, oldbr);
+    SelectObject(hdc, oldpen);
+    DeleteObject(br);
+    DeleteObject(pen);
+}
+
+/*
+ * cn: 行首状态图标 —— 圆圈里打勾 / 打叉，或调用方指定的资源图标。
+ *
+ * 早期是纯 GDI 现画（Ellipse 画圈 + LineTo 画叉 / Polyline 画勾）。
+ * 不用字体里的 ✓ ✗ 是对的（那套字形在不同系统上缺字或大小不一，
+ * 且圆环画不出来），但 GDI 的 Ellipse 不做抗锯齿，18px 下勉强能看，
+ * 高 DPI 或放大后就是一圈台阶 —— 与卡片左侧大问号同一个毛病。
+ *
+ * 现在改为资源图标：
+ *   icon_id 非 0                          → 直接用该资源（「确认覆盖」用：
+ *                                           目录 → 警告图标，文件 → 圆点）
+ *   CN_CHG_TOGGLE_OFF（新值是「关 / 禁用」）→ IDI_CN_CROSS
+ *   其余（开启 / 切换 / 改值）              → IDI_CN_CHECK
+ * 两个 ICO 各含 16~256 十档，系统挑最接近的尺寸，边缘平滑。
+ *
+ * 主人指定「关闭类打叉，其余打勾」，非开关改动一律打勾。
+ *
+ * 调用方给的 (cx, cy) 是圆心，这里换算成左上角交给 DrawIconEx。
+ */
+static void cn_draw_check_icon(HDC hdc, int cx, int cy, int size,
+                               CnChangeKind kind, int icon_id)
+{
+    HICON ic;
+    int id = icon_id ? icon_id
+                     : (kind == CN_CHG_TOGGLE_OFF ? IDI_CN_CROSS
+                                                  : IDI_CN_CHECK);
+
+    if (size <= 0)
+        return;
+
+    ic = (HICON)LoadImageW(GetModuleHandle(NULL),
+                           MAKEINTRESOURCEW(id), IMAGE_ICON,
+                           size, size, LR_DEFAULTCOLOR);
+    if (!ic)
+        return;                        /* 资源缺失就不画，不阻塞弹窗 */
+
+    DrawIconEx(hdc, cx - size / 2, cy - size / 2, ic, size, size,
+               0, NULL, DI_NORMAL);
+    DestroyIcon(ic);
+}
+
+/*
+ * cn: 行尾装饰折角「>」。
+ *
+ * 纯装饰 —— 主人明确要求不做悬停反馈、不可点。画两段线拼成折角，
+ * 粗细与配色都照设计图（橙 #F3761A）。
+ */
+static void cn_draw_chevron(HDC hdc, int cx, int cy, int size)
+{
+    POINT pts[3];
+    HPEN pen = CreatePen(PS_SOLID, 2, CN_CLR_CHEVRON);
+    HPEN oldpen = SelectObject(hdc, pen);
+    int half = size / 2;
+
+    pts[0].x = cx - half / 2;  pts[0].y = cy - half;
+    pts[1].x = cx + half / 2;  pts[1].y = cy;
+    pts[2].x = cx - half / 2;  pts[2].y = cy + half;
+    Polyline(hdc, pts, 3);
+
+    SelectObject(hdc, oldpen);
+    DeleteObject(pen);
+}
+
+/*
+ * cn: 自绘标题栏右侧那个大 X 已删除（cn_draw_close_x）。
+ * 现在走原生 WS_SYSMENU，关闭按钮由系统绘制并自带悬停效果，
+ * 不再需要自己画、也不再需要 WM_LBUTTONUP 命中判定。
+ */
+
 
 /* 宽字符串复制。工程里只有 char 版的 dupstr，宽字符得自己来。 */
 static wchar_t *cn_wcsdup(const wchar_t *s)
@@ -1870,46 +2102,6 @@ static ConflictItem *cn_collect_conflicts(SftpWin *sw, char **names,
     }
     *outn = n;
     return items;
-}
-
-/*
- * 把冲突项拼成多行宽字符文本，最多 show 项，超出部分用「.......」。
- * show 传 n 就是全量（tooltip 用）。
- */
-static wchar_t *cn_conflict_join(ConflictItem *items, size_t n, size_t show)
-{
-    size_t lim = n < show ? n : show;
-    size_t total = 1;
-    wchar_t *s, *p;
-
-    for (size_t i = 0; i < lim; i++)
-        total += wcslen(items[i].name) + 2;
-    if (n > lim)
-        total += 8;                      /* "......." + 换行 */
-
-    s = snewn(total, wchar_t);
-    /* 容量已算好，直接顺着写，不用 wcscat 反复从头扫。 */
-    p = s;
-    for (size_t i = 0; i < lim; i++) {
-        size_t len;
-        if (i) {
-            *p++ = L'\r';
-            *p++ = L'\n';
-        }
-        len = wcslen(items[i].name);
-        memcpy(p, items[i].name, len * sizeof(wchar_t));
-        p += len;
-    }
-    if (n > lim) {
-        if (lim) {
-            *p++ = L'\r';
-            *p++ = L'\n';
-        }
-        memcpy(p, L".......", 7 * sizeof(wchar_t));
-        p += 7;
-    }
-    *p = L'\0';
-    return s;
 }
 
 /*
@@ -2219,475 +2411,179 @@ static void cn_tip_track(CnTipState *st, HWND hwnd, LPARAM lparam)
     TrackMouseEvent(&tme);
 }
 
-static LRESULT CALLBACK cn_conflict_proc(HWND hwnd, UINT msg, WPARAM wparam,
-                                         LPARAM lparam)
-{
-    ConflictBox *cb = (ConflictBox *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-
-    switch (msg) {
-      case WM_MOUSEMOVE:
-        /*
-         * 鼠标落在内容列表文本区（含「.......」行）就显示浮层，离开就收。
-         * 细节见 cn_tip_track —— 与「确认保存」弹窗共用同一套逻辑。
-         */
-        if (cb)
-            cn_tip_track(&cb->tip, hwnd, lparam);
-        break;
-      case WM_MOUSELEAVE:
-        if (cb)
-            cn_tip_hide(&cb->tip);
-        break;
-      case WM_COMMAND:
-        if (cb) {
-            int id = LOWORD(wparam);
-            if (id == IDC_CNC_OVERWRITE) {
-                cb->result = CN_OVW_OVERWRITE;
-            } else if (id == IDC_CNC_SKIP) {
-                cb->result = CN_OVW_SKIP;
-            } else if (id == IDC_CNC_CANCEL) {
-                cb->result = CN_OVW_ABORT;
-            } else {
-                break;                   /* 不是本窗的按钮，照常处理 */
-            }
-            DestroyWindow(hwnd);
-            return 0;
-        }
-        break;
-      case WM_CLOSE:
-        /* 关窗等同取消，绝不能悄悄当成「全部覆盖」。 */
-        if (cb)
-            cb->result = CN_OVW_ABORT;
-        DestroyWindow(hwnd);
-        return 0;
-    }
-    return DefWindowProcW(hwnd, msg, wparam, lparam);
-}
 
 /*
- * 建弹窗（不跑消息循环）。位置跟随光标，交给 cn_place_near 算 ——
- * 和系统对话框共用一个摆位函数，两处判据保持一致。
+ * cn: 把一批冲突项用「原始自绘模板」问一遍，返回模板的原始结果
+ * （IDOK = 跳过已存在 / IDYES = 全部覆盖 / IDCANCEL = 停止整批）。
  *
- * 拆成「建」和「跑循环」两段是为了自检：建完就能量尺寸、读控件文字、
- * 检查 tooltip 内容，不必真等用户点。
+ * 单独抽出来是为了让 -confirm-overwrite-show 看图入口能复用同一份
+ * 数据映射与文案：截图看到的必须是线上真实效果，不能另拼一份长得像的。
+ *
+ * 数据适配：ConflictItem 只有名字和「是不是目录」，而模板吃 CnChange
+ * （名字 + 旧值 + 新值 + 行首图标）。这里映射成「纯名字行」：旧值 / 新值
+ * 留空串，排版器就不会拼冒号、也不会画箭头；行首图标按目录 / 文件分 ——
+ * 目录用警告（覆盖目录是连锅端），文件用中性圆点。
+ *
+ * 按钮排列：模板的三按钮槽位固定是「ok / cancel / third」，其中 third
+ * 恒为最右、恒为默认（回车触发）。所以「全部覆盖」放 third，「跳过已存在」
+ * 放 ok（最左），「取消」放中间。返回值按 IDOK / IDYES / IDCANCEL 映射，
+ * 不依赖按钮资源 ID —— 那些是模板内部的槽位编号，与语义无关。
  */
-static HWND cn_conflict_dialog_create(HWND parent, HFONT font,
-                                      ConflictItem *items, size_t n,
-                                      ConflictBox *cb)
+static int cn_overwrite_ask(HWND parent, ConflictItem *items, size_t n)
 {
-    static const wchar_t classname[] = L"PuTTYSftpConflictBox";
-    HINSTANCE inst = GetModuleHandle(NULL);
-    WNDCLASSW wc;
-    POINT pt;
-    HDC hdc;
-    SIZE sz = { 0, 0 };
-    int m, lh, list_h, w, h, cw, ch, x, y, shown, lines, ytop;
-    int needw = 0, textw;
-    int qicon_size = cn_dpi(48);    /* 内容区问号图标尺寸 */
+    CnChangeList cl;
+    CnConfirmTexts texts;
     char *head;
-    wchar_t *shorttxt;
-
-    memset(cb, 0, sizeof(*cb));
-    cb->items = items;
-    cb->nitems = n;
-    cb->owner = parent;
-    cb->font = font ? font : (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-    cb->result = CN_OVW_ABORT;
-
-    /* 量一行字有多高：行高跟着 DPI 与系统字体走，不能写死。 */
-    hdc = GetDC(NULL);
-    if (hdc) {
-        HFONT old = SelectObject(hdc, cb->font);
-        GetTextExtentPoint32W(hdc, L"国Ag", 3, &sz);
-        SelectObject(hdc, old);
-        ReleaseDC(NULL, hdc);
-    }
-    lh = sz.cy > 0 ? sz.cy : cn_dpi(16);
-
-    m = cn_dpi(14);
-    shown = (int)(n < CN_CONFLICT_SHOW_MAX ? n : CN_CONFLICT_SHOW_MAX);
-    lines = shown + (n > (size_t)shown ? 1 : 0);
-    list_h = lines * lh + cn_dpi(6);
-
-    /* 窗口宽度取「列表最长一行」为基准，加边距。 */
-    hdc = GetDC(NULL);
-    if (hdc) {
-        HFONT old = SelectObject(hdc, cb->font);
-        for (size_t i = 0; i < (size_t)shown; i++) {
-            SIZE s2;
-            GetTextExtentPoint32W(hdc, items[i].name,
-                                  (int)wcslen(items[i].name), &s2);
-            if (s2.cx > needw)
-                needw = s2.cx;
-        }
-        /* 省略号行也在内容区里，命中区右缘要能罩住它。 */
-        {
-            SIZE s3;
-            GetTextExtentPoint32W(hdc, L".......", 7, &s3);
-            if (s3.cx > needw)
-                needw = s3.cx;
-        }
-        SelectObject(hdc, old);
-        ReleaseDC(NULL, hdc);
-    }
-    /*
-     * 命中区只认纯文本宽：下面 needw 还会被按钮最小宽度抬高，窗口因此
-     * 变宽没问题，但命中区跟着变大就会罩住列表右侧的空白。
-     */
-    textw = needw;
-    /* 三个按钮（含间距）也是硬下限，文字再短也不能把它们挤扁。 */
-    {
-        int btnmin = cn_dpi(96) * 3 + cn_dpi(8) * 2;
-        if (needw < btnmin)
-            needw = btnmin;
-    }
-    w = needw + 2 * m + cn_dpi(12);
-    if (w < cn_dpi(360))
-        w = cn_dpi(360);
-    if (w > cn_dpi(720))
-        w = cn_dpi(720);
-
-    /*
-     * 客户区高度：标题 + 冲突列表 + 按钮 + 边距。列表区高度取列表与
-     * 问号图标中的高者 —— 48px 的图标比一两项的列表高，不算上它就会
-     * 压到下面的按钮。
-     *
-     * 图标下方留 cn_dpi(8)，与确认保存弹窗同一口径（见那边注释）：
-     * 图标没有字形下伸留白，控件距多少视觉就是多少，下方不留就会
-     * 紧贴按钮带顶线。
-     */
-    h = m + lh + cn_dpi(6) + (list_h > qicon_size ? list_h : qicon_size) +
-        cn_dpi(8) + cn_dpi(12) + cn_dpi(26) + m;
-
-    if (!GetClassInfoW(inst, classname, &wc)) {
-        memset(&wc, 0, sizeof(wc));
-        wc.lpfnWndProc = cn_conflict_proc;
-        wc.hInstance = inst;
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
-        wc.lpszClassName = classname;
-        RegisterClassW(&wc);
-    }
-
-    /*
-     * CreateWindowExW 收的是「窗口外框」尺寸，而上面算的 cw / ch 是客户区。
-     * 不换算就会像第一版那样：标题栏与边框吃掉三十来像素，底部三个
-     * 按钮被切掉一半。所以外框尺寸只给 CreateWindowExW 用，子控件仍然
-     * 按客户区排 —— 两个尺寸必须分开存，混用就是控件错位。
-     */
-    cw = w;
-    ch = h;
-    {
-        RECT fr;
-        fr.left = 0;
-        fr.top = 0;
-        fr.right = cw;
-        fr.bottom = ch;
-        AdjustWindowRectEx(&fr, WS_POPUP | WS_CAPTION | WS_SYSMENU,
-                           FALSE, WS_EX_DLGMODALFRAME);
-        w = fr.right - fr.left;
-        h = fr.bottom - fr.top;
-    }
-
-    if (!GetCursorPos(&pt))
-        pt.x = pt.y = 0;
-    cn_place_near(pt, w, h, &x, &y);
-
-    {
-        wchar_t *wtitle = dup_mb_to_wc(DEFAULT_CODEPAGE, "确认覆盖");
-        cb->dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, classname, wtitle,
-                                  WS_POPUP | WS_CAPTION | WS_SYSMENU,
-                                  x, y, w, h, parent, NULL, inst, NULL);
-        sfree(wtitle);
-    }
-    if (!cb->dlg) {
-        cb->font = NULL;
-        return NULL;
-    }
-    SetWindowLongPtrW(cb->dlg, GWLP_USERDATA, (LONG_PTR)cb);
-
-    /* 第一行：概括一句有几个冲突，别让人从列表里自己数。 */
-    head = dupprintf("%d 个同名项目已存在于目标位置：", (int)n);
-    {
-        wchar_t *wh = dup_mb_to_wc(DEFAULT_CODEPAGE, head);
-        cb->head = CreateWindowExW(0, L"STATIC", wh,
-                                   WS_CHILD | WS_VISIBLE | SS_LEFTNOWORDWRAP,
-                                   m, m, cw - 2 * m, lh,
-                                   cb->dlg, NULL, inst, NULL);
-        sfree(wh);
-    }
-    sfree(head);
-
-    /* 冲突列表：最多三项，多的那行写「.......」。 */
-    ytop = m + lh + cn_dpi(6);
-    {
-        int icon = qicon_size;
-        int lx = m + icon + cn_dpi(6);   /* 列表右移，左边给问号图标让位 */
-        int content_h = list_h > icon ? list_h : icon;
-        int icon_y = ytop + (content_h - icon) / 2;
-
-        shorttxt = cn_conflict_join(items, n, CN_CONFLICT_SHOW_MAX);
-        cb->list = CreateWindowExW(0, L"STATIC", shorttxt,
-                                    WS_CHILD | WS_VISIBLE | SS_LEFTNOWORDWRAP,
-                                    lx, ytop, cw - lx - m, list_h,
-                                    cb->dlg, NULL, inst, NULL);
-        sfree(shorttxt);
-
-        /* 内容区问号图标：在内容区里垂直居中，与确认保存弹窗同一口径。 */
-        cb->qicon = CreateWindowExW(0, L"STATIC", NULL,
-                                     WS_CHILD | WS_VISIBLE | SS_ICON,
-                                     m, icon_y, icon, icon,
-                                     cb->dlg, NULL, inst, NULL);
-        SendMessageW(cb->qicon, STM_SETICON,
-                     (WPARAM)cn_question_icon(icon), 0);
-
-        /*
-         * 悬浮命中区 = 内容列表的文本矩形（图 2 标注的区域）：纵向覆盖
-         * 列表全部行，横向只到实际文本的右缘。之前 right 一直拉到窗口右
-         * 边距，省略号行右侧的空白也会触发浮层，就是主人指出的问题。
-         *
-         * 没截断就不建浮层：列表本身就是全的，再弹个一模一样的浮窗只会
-         * 碍事。触发与隐藏都在弹窗的 WM_MOUSEMOVE / WM_MOUSELEAVE 里
-         * 处理（见 cn_conflict_proc）。
-         *
-         * 这里没有用系统的 tooltips_class32：它的自动尺寸在这个场景下调
-         * 不动 —— 多行文本 + 中文，TTM_SETMAXTIPWIDTH / TTM_SETMARGIN
-         * 全部试过，窗口宽度死死卡在 114px（正好一个中文文件名的宽度），
-         * 长名字被硬裁。与其跟它的内部算法较劲，不如自己开一个 WS_POPUP
-         * 小窗：宽高按文本自己算，位置跟着光标走，行为完全可控。
-         */
-        if (n > (size_t)shown) {
-            cb->tip.text = cn_conflict_join(items, n, n);
-            cb->tip.parent = cb->dlg;
-            cb->tip.font = cb->font;
-            cb->tip.hot.left = lx;
-            cb->tip.hot.top = ytop;
-            cb->tip.hot.right = lx + textw;
-            cb->tip.hot.bottom = ytop + list_h;
-            cb->tip.mode = CN_TIP_BELOW;   /* 确认覆盖保持「下方弹出」 */
-            cb->tip.tip = cn_tip_create(&cb->tip);
-        }
-    }
-
-    /*
-     * 三个按钮：全部覆盖靠左，跳过已存在居中，取消靠右。
-     *
-     * 宽度取「文字实际宽度 + 内边距」而不是写死 84 —— 「跳过已存在」五个
-     * 汉字在系统消息字体下就要 80px，再加按钮边框与内边距，84 会被截成
-     * 「跳过已存」。按文字量算，换字体、换语言都不会翻车。
-     */
-    {
-        int bh = cn_dpi(26);
-        int bw[3], by;
-        const wchar_t *cap[3] = { L"全部覆盖", L"跳过已存在", L"取消" };
-
-        bw[0] = bw[1] = bw[2] = 0;
-        hdc = GetDC(NULL);
-        if (hdc) {
-            HFONT old = SelectObject(hdc, cb->font);
-            for (int i = 0; i < 3; i++) {
-                SIZE s2;
-                GetTextExtentPoint32W(hdc, cap[i], (int)wcslen(cap[i]), &s2);
-                bw[i] = s2.cx + cn_dpi(24);
-                if (bw[i] < cn_dpi(72))
-                    bw[i] = cn_dpi(72);
-            }
-            SelectObject(hdc, old);
-            ReleaseDC(NULL, hdc);
-        }
-
-        by = ch - m - bh;
-        cb->b_ovw = CreateWindowW(
-            L"BUTTON", cap[0],
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-            m, by, bw[0], bh, cb->dlg,
-            (HMENU)IDC_CNC_OVERWRITE, inst, NULL);
-        cb->b_skip = CreateWindowW(
-            L"BUTTON", cap[1],
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-            (cw - bw[1]) / 2, by, bw[1], bh, cb->dlg,
-            (HMENU)IDC_CNC_SKIP, inst, NULL);
-        cb->b_cancel = CreateWindowW(
-            L"BUTTON", cap[2],
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-            cw - m - bw[2], by, bw[2], bh, cb->dlg,
-            (HMENU)IDC_CNC_CANCEL, inst, NULL);
-    }
-
-    {
-        HWND all[] = { cb->head, cb->list, cb->qicon,
-                       cb->b_ovw, cb->b_skip, cb->b_cancel };
-        for (size_t i = 0; i < lenof(all); i++)
-            SendMessageW(all[i], WM_SETFONT, (WPARAM)cb->font, TRUE);
-    }
-
-    /* 标题栏图标：问号，与内容区同一份资源。 */
-    {
-        HICON ico = cn_question_icon(cn_dpi(16));
-        if (ico) {
-            SendMessageW(cb->dlg, WM_SETICON, ICON_SMALL, (LPARAM)ico);
-            SendMessageW(cb->dlg, WM_SETICON, ICON_BIG, (LPARAM)ico);
-        }
-    }
-
-    return cb->dlg;
-}
-
-/*
- * 跑模态循环，返回用户选的 CN_OVW_*。
- *
- * Esc 等同取消 —— 自己画的窗口没有系统对话框那套默认行为，这几条
- * 得自己补上，否则用户按 Esc 毫无反应，会以为程序卡死了。
- *
- * ⚠️ 这里绝对不能用 IsDialogMessageW。它是给系统对话框（#32770 /
- * DS_* 风格）设计的，本窗是自绘 WS_POPUP，没有对话框模板与 tab 顺序，
- * 它按「父窗是对话框」去解释消息，实测点任一按钮都会把文件传输主窗
- * 最小化。Tab / Enter / Esc 我们自己处理，行为可控也不牵连父窗。
- */
-static int cn_conflict_loop(ConflictBox *cb)
-{
-    MSG msg;
-
-    while (IsWindow(cb->dlg) && GetMessageW(&msg, NULL, 0, 0)) {
-        /*
-         * 只对本窗（及其子控件）的键盘消息做自定义导航，别的窗口的
-         * 消息原样派发，绝不替别人的窗口做主。
-         */
-        if ((msg.hwnd == cb->dlg || IsChild(cb->dlg, msg.hwnd)) &&
-            msg.message == WM_KEYDOWN) {
-            HWND map[] = { cb->b_ovw, cb->b_skip, cb->b_cancel };
-            int n = (int)lenof(map);
-
-            if (msg.wParam == VK_ESCAPE) {
-                cb->result = CN_OVW_ABORT;
-                DestroyWindow(cb->dlg);
-                break;
-            }
-            if (msg.wParam == VK_TAB) {
-                /* Tab / Shift+Tab 在三个按钮间循环，跳过空句柄。 */
-                HWND cur = GetFocus();
-                int at = -1, step, i;
-
-                for (i = 0; i < n; i++)
-                    if (map[i] == cur) {
-                        at = i;
-                        break;
-                    }
-                step = (GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1;
-                if (at < 0)
-                    at = step > 0 ? -1 : 0;
-                for (i = 0; i < n; i++) {
-                    at = (at + step + n) % n;
-                    if (map[at]) {
-                        SetFocus(map[at]);
-                        break;
-                    }
-                }
-                continue;               /* 不让它进默认过程 */
-            }
-            if (msg.wParam == VK_RETURN) {
-                /*
-                 * Enter 走默认按钮（全部覆盖）——与 BS_DEFPUSHBUTTON
-                 * 的视觉暗示一致。按钮自己会发 WM_COMMAND，这里只负责
-                 * 把动作递过去。
-                 */
-                if (cb->b_ovw) {
-                    SendMessageW(cb->dlg, WM_COMMAND,
-                                 MAKEWPARAM(IDC_CNC_OVERWRITE,
-                                            BN_CLICKED),
-                                 (LPARAM)cb->b_ovw);
-                    continue;
-                }
-            }
-        }
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
-    return cb->result;
-}
-
-/* 数弹窗里的 STATIC 子控件个数（自检用）。类名系统注册为「Static」。 */
-static BOOL CALLBACK cn_count_static_childs(HWND hwnd, LPARAM lp)
-{
-    wchar_t cls[32];
-
-    if (GetClassNameW(hwnd, cls, lenof(cls)) &&
-        !lstrcmpiW(cls, L"STATIC"))
-        (*(int *)lp)++;
-    return TRUE;
-}
-
-static void cn_conflict_box_done(ConflictBox *cb)
-{
-    sfree(cb->tip.text);
-    cb->tip.text = NULL;
-}
-
-/*
- * 整批冲突一次问清。没有冲突就静默放行，绝不弹空窗。
- *
- * 弹窗建不出来（极低内存之类）时按「全部覆盖」放行 —— 宁可照用户的
- * 原本意图传完，也不要因为摆不出一个窗就整批罢手。
- */
-static int cn_confirm_batch(SftpWin *sw, ConflictItem *items, size_t n)
-{
-    ConflictBox cb;
     int rc;
 
-    if (n == 0)
-        return CN_OVW_OVERWRITE;
-    if (!cn_conflict_dialog_create(sw->hwnd, sw->font, items, n, &cb))
-        return CN_OVW_OVERWRITE;
-
-    if (sw->hwnd)
-        EnableWindow(sw->hwnd, FALSE);
-    ShowWindow(cb.dlg, SW_SHOW);
-    SetForegroundWindow(cb.dlg);
-    rc = cn_conflict_loop(&cb);
-    if (sw->hwnd)
-        EnableWindow(sw->hwnd, TRUE);
-
     /*
-     * 弹窗收场后把主窗摆回「正常显示 + 前台」。
-     *
-     * 弹窗是 owner-owned 的 WS_POPUP，被销毁时前台窗口要还给 owner；
-     * 系统在这条路径上会让 owner 落到「最小化」状态（实测：点任一按钮，
-     * 文件传输主窗缩成任务栏）。SW_RESTORE 无条件还原：对已经是正常
-     * 状态的窗口它等价于显示并激活，有副作用的那一半正是我们要的。
-     *
-     * 顺序有讲究：先 EnableWindow（上面那行已做）再 ShowWindow ——
-     * 禁用的窗口 ShowWindow 不会真正激活。
+     * n 没有上限（一批上千个文件也正常），所以堆上开数组。字符串都
+     * 过 dupstr，释放统一交给 cn_change_list_free。
      */
-    if (sw->hwnd) {
-        ShowWindow(sw->hwnd, SW_RESTORE);
-        SetForegroundWindow(sw->hwnd);
+    cl.n = n;
+    cl.items = snewn(n, CnChange);
+    for (size_t i = 0; i < n; i++) {
+        cl.items[i].name = dup_wc_to_mb(DEFAULT_CODEPAGE, items[i].name,
+                                       "?");
+        cl.items[i].oldval = dupstr("");
+        cl.items[i].newval = dupstr("");
+        cl.items[i].kind = CN_CHG_OTHER;
+        /*
+         * 行首图标一律中性圆点（主人 2026-11 决定）：
+         * 这一行只是陈述「该项已存在于目标位置」，不表达危险度 ——
+         * 危险提示交给标题栏那一个警告图标，内容区再挂感叹号是语义重复，
+         * 而且「同名目录已存在」本身也不算什么危险动作。
+         *
+         * 目录 / 文件在清单里一视同仁，不再用图标区分。
+         */
+        cl.items[i].icon_id = IDI_CN_DOT;
     }
 
-    cn_conflict_box_done(&cb);
+    head = dupprintf("%d 个同名项目已存在于目标位置：", (int)n);
+
+    texts.title = "确认覆盖";
+    texts.head = head;
+    texts.ok = "跳过已存在";             /* 最左，返回 IDOK */
+    texts.cancel = "取消";               /* 中间，返回 IDCANCEL */
+    texts.default_on_right = true;
+    texts.third = "全部覆盖";             /* 最右，返回 IDYES，默认 */
+    texts.icon_id = IDI_CN_WARN;         /* 标题栏挂警告图标，不是问号 */
+    texts.third_is_danger = true;        /* 红框挂在最右那个 */
+
+    rc = cn_confirm_dialog_texts(parent, NULL, &cl, &texts, NULL);
+
+    sfree(head);
+    cn_change_list_free(&cl);
     return rc;
 }
 
 /*
- * cn: 「确认保存」弹窗（配置框保存按钮用）——与「确认覆盖」弹窗完全
- * 同款：首行文案顶格，第二行起 48px 问号图标 + 无边框清单，底部大按钮。
- * 清单最多显示三行，超出的行折叠成省略行（同一画法）。
- * 返回 IDOK / IDCANCEL。
+ * cn: 整批冲突一次问清。没有冲突就静默放行，绝不弹空窗。
+ *
+ * 从 2026-11 起走「原始自绘模板」（与确认保存 / 退出确认同一套）：
+ * 浅灰底 + 白色圆角卡片 + 自绘分段清单 + 底部按钮带。旧的独立实现
+ * （cn_conflict_dialog_create / cn_conflict_loop / 原生 BUTTON + STATIC
+ * 那一套四百行）已整个删除 —— 两个弹窗视觉不一致的根源就是它。
+ *
+ * 数据适配：ConflictItem 只有名字和「是不是目录」，而模板吃 CnChange
+ * （名字 + 旧值 + 新值 + 行首图标）。这里把冲突项映射成「纯名字行」：
+ * 旧值 / 新值留空串，排版器就不会拼冒号、也不会画箭头；行首图标按
+ * 目录 / 文件分 —— 目录用警告（覆盖目录是连锅端），文件用中性圆点。
+ *
+ * 返回值仍是 CN_OVW_*。三个按钮从左到右：
+ *   「跳过已存在」(→ CN_OVW_SKIP) / 「取消」(→ CN_OVW_ABORT) /
+ *   「全部覆盖」(→ CN_OVW_OVERWRITE，最右、默认、红框危险动作)。
+ * 主人 2026-11 明确要求「把全部覆盖的按键位置调整至最右，默认即全部覆盖」。
+ */
+static int cn_confirm_batch(SftpWin *sw, ConflictItem *items, size_t n)
+{
+    int rc;
+
+    if (n == 0)
+        return CN_OVW_OVERWRITE;
+
+    rc = cn_overwrite_ask(sw->hwnd, items, n);
+
+    /*
+     * 返回值映射。Esc 与标题栏 X 在模板里都归到 IDCANCEL，这里一并
+     * 当作「停止整批」—— 关掉一个问「要不要覆盖」的窗，绝不能悄悄
+     * 当成「全部覆盖」。
+     */
+    switch (rc) {
+      case IDOK:
+        return CN_OVW_SKIP;
+      case IDYES:
+        return CN_OVW_OVERWRITE;
+      default:
+        return CN_OVW_ABORT;
+    }
+}
+
+/*
+ * cn: 「原始自绘模板」—— 确认保存 / 连接前确认 / 退出确认 / 确认覆盖
+ * 四个弹窗共用这一套：浅灰底 + 白色圆角卡片 + 自绘分段清单 + 底部
+ * 按钮带。标题栏挂一个图标，卡片内不再放大问号（主人 2026-11 删除）。
+ * 清单最多显示 CN_CONFIRM_SAVE_MAX_ITEMS 项，超出的折叠成省略行
+ * （同一画法，鼠标悬停用浮层看全部）。
+ * 返回 IDOK / IDCANCEL / IDYES（三按钮模式下第三个按钮）。
  *
  * 文案可覆盖：点「连接」「文件传输」时也要弹同一个框，只是标题、首行
  * 和两个按钮的说法不同（「仅本次生效」「长期生效」）。传 NULL 表示
  * 沿用「确认保存」那套默认文案。CnConfirmTexts 定义在 putty.h。
  */
-#define CN_CONFIRM_SAVE_MAX_LINES 3
+#define CN_CONFIRM_SAVE_MAX_ITEMS 3
 
 typedef struct ConfirmSaveBox {
     HWND dlg;
-    HWND head, list, qicon;              /* 首行 / 清单 / 问号图标 */
+    HWND head, list, qicon;              /* 首行 / 清单 / 旧的问号图标（已弃用） */
     HWND b_ok, b_cancel;
     HWND b_third;                        /* 三按钮模式下的右按钮，否则为 NULL */
+    /*
+     * cn: 需要画成红框红字的那个按钮（危险动作），NULL 表示没有。
+     *
+     * 退出确认里是「直接退出」（最左），确认覆盖里是「全部覆盖」（最右）。
+     * 红框挂哪个由文案结构的 third_is_danger 决定，不能靠位置猜 ——
+     * 同样是三按钮，两边的危险项恰恰在相反两侧。
+     */
+    HWND b_danger;
     HFONT font;                          /* 自建则需释放，stock 不释放 */
+    HFONT font_value;                    /* 新值粗体（自建，需释放） */
     bool font_owned;
     CnTipState tip;                      /* 折叠成「.......」时的悬浮浮层 */
     int band_h;                          /* 底部按钮带高度（WM_ERASEBKGND 填灰用） */
     int result;
+    /*
+     * cn: 自绘布局参数。控件仍在（STATIC / BUTTON 保留，便于自检读文本、
+     * 保留键盘焦点与无障碍），但清单 STATIC 设为不可见，文字由
+     * WM_PAINT 分段画到白卡片上；卡片、勾叉、折角自绘。
+     *
+     * 标题栏与窗口边框走系统原生（WS_CAPTION | WS_SYSMENU），
+     * 不再自绘 —— 自绘的 X 与原生边框风格不统一，主人已否掉。
+     *
+     * 不彻底删控件的原因：自检要靠 GetWindowTextW 读回文本，按钮要
+     * 保留焦点与键盘操作，这些系统能力自己实现代价太大。
+     */
+    int title_h;                         /* 标题栏占位（原生外壳下为 0） */
+    int card_top, card_bottom;           /* 白卡片上下边（客户区坐标） */
+    int card_left, card_right;
+    int row_h;                           /* 清单每行高 */
+    int icon_sz;                         /* 行首勾/叉直径 */
+    int chev_sz;                         /* 行尾折角尺寸 */
+    /*
+     * cn: 卡片左侧大问号已删除（主人 2026-11，只留标题栏小问号），
+     * 原来的 qicon_sz 字段随之去掉，不再有「画多大问号」这个状态。
+     */
+    /*
+     * cn: 本帧要画几项清单、要不要补省略行。
+     *
+     * 由 cn_confirm_save_paint 在居中排版时一次算定，绘制阶段照单执行。
+     * 不能在绘制循环里逐行判断「还放不放得下」—— 居中已经把省略号的
+     * 位置算进内容高了，再判一次会因 6px 余量把它踢掉（省略号消失）。
+     */
+    size_t draw_n;
+    bool draw_dots;
+    bool shot_done;                      /* 截图模式：已存过 BMP */
+    CnChangeList *changes;               /* 结构化清单（可能为 NULL） */
     /*
      * cn: 是否由右上角 ❌（WM_CLOSE）关掉。点右按钮和按 ❌ 都返回
      * IDCANCEL，但「连接/文件传输」那个弹窗里两者语义不同 ——
@@ -2696,6 +2592,753 @@ typedef struct ConfirmSaveBox {
      */
     bool closed_by_x;
 } ConfirmSaveBox;
+
+/*
+ * cn: 把清单的某一行按段画出来。
+ *
+ * 一行 = 勾/叉图标 + 选项名 + 「：」+ 旧值 + 「 → 」+ 新值。
+ * 配色照设计图：选项名与旧值同色（灰 #4C4B49），箭头与新值同色
+ * （深蓝 #00307C），新值另加粗。行首图标按 kind 决定勾或叉。
+ *
+ * 为什么不用 STATIC 控件：STATIC 只能整行一个颜色，分段上色必须自绘。
+ * STATIC 仍保留但设为不可见，只为自检能 GetWindowTextW 读回文本。
+ *
+ * cn: 折行规则（主人 2026-11 二次修订）——
+ *   「改动项是一个整体，超出了应该先触发改动项的换行，然后再计算
+ *     改动值的字数是否需要换行」。
+ *
+ * 两级折行：
+ *   1) 改动项 = 选项名 + 「：」+ 旧值 + 箭头，先当整体量宽度。
+ *      - 整体放得下 → 留在首行；
+ *      - 整体放不下 → 改动项整体换到下一行（首行只留勾叉图标），
+ *        然后在新行上重新判断能不能放下；
+ *      - 换了行还放不下（选项名本身就比整行宽）→ 才在改动项内部
+ *        按字符折行，绝不让文字冲出卡片右缘。
+ *   2) 改动项落位后再量新值：剩余宽度放不下就在新值内部按字符折行。
+ *
+ * 绘制与测高共用 cn_layout_change_row() 一个排版器，避免两边分叉
+ * （历史上分叉过一次，折到第二行的内容被卡片下沿裁掉）。
+ */
+
+/*
+ * cn: 一项改动的排版结果 —— 每段文字的起始位置与所在行号。
+ *
+ * 段：0 = 改动项（选项名：旧值），1 = 箭头，2 = 新值。
+ * 每段可能跨多行（seg_pos[] 记录该段从第几个字符开始换行）。
+ */
+typedef struct CnRowLayout {
+    int lines;                  /* 总行数 */
+    int seg_line[3];            /* 各段首行行号（0 基） */
+    int seg_x[3];               /* 各段首行 x 起点 */
+    int seg_pos[3];             /* 各段起始字符下标（折行后从 0 开始） */
+    int wrap[3];                /* 各段内部是否折行 */
+    int arrow_line;             /* 箭头所在行（段 1 画完后的位置） */
+    int arrow_x;                /* 箭头 x 起点 */
+    /*
+     * cn: 本行到底有没有箭头。
+     *
+     * 纯名字行（旧值、新值都为空，如「确认覆盖」的文件名清单）不该画
+     * 箭头；有改动值的行才画。绘制端靠这个标志判断，不再自己猜。
+     */
+    int arrow_drawn;
+    int first_text_x;           /* 文字起点（图标右侧），续行也用它 */
+} CnRowLayout;
+
+/* cn: 二分找「从 pos 起、宽度不超过 avail 的最长前缀字符数」。 */
+static int cn_fit_prefix(HDC hdc, const wchar_t *s, int len, int avail)
+{
+    int lo = 1, hi = len, fit = 1;
+
+    if (len <= 0)
+        return 0;
+    if (avail <= 0)
+        return 1;                   /* 至少一个字符，防死循环 */
+
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        SIZE sz;
+        GetTextExtentPoint32W(hdc, s, mid, &sz);
+        if (sz.cx <= avail) {
+            fit = mid;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return fit;
+}
+
+/*
+ * cn: 排版一项改动 —— 绘制与测高共用。
+ *
+ * 只算位置，不画。返回总行数。avail 是「文字起点 → 卡片右内缘」宽度。
+ */
+static int cn_layout_change_row(HDC hdc, const CnChange *ch, int avail,
+                                HFONT font, HFONT font_value,
+                                CnRowLayout *out)
+{
+    static const wchar_t arrow[] = L" → ";
+    wchar_t *wseg = NULL, *wnew = NULL, *wold = NULL;
+    int segw, arroww, neww, oldw, lines = 1;
+    int cursor_x, cursor_line;
+    HFONT oldfont;
+    SIZE sz;
+    int seglen, nlen, olen;
+
+    memset(out, 0, sizeof(*out));
+    out->first_text_x = 0;
+
+    wnew = dup_mb_to_wc(DEFAULT_CODEPAGE, ch->newval);
+    wold = dup_mb_to_wc(DEFAULT_CODEPAGE, ch->oldval);
+    nlen = (int)wcslen(wnew);
+    olen = (int)wcslen(wold);
+
+    {
+        strbuf *sb = strbuf_new();
+        /*
+         * cn: 段 0 只放「选项名：」，不含旧值。
+         *
+         * 主人 2026-11 明确要求「改选项只包含到『：』，不应该连『关』
+         * 也包含」。原先这里拼的是 "%s：%s"（名字 + 旧值），视觉上旧值
+         * 粘在名字后面，折行时也被当成名字的一部分一起下移，读起来像
+         * 名字叫「XXX：关」。现在旧值归到段 1，与箭头一起排。
+         *
+         * cn: 纯名字行（旧值与新值都为空）不出冒号。
+         *
+         * 「确认覆盖」弹窗的清单每行只是一个同名项的名字，前面还有个
+         * 行首图标，写成「a.txt：」会让人以为冒号后面还该跟一个值，
+         * 视觉上像被截断。这里按「没有值就不加冒号」处理。
+         */
+        if (olen > 0 || nlen > 0)
+            put_fmt(sb, "%s：", ch->name);
+        else
+            put_fmt(sb, "%s", ch->name);
+        wseg = dup_mb_to_wc(DEFAULT_CODEPAGE, sb->s);
+        strbuf_free(sb);
+    }
+    seglen = (int)wcslen(wseg);
+
+    oldfont = SelectObject(hdc, font);
+    GetTextExtentPoint32W(hdc, wseg, seglen, &sz);
+    segw = sz.cx;
+    GetTextExtentPoint32W(hdc, arrow, 3, &sz);
+    arroww = sz.cx;
+    GetTextExtentPoint32W(hdc, wold, olen, &sz);
+    oldw = sz.cx;
+    SelectObject(hdc, font_value ? font_value : font);
+    GetTextExtentPoint32W(hdc, wnew, nlen, &sz);
+    neww = sz.cx;
+    SelectObject(hdc, font);
+
+    cursor_x = 0;
+    cursor_line = 0;
+
+    /*
+     * 段 0：只放「选项名：」。
+     *
+     * 旧值不在这里 —— 它归段 1（旧值 + 箭头），所以名字永远不会被
+     * 旧值拖着一起换行。主人明确要求「改选项只包含到冒号」。
+     *
+     * 名字自己都比整行宽时（超长选项名）才在段内按字符折行。
+     */
+    if (segw <= avail) {
+        out->seg_line[0] = 0;
+        out->seg_x[0] = 0;
+        out->seg_pos[0] = 0;
+        out->wrap[0] = 0;
+        cursor_line = 0;
+        cursor_x = segw;
+    } else {
+        /* 段本身比整行还宽 → 段内折行（选项名很长时才会走到这里）。 */
+        out->seg_line[0] = 0;
+        out->seg_x[0] = 0;
+        out->seg_pos[0] = 0;
+        out->wrap[0] = 1;
+        {
+            int pos = 0;
+            while (pos < seglen) {
+                int fit;
+                GetTextExtentPoint32W(hdc, wseg + pos, seglen - pos, &sz);
+                if (sz.cx <= avail) {
+                    cursor_x = sz.cx;
+                    break;
+                }
+                fit = cn_fit_prefix(hdc, wseg + pos, seglen - pos, avail);
+                pos += fit;
+                lines++;
+                cursor_line = lines - 1;
+                cursor_x = 0;
+                if (lines > 12)
+                    break;
+            }
+        }
+    }
+
+    /*
+     * 段 1：旧值 + 箭头，作为**一个不可分整体**排。
+     *
+     * cn: 主人 2026-11 指出「『关』这个旧值没有和『→开』连一块到下一行」。
+     * 根因是旧值与箭头分开排：旧值在行末剩余宽度里放得下就留在上一行，
+     * 只有箭头被挤下去，于是「关」孤零零吊在行末、下一行光秃秃一个
+     * 「→ 开」。读起来像是选项名结尾带个「关」。
+     *
+     * 现在把「旧值 → 」当整体：当前行放不下就整段下移，新值紧跟其后，
+     * 「关 → 开」一起出现在续行。只有旧值本身比整行还宽（比如超长文件
+     * 路径）时才在段内逐字符折行 —— 那种情况再怎么挪也放不下一行。
+     */
+    out->seg_line[1] = cursor_line;
+    out->seg_x[1] = cursor_x;
+    out->seg_pos[1] = 0;
+    out->wrap[1] = 0;
+    {
+        int valw = oldw + arroww + neww;   /* 「旧值 → 新值」整段宽度 */
+        bool fits_here = (olen > 0 && cursor_x + valw <= avail);
+        bool fits_next = (olen > 0 && !fits_here && cursor_x > 0 &&
+                          valw <= avail);
+
+        if (fits_here) {
+            /* 整段改动值在当前行放得下，原地排。 */
+            out->arrow_line = cursor_line;
+            out->arrow_x = cursor_x + oldw;
+            out->arrow_drawn = 1;
+            cursor_x += oldw + arroww;
+        } else if (fits_next) {
+            /*
+             * 当前行放不下、但整段单独一行放得下 → 旧值连箭头、新值
+             * 一起下移，保证「关 → 开」在同一行。
+             */
+            lines++;
+            cursor_line = lines - 1;
+            out->seg_line[1] = cursor_line;
+            out->seg_x[1] = 0;
+            out->arrow_line = cursor_line;
+            out->arrow_x = oldw;
+            out->arrow_drawn = 1;      /* 能进这里必然有旧值 */
+            cursor_x = oldw + arroww;
+        } else {
+            /* 超长旧值：段内折行（无旧值时循环不执行）。 */
+            int pos = 0;
+            int line = cursor_line;
+            int x = cursor_x;
+
+            while (pos < olen) {
+                int fit, room = avail - x;
+                GetTextExtentPoint32W(hdc, wold + pos, olen - pos, &sz);
+                if (sz.cx <= room) {
+                    x += sz.cx;
+                    break;
+                }
+                fit = cn_fit_prefix(hdc, wold + pos, olen - pos, room);
+                pos += fit;
+                out->wrap[1] = 1;
+                line++;
+                x = 0;
+                if (line > 12)
+                    break;
+            }
+            if (line > cursor_line)
+                lines = line + 1;
+            cursor_line = line;
+            cursor_x = x;
+
+            /* 箭头接在旧值末尾；放不下就换行。 */
+            if (cursor_x + arroww > avail && cursor_x > 0) {
+                lines++;
+                cursor_line = lines - 1;
+                cursor_x = 0;
+            }
+            out->arrow_line = cursor_line;
+            out->arrow_x = cursor_x;
+            /*
+             * cn: 只有真画箭头时才把 cursor 往后推一个箭头宽。
+             *
+             * 纯名字行（无旧值无新值）走这里，若照样推进，光标位置就
+             * 白多出一个「 → 」宽 —— 单行时看不出来，一旦该行有后续
+             * 内容或折行判断就会莫名其妙提前换行。
+             */
+            /*
+             * cn: 纯名字行（旧值、新值都空）到此不画箭头。
+             *
+             * 走到 else 分支且 olen == 0，说明没有旧值 —— 「确认覆盖」
+             * 的清单就是这样。此时若还把箭头标成「要画」，行尾就吊着
+             * 一个孤零零的「→」。只有真带值（旧值或新值非空）才画。
+             */
+            out->arrow_drawn = (olen > 0 || nlen > 0) ? 1 : 0;
+            if (out->arrow_drawn)
+                cursor_x += arroww;
+        }
+    }
+
+    /* 段 2：新值。剩余宽度放不下就折行，续行用整行宽度。 */
+    out->seg_line[2] = cursor_line;
+    out->seg_x[2] = cursor_x;
+    out->seg_pos[2] = 0;
+    out->wrap[2] = 0;
+    if (nlen > 0) {
+        int pos = 0;
+        int line = cursor_line;
+        int x = cursor_x;
+        SelectObject(hdc, font_value ? font_value : font);
+        while (pos < nlen) {
+            int fit, room = avail - x;
+            GetTextExtentPoint32W(hdc, wnew + pos, nlen - pos, &sz);
+            if (sz.cx <= room)
+                break;
+            fit = cn_fit_prefix(hdc, wnew + pos, nlen - pos, room);
+            pos += fit;
+            out->wrap[2] = 1;
+            line++;
+            x = 0;
+            if (line > 12)
+                break;
+        }
+        if (line > cursor_line)
+            lines = line + 1;
+        SelectObject(hdc, font);
+    }
+
+    out->lines = lines;
+    SelectObject(hdc, oldfont);
+    sfree(wseg);
+    sfree(wnew);
+    return lines;
+}
+
+/*
+ * cn: 把清单的某一行按段画出来。
+ *
+ * 一行 = 勾/叉图标 + 选项名 + 「：」+ 旧值 + 「 → 」+ 新值。
+ * 配色照设计图：选项名与旧值同色（灰 #4C4B49），箭头与新值同色
+ * （深蓝 #00307C），新值另加粗。行首图标按 kind 决定勾或叉。
+ *
+ * 为什么不用 STATIC 控件：STATIC 只能整行一个颜色，分段上色必须自绘。
+ * STATIC 仍保留但设为不可见，只为自检能 GetWindowTextW 读回文本。
+ *
+ * 折行规则见 cn_layout_change_row() —— 本函数只负责把排版结果画出来，
+ * 不再自己算折行，避免与测高分叉。
+ *
+ * 返回本行实际占用高度（可能是多行），供调用方累加。
+ */
+static int cn_draw_change_row(HDC hdc, const CnChange *ch, int x, int y,
+                              int right_limit, int row_h, int icon_sz,
+                              int chev_sz, HFONT font, HFONT font_value)
+{
+    int text_x = x + icon_sz + cn_dpi(8);   /* 文字起点（图标右侧） */
+    int avail = right_limit - text_x;
+    int cy = y + row_h / 2;
+    int line_h = row_h;
+    int i;
+    SIZE sz;
+    wchar_t *segs[3];
+    CnRowLayout lay;
+    HFONT oldfont;
+
+    if (avail < cn_dpi(16))
+        avail = cn_dpi(16);
+
+    /* 行首勾/叉：对齐首行的垂直中心。 */
+    cn_draw_check_icon(hdc, x + icon_sz / 2, cy, icon_sz, ch->kind,
+                       ch->icon_id);
+
+    SetBkMode(hdc, TRANSPARENT);
+    oldfont = SelectObject(hdc, font);
+
+    cn_layout_change_row(hdc, ch, avail, font, font_value, &lay);
+
+    {
+        strbuf *sb = strbuf_new();
+        /*
+         * 段 0 只画「选项名：」，旧值归段 1（见排版器说明）。
+         * 纯名字行（无旧值也无新值）不加冒号，与排版器同一判据 ——
+         * 两边一旦分叉，量出来是一行、画出来带个多余的冒号。
+         */
+        if ((ch->oldval && ch->oldval[0]) || (ch->newval && ch->newval[0]))
+            put_fmt(sb, "%s：", ch->name);
+        else
+            put_fmt(sb, "%s", ch->name);
+        segs[0] = dup_mb_to_wc(DEFAULT_CODEPAGE, sb->s);
+        strbuf_free(sb);
+    }
+    /* 段 1 = 旧值 + 箭头，但两者颜色不同，绘制时再拆成两小段。 */
+    segs[1] = dup_mb_to_wc(DEFAULT_CODEPAGE, ch->oldval);
+    segs[2] = dup_mb_to_wc(DEFAULT_CODEPAGE, ch->newval);
+
+    /*
+     * 段 0：选项名（灰）。可能段内折行。
+     * 段 1：旧值（灰）+ 箭头（蓝），从 lay.seg_x[1] 起顺序画。
+     * 段 2：新值（蓝、加粗），从 lay.seg_x[2] 起。
+     */
+    for (i = 0; i < 3; i++) {
+        int pos = 0, line = lay.seg_line[i], lx = lay.seg_x[i];
+        int len = (int)wcslen(segs[i]);
+        HFONT f = (i == 2 && font_value) ? font_value : font;
+        COLORREF clr = (i == 2) ? CN_CLR_ACCENT : CN_CLR_TEXT;
+
+        if (len <= 0)
+            continue;
+        SelectObject(hdc, f);
+        SetTextColor(hdc, clr);
+
+        while (pos < len) {
+            int fit, room = avail - lx;
+            int liney = cy + line * line_h;
+
+            GetTextExtentPoint32W(hdc, segs[i] + pos, len - pos, &sz);
+            if (sz.cx <= room || room <= 0) {
+                if (sz.cx <= room) {
+                    /*
+                     * cn: 用基线对齐 + 视觉中心校正，而不是
+                     *     「liney - sz.cy/2」。后者把字符框当墨迹框，
+                     *     汉字会整体下沉几个像素（与左侧图标不齐）。
+                     */
+                    int by = cn_text_baseline_for_center(hdc, liney);
+                    SetTextAlign(hdc, TA_LEFT | TA_BASELINE);
+                    TextOutW(hdc, text_x + lx, by, segs[i] + pos, len - pos);
+                    SetTextAlign(hdc, TA_LEFT | TA_TOP);
+                    break;
+                }
+                /* 房间为 0 但还有内容：换行再画，防死循环。 */
+                fit = 1;
+            } else {
+                fit = cn_fit_prefix(hdc, segs[i] + pos, len - pos, room);
+            }
+            GetTextExtentPoint32W(hdc, segs[i] + pos, fit, &sz);
+            {
+                int by = cn_text_baseline_for_center(hdc, liney);
+                SetTextAlign(hdc, TA_LEFT | TA_BASELINE);
+                TextOutW(hdc, text_x + lx, by, segs[i] + pos, fit);
+                SetTextAlign(hdc, TA_LEFT | TA_TOP);
+            }
+            pos += fit;
+            line++;
+            lx = 0;
+            if (line > 12)
+                break;
+        }
+
+        /*
+         * 段 1 画完后补画箭头（蓝色）。箭头位置由排版器给出，
+         * 不在这里重算 —— 两边各算一次必然分叉。
+         *
+         * cn: 纯名字行（旧值与新值都为空）不画箭头。
+         * 排版器那边 `olen > 0` 才排改动值，箭头位置保持初值；
+         * 这里若无条件画，就会出现「a.txt    →」这种后面吊着个
+         * 光箭头的怪样子 —— 「确认覆盖」的清单每行都是纯名字，
+         * 一进来就全中。
+         */
+        if (i == 1 && lay.arrow_drawn) {
+            static const wchar_t arrow[] = L" → ";
+            int liney = cy + lay.arrow_line * line_h;
+            int by = cn_text_baseline_for_center(hdc, liney);
+
+            SelectObject(hdc, font);
+            SetTextColor(hdc, CN_CLR_ACCENT);
+            SetTextAlign(hdc, TA_LEFT | TA_BASELINE);
+            TextOutW(hdc, text_x + lay.arrow_x, by, arrow, 3);
+            SetTextAlign(hdc, TA_LEFT | TA_TOP);
+        }
+    }
+
+    (void)chev_sz;
+
+    SelectObject(hdc, oldfont);
+    sfree(segs[0]);
+    sfree(segs[1]);
+    sfree(segs[2]);
+    return lay.lines * line_h;
+}
+
+/*
+ * cn: 量一项改动折行后占几行 —— 直接复用排版器，杜绝两套规则分叉。
+ *
+ * 卡片高度必须在建窗时就定下来（要交给 AdjustWindowRectEx），而绘制
+ * 是后来才发生的。历史上这里另写了一套估算，跟绘制对不上，导致折到
+ * 第二行的内容被卡片下沿裁掉。现在只保留 cn_layout_change_row() 一个
+ * 排版器，绘制与测高都调它。
+ *
+ * avail 是「图标右侧文字起点 → 卡片右内缘」的宽度。avail <= 0 时返回 1。
+ */
+static int cn_change_row_lines(HDC hdc, const CnChange *ch, int avail,
+                               HFONT font, HFONT font_value)
+{
+    CnRowLayout lay;
+
+    if (avail <= 0)
+        return 1;
+
+    return cn_layout_change_row(hdc, ch, avail, font, font_value, &lay);
+}
+
+/* cn: 前置声明 —— dump 函数要调用它，而它定义在后面。 */
+static void cn_confirm_save_paint(HWND hwnd, ConfirmSaveBox *cb, HDC hdc);
+
+/* cn: 前置声明 —— 建窗时要用它算卡片高度，定义在绘制函数之后。 */
+static int cn_change_row_lines(HDC hdc, const CnChange *ch, int avail,
+                               HFONT font, HFONT font_value);
+
+/*
+ * cn: 把当前客户区渲染成 24 位 BMP 落盘（环境变量 CN_CONFIRM_SAVE_SHOT
+ * 给出路径时启用）。
+ *
+ * 为什么不靠外部脚本截屏：本机 Windows Terminal / 沙箱环境下，外部
+ * PowerShell 枚举不到本进程的顶层窗口（EnumWindows 返回 0 条，连主窗
+ * 都没有），PrintWindow 与 FindWindow 全部失效。窗口自己画自己最可靠，
+ * 也跟自检取像素走同一条 WM_PRINTCLIENT 路径，看到的就是真实的。
+ */
+static void cn_confirm_save_dump_bmp(HWND hwnd, ConfirmSaveBox *cb,
+                                     const char *path)
+{
+    RECT rc;
+    HDC screen, memdc;
+    HBITMAP bmp, oldbmp;
+    BITMAPINFO bi;
+    int w, h, rowsz;
+    unsigned char *bits = NULL;
+    FILE *fp;
+    wchar_t *wpath;
+
+    if (!path || !*path)
+        return;
+    /* 整窗尺寸（含标题栏与边框），这样截图能看到完整外壳。 */
+    GetWindowRect(hwnd, &rc);
+    w = rc.right - rc.left;
+    h = rc.bottom - rc.top;
+    if (w <= 0 || h <= 0)
+        return;
+
+    screen = GetDC(NULL);
+    if (!screen)
+        return;
+    memdc = CreateCompatibleDC(screen);
+    bmp = CreateCompatibleBitmap(screen, w, h);
+    ReleaseDC(NULL, screen);
+    if (!memdc || !bmp) {
+        if (bmp) DeleteObject(bmp);
+        if (memdc) DeleteDC(memdc);
+        return;
+    }
+    oldbmp = SelectObject(memdc, bmp);
+
+    /* 先铺白底，避免 alpha 区域残影。 */
+    {
+        RECT all;
+        HBRUSH wb = CreateSolidBrush(RGB(255, 255, 255));
+        all.left = 0; all.top = 0; all.right = w; all.bottom = h;
+        FillRect(memdc, &all, wb);
+        DeleteObject(wb);
+    }
+    /*
+     * 分两层渲染：
+     *   ① 非客户区（标题栏、边框）交给系统 —— DefWindowProc 的 WM_PRINT
+     *   ② 客户区自己画，子控件（STATIC / BUTTON）逐个画，坐标用
+     *      MapWindowPoints 换算到窗口原点
+     *
+     * PrintWindow(PW_RENDERFULLCONTENT) 试过：标题栏出来了，但两个按钮
+     * 始终空白（句柄与坐标都验证正常，是它在这个窗口上的渲染局限）。
+     */
+    {
+        POINT org;
+        RECT cr;
+        HWND ch;
+
+        DefWindowProcW(hwnd, WM_PRINT, (WPARAM)memdc,
+                       PRF_NONCLIENT | PRF_CHECKVISIBLE);
+
+        /* 客户区原点（相对窗口左上角）。 */
+        org.x = 0;
+        org.y = 0;
+        ClientToScreen(hwnd, &org);
+        GetWindowRect(hwnd, &cr);
+        org.x -= cr.left;
+        org.y -= cr.top;
+
+        SetViewportOrgEx(memdc, org.x, org.y, NULL);
+        cn_confirm_save_paint(hwnd, cb, memdc);
+        SetViewportOrgEx(memdc, 0, 0, NULL);
+
+        /*
+         * 子控件：用窗口矩形相对窗口左上角的偏移。
+         * ⚠️ 之前用 ClientToScreen 叠算，按钮一直画在窗外；直接用
+         * GetWindowRect 相减最稳，不受父窗客户区坐标影响。
+         */
+        for (ch = GetWindow(hwnd, GW_CHILD); ch; ch = GetWindow(ch, GW_HWNDNEXT)) {
+            RECT wr;
+            if (!IsWindowVisible(ch))
+                continue;
+            GetWindowRect(ch, &wr);
+            SetViewportOrgEx(memdc, wr.left - cr.left, wr.top - cr.top, NULL);
+            SendMessageW(ch, WM_PRINT, (WPARAM)memdc,
+                         PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND |
+                         PRF_CHECKVISIBLE);
+            SetViewportOrgEx(memdc, 0, 0, NULL);
+        }
+    }
+
+    /* 取像素：DIB 段正向（bottom-up），转成文件里的正向。 */
+    memset(&bi, 0, sizeof(bi));
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;      /* 负数 = top-down，省得手动翻转 */
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 24;
+    bi.bmiHeader.biCompression = BI_RGB;
+
+    rowsz = ((w * 3 + 3) / 4) * 4;
+    bits = snewn(rowsz * h, unsigned char);
+    if (GetDIBits(memdc, bmp, 0, h, bits, &bi, DIB_RGB_COLORS)) {
+        wpath = dup_mb_to_wc(CP_UTF8, path);
+        fp = _wfopen(wpath, L"wb");
+        sfree(wpath);
+        if (fp) {
+            BITMAPFILEHEADER fh;
+            memset(&fh, 0, sizeof(fh));
+            fh.bfType = 0x4D42;      /* "BM" */
+            fh.bfOffBits = sizeof(fh) + sizeof(BITMAPINFOHEADER);
+            fh.bfSize = fh.bfOffBits + rowsz * h;
+            fwrite(&fh, sizeof(fh), 1, fp);
+            fwrite(&bi.bmiHeader, sizeof(BITMAPINFOHEADER), 1, fp);
+            fwrite(bits, 1, (size_t)rowsz * h, fp);
+            fclose(fp);
+        }
+    }
+    sfree(bits);
+
+    SelectObject(memdc, oldbmp);
+    DeleteObject(bmp);
+    DeleteDC(memdc);
+}
+
+/*
+ * cn: 整个弹窗的自绘主体 —— 灰底、白卡片、清单富文本。
+ *
+ * 标题栏与窗口边框交给系统原生绘制，这里只画客户区内容。
+ *
+ * WM_PAINT 与 WM_PRINTCLIENT 共用同一份：自检要拿 WM_PRINTCLIENT 把
+ * 窗口渲到内存位图上取像素（未显示的窗口读不到有效表面，实测踩过），
+ * 两处各写一份必然分叉。
+ *
+ * 层次（照设计图）：
+ *   1. 客户区铺浅灰 #F7F7F5
+ *   2. 白色圆角卡片：包住清单区
+ *   3. 卡片内逐行画改动（勾/叉 + 灰段 + 蓝段 + 折角）
+ */
+static void cn_confirm_save_paint(HWND hwnd, ConfirmSaveBox *cb, HDC hdc)
+{
+    RECT rc, card;
+    HBRUSH br;
+    HFONT oldfont;
+    int y;
+
+    GetClientRect(hwnd, &rc);
+
+    /* 1. 客户区浅灰底。 */
+    br = CreateSolidBrush(CN_CLR_BG);
+    FillRect(hdc, &rc, br);
+    DeleteObject(br);
+
+    /*
+     * 2. 白色圆角卡片。
+     *    card_top / card_bottom 由构建函数按内容算好，这里只管画。
+     */
+    card.left = cb->card_left;
+    card.top = cb->card_top;
+    card.right = cb->card_right;
+    card.bottom = cb->card_bottom;
+    cn_fill_round_rect(hdc, &card, cn_dpi(12),
+                       CN_CLR_CARD, CN_CLR_CARD_EDGE);
+
+    /*
+     * 3. 卡片左侧的大问号图标 —— 已删除（主人 2026-11 要求）。
+     *
+     * 「把大问号图标删除，仅保留标题栏的小问号图标」。标题栏那个
+     * 红色小问号由窗口图标（icon_question.ico + WM_SETICON）提供，
+     * 属系统绘制，与本处无关。卡片里不再画 40~96px 的大问号，
+     * 省下的横向空间全部还给清单文字。
+     *
+     * 这套绘制与构建函数被三个弹窗共用 —— 确认保存、确认退出、
+     * 连接/文件传输（cn_confirm_dialog_texts），所以三处一起生效。
+     */
+
+    /*
+     * 4. 卡片内的清单。
+     *    有结构化数据就逐行画富文本；没有（老调用方只给了字符串）
+     *    就退回用 STATIC 的文本整段画，保证不会白屏。
+     */
+    if (cb->changes && cb->changes->n > 0) {
+        /*
+         * cn: 大问号撤掉后，清单直接顶到卡片左内边距，不再给它让位。
+         * rowx 与 build 里的测量起点必须同一个表达式（见那边注释）。
+         */
+        int rowx = cb->card_left + cn_dpi(14);
+        int right_limit = cb->card_right - cn_dpi(14);
+        int avail = right_limit - (rowx + cb->icon_sz + cn_dpi(8));
+
+        /*
+         * cn: 清单整块在卡片内垂直居中（行首图标跟着一起居中）。
+         *
+         * 画几项、画不画省略号，完全照 build 阶段算好的 cb->draw_n /
+         * cb->draw_dots 执行，这里一个字都不重算。
+         *
+         * ⚠️ 历史上这里自作聪明重算过一遍（模拟 content_h → 居中 → 每行
+         *    再判「y + row_h > card_bottom - 6」），结果和 build 的判据
+         *    打架：居中已经把省略号算进高度，绘制走到省略号时 y 正好顶到
+         *    内容底，那个 -6 余量让它判定「放不下」，省略号被直接跳过。
+         *    主人截图里「改了三项、末尾没有 .......」正是此因。
+         *    现在单一来源：build 算定，paint 照抄。
+         */
+        {
+            int cardh = cb->card_bottom - cb->card_top;
+            int content_h = 0;
+            int used = 0;
+
+            for (size_t i = 0; i < cb->draw_n; i++) {
+                int l = cn_change_row_lines(hdc, &cb->changes->items[i],
+                                            avail, cb->font, cb->font_value);
+                used += (l < 1) ? 1 : l;
+            }
+            if (cb->draw_dots)
+                used++;
+            content_h = used * cb->row_h;
+
+            if (content_h > 0) {
+                int pad = cn_dpi(6);
+                int top = cb->card_top + (cardh - content_h) / 2;
+                if (top < cb->card_top + pad)
+                    top = cb->card_top + pad;
+                y = top;
+            } else {
+                y = cb->card_top + cn_dpi(10);
+            }
+        }
+        for (size_t i = 0; i < cb->draw_n; i++) {
+            int used;
+            /*
+             * ⚠️ cn_draw_change_row 返回的是**像素高度**（行数 × 行高），
+             *    不是行数。早先这里写成 y += used，把像素当行数加，
+             *    每画一项 y 就多跳 row_h 个像素，卡片迅速被判定放不下，
+             *    后面的项和「.......」全被 break 掉 —— 表现就是「改了
+             *    四项只显示两三行、省略号也不见了」。
+             */
+            used = cn_draw_change_row(hdc, &cb->changes->items[i], rowx, y,
+                                      right_limit, cb->row_h, cb->icon_sz,
+                                      cb->chev_sz, cb->font, cb->font_value);
+            y += used;              /* 折行的项按实际占用高度推进 */
+        }
+        /* 被折叠时补一行省略号，提示还有更多（悬停看全部）。 */
+        if (cb->draw_dots) {
+            static const wchar_t dots[] = L".......";
+            int by = cn_text_baseline_for_center(hdc, y + cb->row_h / 2);
+            oldfont = SelectObject(hdc, cb->font);
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, CN_CLR_TEXT);
+            /* 与正文同一套基线对齐，别再混用 sz.cy/2（会贴得偏上）。 */
+            SetTextAlign(hdc, TA_LEFT | TA_BASELINE);
+            TextOutW(hdc, rowx + cb->icon_sz + cn_dpi(8), by, dots, 7);
+            SetTextAlign(hdc, TA_LEFT | TA_TOP);
+            SelectObject(hdc, oldfont);
+        }
+    }
+}
 
 static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
                                              WPARAM wParam, LPARAM lParam)
@@ -2711,38 +3354,93 @@ static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
 
     switch (msg) {
       /*
-       * 底部按钮带：内容区保持白底，按钮那一横条填系统面板灰，
-       * 照「确认覆盖」的系统对话框样式。不带这条，白底一路铺到窗口
-       * 下沿，按钮像浮在纸上，跟图 1 差得远。
+       * cn: 背景与内容全部自绘（照主人给的设计图）。
+       *
+       * WM_ERASEBKGND 只负责「别让系统拿默认刷子糊一遍」，真正绘制在
+       * WM_PAINT 里统一做 —— 两处都画会出现「先画卡片、又被擦掉」
+       * 的闪烁，而且配色会分叉。
        */
       case WM_ERASEBKGND:
+        return 1;
+      case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        if (hdc)
+            cn_confirm_save_paint(hwnd, cb, hdc);
+        EndPaint(hwnd, &ps);
         /*
-         * 自己整块刷：先白底，再把底部按钮带刷灰。交给默认过程只会
-         * 刷成单一背景色，带子就没了。返回 1 表示已处理，别再擦一遍
-         * （否则 WM_PAINT 里填的灰会被抹掉）。
+         * cn: 截图模式 —— 首帧画完后**投递**一条消息再截图，不在这里
+         * 直接抓。原因：PrintWindow 会触发重绘，在 WM_PAINT 内部调用
+         * 就是重入；投递出去等消息队列空下来，窗口已是完整合成状态。
          */
-        {
-            HDC hdc = (HDC)wParam;
-            RECT rc;
-            GetClientRect(hwnd, &rc);
-            FillRect(hdc, &rc, GetSysColorBrush(COLOR_WINDOW));
-            if (cb->band_h > 0 && cb->band_h < rc.bottom) {
-                RECT rb = rc;
-                rb.top = rc.bottom - cb->band_h;
-                FillRect(hdc, &rb, GetSysColorBrush(COLOR_BTNFACE));
-                /* 带上沿一条细线，系统对话框的既有画法。 */
-                rb.bottom = rb.top + 1;
-                FillRect(hdc, &rb, GetSysColorBrush(COLOR_3DSHADOW));
-            }
-            return 1;
+        if (!cb->shot_done && getenv("CN_CONFIRM_SAVE_SHOT")) {
+            cb->shot_done = true;
+            PostMessageW(hwnd, WM_APP + 77, 0, 0);
         }
+        return 0;
+      }
+      case WM_APP + 77: {
+        /* cn: 截图模式的延迟抓图点（见 WM_PAINT 里的说明）。 */
+        const char *shot = getenv("CN_CONFIRM_SAVE_SHOT");
+        if (shot) {
+            cn_confirm_save_dump_bmp(hwnd, cb, shot);
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        }
+        return 0;
+      }
+      case WM_PRINTCLIENT: {
+        /*
+         * cn: 自检要把窗口渲到内存位图上取像素核对配色。未显示的窗口
+         * 拿不到有效表面（GetPixel 恒为白），必须走这条消息。
+         */
+        HDC hdc = (HDC)wParam;
+        if (hdc)
+            cn_confirm_save_paint(hwnd, cb, hdc);
+        return 0;
+      }
+      case WM_PRINT: {
+        /*
+         * cn: 截图模式用的整窗渲染入口。子控件由调用方
+         * （cn_confirm_save_dump_bmp）逐个平移渲染 —— 系统自带的
+         * PRF_CHILDREN 会忽略窗口位置，全画到 DC 原点。
+         */
+        HDC hdc = (HDC)wParam;
+        UINT flags = (UINT)lParam;
+        if (flags & PRF_NONCLIENT)
+            DefWindowProcW(hwnd, WM_PRINT, wParam,
+                           PRF_NONCLIENT | PRF_CHECKVISIBLE);
+        if (hdc && (flags & PRF_CLIENT))
+            cn_confirm_save_paint(hwnd, cb, hdc);
+        return 0;
+      }
       case WM_CTLCOLORSTATIC:
         /*
-         * 内容区的 STATIC 必须透明，否则它会拿系统面板灰当底色，
-         * 在白内容区上糊出一个个灰方块。
+         * 清单 STATIC 已隐藏，但首行说明仍是可见控件，必须透明，
+         * 否则它会拿系统面板灰当底色，在浅灰内容区上糊出灰方块。
          */
         SetBkMode((HDC)wParam, TRANSPARENT);
-        return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+        SetTextColor((HDC)wParam, CN_CLR_HEAD_TEXT);
+        return (LRESULT)GetStockObject(NULL_BRUSH);
+      case WM_LBUTTONUP:
+        break;
+      case WM_MOUSEMOVE:
+        /*
+         * cn: 只剩清单折叠时的浮层。X 悬停高亮随自绘标题栏一起去掉，
+         * 系统关闭按钮自带悬停效果。
+         */
+        cn_tip_track(&cb->tip, hwnd, lParam);
+        break;
+      case WM_KEYDOWN:
+        /*
+         * cn: Esc 关闭。自绘窗口没有系统对话框的 Esc 处理，得自己接。
+         * 语义等同点 X（什么都不做，result 保持 IDCANCEL）。
+         */
+        if (wParam == VK_ESCAPE) {
+            cb->closed_by_x = true;
+            DestroyWindow(hwnd);
+            return 0;
+        }
+        break;
       case WM_COMMAND:
         if (LOWORD(wParam) == IDC_CNC_OVERWRITE) {   /* 确定/直接退出复用该 ID */
             cb->result = IDOK;
@@ -2779,7 +3477,7 @@ static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
         RECT rc;
         wchar_t text[64];
 
-        if (!cb->b_third || dis->hwndItem != cb->b_ok)
+        if (!cb->b_danger || dis->hwndItem != cb->b_danger)
             break;
         selected = (dis->itemState & ODS_SELECTED) != 0;
         bg = selected ? CreateSolidBrush(RGB(0xF5, 0xD0, 0xD0))
@@ -2806,13 +3504,6 @@ static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
             DeleteObject(bg);
         return TRUE;
       }
-      case WM_MOUSEMOVE:
-        /*
-         * 清单被折叠成「.......」时，鼠标悬停在清单区就铺开完整改动。
-         * 逻辑与「确认覆盖」共用 cn_tip_track。
-         */
-        cn_tip_track(&cb->tip, hwnd, lParam);
-        break;
       case WM_MOUSELEAVE:
         cn_tip_hide(&cb->tip);
         break;
@@ -2925,13 +3616,143 @@ static char *cn_wrap_at_bracket(const char *listtxt, int maxw,
  * cn: 建「确认保存」弹窗（不跑消息循环，不显示）。
  *
  * 拆成「建」和「跑循环」两段是为了自检：建完就能量尺寸、读控件矩形、
- * 检查浮层，不必真等用户点。与「确认覆盖」的 cn_conflict_dialog_create
- * 是同一套拆分思路。
+ * 检查浮层，不必真等用户点。
+ *
+ * cn: 同一套模板现在也服务「确认覆盖」——它通过 structured 参数把
+ * 冲突项传进来，不再有独立的建窗函数。
  *
  * 返回 true 表示建成；cb 里的句柄有效。changes 是待展示的改动清单
  * （多行，\n 分隔），函数内部复制，调用方不必保活。
  */
+/*
+ * cn: 从「【选项名】 旧值 → 新值」纯文本反解出结构化清单。
+ *
+ * 为什么还要解析：cn_confirm_save_build 的调用方（含自检、确认覆盖、
+ * 连接确认）都只传字符串。改签名要动七处调用点，且其中几处是自检里
+ * 硬编码的样例文本，改起来噪音比收益大。
+ *
+ * 解析规则严格照 conf_describe_changes 的输出格式：
+ *   行首「【」…「】」之间是选项名，其后空格分隔，再按第一个「 → 」
+ *   （前后带空格的箭头）切成旧值与新值。
+ *
+ * ⚠️ 与「解析纯字符串不可靠」不矛盾：生产路径上 dialog.c 那边已经
+ *    走 conf_describe_changes_struct 拿到结构化数据（不经过这里）；
+ *    这里只是给「只给字符串」的老调用方兜底，格式由我们自己生成，
+ *    所以能严格按格式切。真正的自由文本不会走到这条路上。
+ *
+ * 反解失败（没有【】或没有箭头）时返回 NULL，绘制端退回整行单色显示。
+ */
+static CnChangeList *cn_parse_changes_text(const char *text)
+{
+    CnChangeList *list = snew(CnChangeList);
+    const char *p = text;
+
+    list->items = NULL;
+    list->n = 0;
+    if (!text)
+        return list;
+
+    while (p && *p) {
+        const char *nl = strchr(p, '\n');
+        int blen = nl ? (int)(nl - p) : (int)strlen(p);
+        while (blen > 0 && (p[blen-1] == '\r' || p[blen-1] == '\n'))
+            blen--;
+        if (blen > 0) {
+            const char *close = cn_find_bracket_close(p, (size_t)blen);
+            if (close && p[0] == '[' && p[1] == '[') {
+                /* 不是「【」开头的行（例如省略行），整行当名字。 */
+                close = NULL;
+            }
+            /*
+             * 「【」是 U+3010，UTF-8 编码 E3 80 90 三字节。用字节比较，
+             * 不用宽字符 —— 这条路径上全是 char。
+             */
+            if (blen >= 3 && (unsigned char)p[0] == 0xE3 &&
+                (unsigned char)p[1] == 0x80 && (unsigned char)p[2] == 0x90)
+                close = cn_find_bracket_close(p, (size_t)blen);
+            else
+                close = NULL;
+
+            if (close) {
+                /* 名字：去掉前 3 字节「【」与后 3 字节「】」。 */
+                int nlen = (int)(close - p) - 3 - 3;
+                char *name = snewn(nlen + 1, char);
+                memcpy(name, p + 3, nlen);
+                name[nlen] = '\0';
+
+                /*
+                 * 剩余部分按「 → 」切。箭头是 U+2192（E2 86 92），
+                 * 前后各带一个半角空格，与 conf_describe_changes 一致。
+                 */
+                {
+                    const char *rest = close;
+                    const char *arrow = NULL;
+                    int restlen = blen - (int)(close - p);
+                    for (int i = 0; i + 5 <= restlen; i++) {
+                        if (rest[i] == ' ' &&
+                            (unsigned char)rest[i+1] == 0xE2 &&
+                            (unsigned char)rest[i+2] == 0x86 &&
+                            (unsigned char)rest[i+3] == 0x92 &&
+                            rest[i+4] == ' ') {
+                            arrow = rest + i;
+                            break;
+                        }
+                    }
+                    if (arrow) {
+                        /* 旧值：close 之后到 arrow 之前，掐掉前导空格。 */
+                        const char *o = close;
+                        int olen = (int)(arrow - close);
+                        while (olen > 0 && *o == ' ') { o++; olen--; }
+                        while (olen > 0 && o[olen-1] == ' ') olen--;
+                        /* 新值：arrow + 5 到行尾。 */
+                        const char *n = arrow + 5;
+                        int nlen2 = blen - (int)(n - p);
+                        while (nlen2 > 0 && n[nlen2-1] == ' ') nlen2--;
+
+                        {
+                            char *oldv = snewn(olen + 1, char);
+                            char *newv = snewn(nlen2 + 1, char);
+                            memcpy(oldv, o, olen); oldv[olen] = '\0';
+                            memcpy(newv, n, nlen2); newv[nlen2] = '\0';
+                            /*
+                             * 勾叉分类：新值是「关/禁用」→ 叉，其余 → 勾。
+                             * 与 conf_data.c 的 cn_classify_newval 同规则，
+                             * 但那边是 static，这里按同一张词表重写一份
+                             * （只判 关/禁用/关闭 三个词，够用且不必
+                             * 为了共用把函数提到头文件里）。
+                             */
+                            {
+                                CnChangeKind k = CN_CHG_TOGGLE_ON;
+                                if (!strcmp(newv, "关") ||
+                                    !strcmp(newv, "禁用") ||
+                                    !strcmp(newv, "关闭"))
+                                    k = CN_CHG_TOGGLE_OFF;
+                                else if (!strcmp(newv, "(无)"))
+                                    k = CN_CHG_TOGGLE_OFF;
+                                list->items = sresize(list->items,
+                                                      list->n + 1, CnChange);
+                                list->items[list->n].name = name;
+                                list->items[list->n].oldval = oldv;
+                                list->items[list->n].newval = newv;
+                                list->items[list->n].kind = k;
+                                /* cn: 解析出的行一律走勾/叉，不指定资源。 */
+                                list->items[list->n].icon_id = 0;
+                                list->n++;
+                            }
+                        }
+                    } else {
+                        sfree(name);
+                    }
+                }
+            }
+        }
+        p = nl ? nl + 1 : NULL;
+    }
+    return list;
+}
+
 static bool cn_confirm_save_build(HWND parent, const char *changes,
+                                  const CnChangeList *structured,
                                   const CnConfirmTexts *texts,
                                   ConfirmSaveBox *cb)
 {
@@ -2952,6 +3773,16 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
     int qicon_size = cn_dpi(48);
     int content_h = 0;              /* 内容区高 = max(清单, 图标) */
     int needw = 0, listw_text = 0, needw_head = 0;
+    /* cn: 自绘清单的行内装饰尺寸，定宽与绘制共用这两个值。 */
+    /*
+     * cn: 行首勾/叉直径。
+     *
+     * 18px 时图标糊成一团 —— 素材的圆环笔画约占直径 12%，18px 下只剩
+     * 2px，叉的细节被挤没了（放大截图确认）。改 22px 后圆环约 2.6px、
+     * 叉与圆环之间留得出空隙，且仍小于行高，不会把行撑开。
+     */
+    int icon_sz = cn_dpi(22);       /* 行首勾/叉直径 */
+    int chev_sz = cn_dpi(14);       /* 行尾装饰折角尺寸 */
     /* cn: 按钮宽度与数量在定窗口宽时就算好，创建按钮时直接复用。 */
     int bw[3] = { 0, 0, 0 };
     int bw_n = 2;
@@ -2963,7 +3794,7 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
     const char *txt_title  = (texts && texts->title)  ? texts->title
                                                         : "确认保存";
     const char *txt_head   = (texts && texts->head)   ? texts->head
-        : "当前改动尚未保存，改动清单：";
+        : CN_HEAD_TEXT;
     const char *txt_ok     = (texts && texts->ok)     ? texts->ok  : "确定";
     const char *txt_cancel = (texts && texts->cancel) ? texts->cancel
                                                       : "取消";
@@ -2975,15 +3806,24 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
     bool three = (txt_third != NULL);
     /* 默认按钮在哪边：只有显式要求时才挪到右边。 */
     bool default_on_right = (texts != NULL) && texts->default_on_right;
+    /*
+     * cn: 标题栏图标资源 ID（0 = 红色问号 IDI_QHELP）。
+     * 「确认覆盖」那边传警告图标，见 CnConfirmTexts 的说明。
+     */
+    int title_icon = (texts && texts->icon_id) ? texts->icon_id : IDI_QHELP;
+    /* cn: 三按钮模式下红框（危险动作）挂在最右那个按钮上。 */
+    bool third_danger = (texts != NULL) && texts->third_is_danger;
 
     memset(cb, 0, sizeof(*cb));
     cb->result = IDCANCEL;
 
-    /* cn: 取系统消息字体，原尺寸（与「确认覆盖」弹窗、主窗控件同一份）。 */
+    /* cn: 取系统消息字体，按 CN_FONT_SCALE 放大（主人要求整体 +10%）。 */
     font_owned = false;
     ncm.cbSize = sizeof(ncm);
     if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0)) {
-        font = CreateFontIndirectW(&ncm.lfMessageFont);
+        LOGFONTW lf = ncm.lfMessageFont;
+        cn_scale_logfont(&lf);
+        font = CreateFontIndirectW(&lf);
         font_owned = (font != NULL);
     } else {
         font = NULL;
@@ -3018,16 +3858,35 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
     m = cn_dpi(14);
 
     /*
-     * 清单折叠：只留前三行，超出的行并成一个「.......」。
-     * truncated 记下「是否真的还有没显示的行」——只有真截断了才挂浮层。
+     * cn: 清单文本。
+     *
+     * 两条路径：
+     *   1) 调用方直接给了结构化清单（「确认覆盖」走这条）—— 每行的
+     *      文字由结构化数据现拼，不经过「【】→」的字符串格式；
+     *   2) 只给了字符串 —— 照旧按行取前 CN_CONFIRM_SAVE_MAX_ITEMS 行。
+     *
+     * ⚠️ 折叠的判定两处口径不同，别混：
+     *    字符串路径在这里就把行数截到上限（历史行为，自检依赖它）；
+     *    结构化路径保留全量，由绘制端的行数预算决定画几项 —— 因为
+     *    「三项」不等于「三行」，长项折行后三项可能占四行。
      */
+    if (structured) {
+        strbuf *sb = strbuf_new();
+        for (size_t i = 0; i < structured->n; i++) {
+            if (i)
+                put_fmt(sb, "\r\n");
+            put_fmt(sb, "%s", structured->items[i].name);
+        }
+        listtxt = strbuf_to_str(sb);
+        truncated = false;
+    } else
     {
         int n = 0;
         size_t len = strlen(changes);
         char *tmp = dupstr(changes);
         char *p = tmp, *nl;
         strbuf *sb = strbuf_new();
-        while (p < tmp + len && n < CN_CONFIRM_SAVE_MAX_LINES) {
+        while (p < tmp + len && n < CN_CONFIRM_SAVE_MAX_ITEMS) {
             nl = strchr(p, '\n');
             if (nl) {
                 *nl = 0;
@@ -3072,6 +3931,39 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
                 listtxt[l2-1] = 0;
         }
     }
+
+    /*
+     * cn: 结构化清单 —— 自绘要按段上色，必须拿到分段数据。
+     *
+     * 两条来源：
+     *   1) 调用方直接给了结构化清单（「确认覆盖」）→ 深拷一份接管所有权，
+     *      不能只存指针 —— 调用方那头的清单在弹窗关闭后就被释放了，
+     *      而自绘/自检在弹窗存续期间还要反复读它。
+     *   2) 只给了字符串 → 从自己生成的字符串反解（格式由
+     *      conf_describe_changes 保证，见 cn_parse_changes_text 的说明）。
+     */
+    if (structured) {
+        cb->changes = snew(CnChangeList);
+        cb->changes->n = structured->n;
+        cb->changes->items = structured->n
+            ? snewn(structured->n, CnChange) : NULL;
+        for (size_t i = 0; i < structured->n; i++) {
+            const CnChange *s = &structured->items[i];
+            CnChange *d = &cb->changes->items[i];
+            d->name = dupstr(s->name);
+            d->oldval = dupstr(s->oldval ? s->oldval : "");
+            d->newval = dupstr(s->newval ? s->newval : "");
+            d->kind = s->kind;
+            d->icon_id = s->icon_id;
+        }
+    } else {
+        cb->changes = cn_parse_changes_text(listtxt);
+    }
+    if (getenv("CN_CONFIRM_SAVE_DEBUG"))
+        fprintf(stderr, "[cs] parsed %d change rows (structured=%d)\n",
+                cb->changes ? (int)cb->changes->n : -1,
+                structured ? (int)structured->n : -1);
+
     /*
      * cn: 清单区起始高度（首行之下）。
      *
@@ -3094,7 +3986,7 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
     if (hdc) {
         HFONT old = SelectObject(hdc, font);
         {
-            const char *head = "当前改动尚未保存，改动清单：";
+            const char *head = CN_HEAD_TEXT;
             wchar_t *wh = dup_mb_to_wc(DEFAULT_CODEPAGE, head);
             SIZE sh;
             GetTextExtentPoint32W(hdc, wh, (int)wcslen(wh), &sh);
@@ -3154,9 +4046,25 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
      * 算好，后面创建按钮时直接用，避免同一套测量写两遍算出两个答案。
      */
     {
-        int lx = m + qicon_size + cn_dpi(6);
+        /*
+         * cn: 清单改自绘后，每行左侧多了勾/叉图标，卡片左侧还多了一个
+         * 大问号，可用文字宽度相应变窄。需求宽度按新的行结构算：
+         *
+         *   卡片内 = 问号 + 间距 + 勾叉 + 间距 + 选项名+旧值 + 箭头 + 新值 + 边距
+         *
+         * 行尾折角已删除（主人 2026-11），所以不再预留 chev_sz + 12 ——
+         * 那部分宽度还给文字，同样窗口宽度下能多放两三个字。
+         *
+         * 勾叉由 icon_sz 决定，与绘制时同一份数值（存在 cb 里，
+         * 绘制函数直接取），不许两处各写一个常数。
+         *
+         * cn: 大问号已删除（主人 2026-11），不再为它预留 CN_QICON_MAX
+         * 的横向空间。原先要留 96 + 14 两段，现在全省下来给清单文字，
+         * 同样窗口宽度下每行能多放三四个字，折行也少一层。
+         */
+        int row_deco = icon_sz + cn_dpi(8);
         int need_head = 2 * m + needw_head;
-        int need_list = lx + listw_text + m;
+        int need_list = 2 * m + cn_dpi(14) + row_deco + listw_text;
         int gap = cn_dpi(8);
         int bw_need = 0;
 
@@ -3198,6 +4106,14 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
             w = cn_dpi(450);
     }
     cw = w;      /* 客户区宽定死，下面量折行高度要用 */
+    /*
+     * cn: 白卡片的左右边界。
+     * 之前漏了这两行，card_left / card_right 一直是 0，
+     * RoundRect 退化成零面积，白卡片根本没画出来（整窗只剩灰底）。
+     * 卡片左右各留 m 的外边距，与底部按钮带对齐。
+     */
+    cb->card_left = m;
+    cb->card_right = cw - m;
     if (getenv("CN_CONFIRM_SAVE_DEBUG"))
         fprintf(stderr, "[cs] head_w=%d listw_text=%d needw=%d w=%d\n",
                 needw_head, listw_text, needw, w);
@@ -3305,19 +4221,200 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
     }
 
     /*
-     * 高度：内容区（首行 + 图标/清单）+ 底部按钮带。
-     * 按钮带 = 上边距 + 按钮高 + 下边距；带高单独存进 cb->band_h 给
-     * WM_ERASEBKGND 填灰用，别在绘制时再算一遍 —— 两处算法一分叉
-     * 就会出现「灰带和按钮错开」的鬼画面。
+     * cn: 新视觉的垂直布局（照设计图，但外壳用原生）。
      *
-     * 内容区高度取 max(清单高, 图标高)：清单只有一两行时图标更高，
-     * 清单很长时清单更高。图标在内容区里垂直居中（见创建处），
-     * 所以上下留白随内容增高自动等量增大，不用分别写死。
+     *   [系统标题栏]                 由 Windows 画，不占客户区
+     *   [首行说明 lh + 间距]         「以下配置项已被修改，请核对后保存或撤销。」
+     *   [白色圆角卡片 card_h]        左侧大问号 + 清单富文本，每行 row_h
+     *   [底部按钮带 band_h]          蓝框确定 / 灰框取消
+     *
+     * 标题栏高度不再由我们预留（title_h 归零），客户区从首行说明直接开始。
+     * 卡片高度按行数算：row_h × 行数 + 上下内边距。
+     * 清单仍走 STATIC（不可见）承载文本，自检靠它读回内容。
      */
-    cb->band_h = cn_dpi(12) + cn_dpi(26) + m;
-    content_h = list_h > qicon_size ? list_h : qicon_size;
-    h = m + lh + cn_dpi(6) + content_h + cn_dpi(8) + cb->band_h;
+    cb->title_h = 0;
+    cb->icon_sz = icon_sz;
+    cb->chev_sz = chev_sz;
+    cb->row_h = lh + cn_dpi(14);
+    {
+        int nrows = 0;
+        /*
+         * cn: 显示行数 = 每项折行后占用的行数之和。
+         *
+         * ⚠️ 这里必须与绘制时的折行规则完全一致，否则卡片高度算少、
+         *    折到第二行的内容会被卡片下沿裁掉。所以共用
+         *    cn_change_row_lines() —— 不许在这里另写一套估算。
+         *
+         * 以前这里是「数 listtxt 里有几个 \n」，而绘制时超宽就画省略号
+         * 不折行，两边碰巧对得上；一旦绘制改成真折行，这里不改就是 bug。
+         */
+        if (cb->changes && cb->changes->n > 0) {
+            /*
+             * 文字起点必须与绘制端**完全同一个坐标系**。
+             *
+             * cn: 大问号删除后两边都简化为 m + 14：
+             *     绘制端 rowx = card_left + 14      = m + 14
+             *     这里同理。
+             * 早先这里漏过开头的 m（差 14px），也漏过大问号的实际占位
+             * （差 48px），两次都导致量出的行数比实际少，卡片高度不够。
+             *
+             * 注：这里不再需要推导「可用文字宽度 avail」—— 折叠改成按
+             * 项数算（与确认保存一致），不用逐项量折行了；真正折行时
+             * 每项占几行由下面算卡片高度的 nrows 循环按实际行数累加。
+             */
+            int rowx = m + cn_dpi(14);
+
+            /*
+             * cn: 结构化清单的折叠口径，与「确认保存」的字符串路径对齐。
+             *
+             * 确认保存那套规矩是：**最多显示 CN_CONFIRM_SAVE_MAX_ITEMS
+             * 项，若还有更多，额外补一行「.......」**。注意是「项数」，
+             * 不是「总行数」—— 折叠后清单可能占 4 行（3 项 + 省略行），
+             * 卡片高度本来就按实际行数自适应，撑得住。
+             *
+             * ⚠️ 这里曾经写成「总行数预算 3 行，其中扣一格给省略号」，
+             *    于是 5 个单行项只显示 2 项 —— 省略号白白吃掉一整项的位置，
+             *    主人直接问「为啥只有两项就触发了省略」。按项数算就没这问题。
+             *
+             * 折行的项照样按实际行数累加进卡片高度（见下面 nrows 那段），
+             * 所以长选项名不会被裁。
+             *
+             * 结果存进 cb->draw_n / cb->draw_dots，绘制端照单执行 ——
+             * 单一来源，避免两边判据打架。
+             */
+            {
+                int budget = CN_CONFIRM_SAVE_MAX_ITEMS;
+                size_t dn = 0;
+                bool trunc = false;
+
+                hdc = GetDC(NULL);
+
+                if (cb->changes->n <= (size_t)budget) {
+                    /* 装得下：全部显示，不出现省略行。 */
+                    dn = cb->changes->n;
+                } else {
+                    /* 超出：显示前 budget 项，另补一行省略号。 */
+                    dn = (size_t)budget;
+                    trunc = true;
+                }
+
+                if (dn == 0)
+                    dn = 1;
+                if (dn > cb->changes->n)
+                    dn = cb->changes->n;
+                cb->draw_n = dn;
+                cb->draw_dots = trunc;
+
+                /*
+                 * 卡片高度：按真正要画的那几项的行数累加。
+                 *
+                 * 折行与否只影响高度，不影响「画几项」—— 折叠已经按
+                 * 项数定死在 draw_n，所以这里必须给足可用宽度，让长
+                 * 选项名能折出正确的行数，卡片才撑得下。
+                 */
+                {
+                    int right_limit = cw - cn_dpi(14);
+                    int text_x = rowx + icon_sz + cn_dpi(8);
+                    int avail = right_limit - text_x;
+                    HFONT mf = NULL;
+                    LOGFONTW lf;
+                    if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,
+                                              sizeof(ncm), &ncm, 0)) {
+                        lf = ncm.lfMessageFont;
+                        lf.lfWeight = FW_BOLD;
+                        cn_scale_logfont(&lf);
+                        mf = CreateFontIndirectW(&lf);
+                    }
+                    hdc = GetDC(NULL);
+                    for (size_t k = 0; k < cb->draw_n; k++) {
+                        int l = hdc ? cn_change_row_lines(
+                            hdc, &cb->changes->items[k], avail, font, mf) : 1;
+                        nrows += (l < 1) ? 1 : l;
+                    }
+                    if (hdc)
+                        ReleaseDC(NULL, hdc);
+                    if (mf)
+                        DeleteObject(mf);
+                }
+                if (cb->draw_dots)
+                    nrows++;
+                /*
+                 * cn: 结构化路径的折叠状态由行数预算决定，字符串路径
+                 * 由上面的文本截断决定。浮层（悬停看全部）与「.......」
+                 * 都只看 truncated 一个标志，所以这里把预算结果合并
+                 * 进去 —— 否则覆盖弹窗清单被折叠了却没有浮层可看，
+                 * 用户永远看不到后面的文件。
+                 */
+                if (cb->draw_dots)
+                    truncated = true;
+            }
+        } else {
+            for (const char *p = listtxt; p && *p; ) {
+                const char *nl = strchr(p, '\n');
+                int bl = nl ? (int)(nl - p) : (int)strlen(p);
+                while (bl > 0 && (p[bl-1] == '\r' || p[bl-1] == '\n'))
+                    bl--;
+                if (bl > 0)
+                    nrows++;
+                p = nl ? nl + 1 : NULL;
+            }
+        }
+        if (nrows < 1)
+            nrows = 1;
+        /*
+         * cn: 折叠时给「.......」预留一行。
+         *
+         * 省略号是绘制阶段补画的（不是 changes 里的一项），所以算卡片
+         * 高度时必须单独 +1，否则卡片刚好被清单项填满，绘制时
+         * 「y + row_h > card_bottom」条件不成立，省略号直接被跳过 ——
+         * 表现就是「改了四项只显示三行，末尾该有的 ....... 不见了」。
+         *
+         * ⚠️ 结构化路径（有 cb->changes）在上面按行数预算排版时已经把
+         *    省略号那行算进 nrows 了，这里不能再加一次 —— 多加一行会
+         *    让卡片底下空出一条，看起来像内容没画全。
+         *    只有「纯字符串、退化成按行显示」的那条路才需要在这里补。
+         */
+        if (truncated && cb->changes && cb->changes->n == 0)
+            nrows++;
+        cb->card_top = cb->title_h + m + lh + cn_dpi(10);
+        cb->card_bottom = cb->card_top + nrows * cb->row_h + cn_dpi(16);
+        /*
+         * cn: 大问号已删除（主人 2026-11），卡片高度不再需要为它留
+         * 下限。原先「至少容下问号 + 上下各 12px」是为了让大图标不贴
+         * 满上下，图标没了这条下限就只剩副作用：单行改动也被撑到
+         * 64px 高、下面空一片。现在高度完全由行数决定。
+         */
+    }
+    /*
+     * cn: 底部按钮带高度（主人 2026-11 要求）。
+     *
+     * 要求：「按钮位置改为改动内容区和窗口底部之间垂直居中，以现在
+     * 按钮与窗口底部的距离为基准（大概 17px）」。
+     *
+     * 也就是按钮上下的留白相等，都等于原来的底部留白 m（14px，随 DPI
+     * 缩放，100% 缩放下实测约 14px，用户视觉上估 17px）。
+     *
+     * 所以 band_h = 上留白 m + 按钮高 bh + 下留白 m。
+     * ⚠️ 这里必须用按钮真实高度 CN_BTN_H，不能再用过去那个
+     *    「16 + 32 + m」的估算 —— 那个 32 是按钮槽位，按钮实际只有 26，
+     *    多出来的 6px 全堆在按钮下方，看起来就是「贴着底边、上边空太多」。
+     *
+     * ⚠️ 客户区总高直接是 card_bottom + band_h，**不要再加一个 m** ——
+     *    band_h 自己已经含了卡片与按钮之间那 m 的留白。多加一次会让
+     *    按钮上方的空白比下方多出整整一个 m，居中就废了。
+     */
+    cb->band_h = m + cn_dpi(CN_BTN_H) + m;
+    h = cb->card_bottom + cb->band_h;
     ch = h;
+
+    /*
+     * cn: 原生外壳 —— 标题栏、关闭按钮、边框全交回系统绘制。
+     * 自绘标题栏那套（WS_POPUP 裸窗 + 自绘 X + 圆角裁剪）主人已否掉，
+     * 理由是跟系统原生边框风格不统一。
+     *
+     * 用 WS_CAPTION | WS_SYSMENU 后，CreateWindowExW 的 w/h 是**窗口**尺寸，
+     * 客户区要按目标尺寸反推，所以必须过一遍 AdjustWindowRectEx。
+     */
     {
         RECT fr;
         fr.left = 0;
@@ -3348,7 +4445,33 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
     cb->font = font;
     cb->font_owned = font_owned;
 
-    /* 首行：顶格说明。句柄要留着设字体，见下方统一 WM_SETFONT。 */
+    /*
+     * cn: 「新值」用的字体 —— 正文同尺寸加粗（设计图里新值加粗显示）。
+     *
+     * 标题字体（font_title）已随自绘标题栏一起撤掉：标题现在由系统
+     * 标题栏绘制，字体不由我们决定。
+     *
+     * 从系统消息字体派生，只改字重，不换字族 —— 换字族会在不同系统上
+     * 出现「中文回退到别的字体」的跳变。
+     */
+    cb->font_value = NULL;
+    {
+        LOGFONTW lf;
+        if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm),
+                                  &ncm, 0)) {
+            lf = ncm.lfMessageFont;
+            lf.lfWeight = FW_BOLD;
+            cn_scale_logfont(&lf);       /* 与正文同比例放大 */
+            cb->font_value = CreateFontIndirectW(&lf);
+        }
+    }
+
+    /*
+     * cn: 不做窗口区域裁剪 —— 圆角是自绘外壳的一部分，已随标题栏一起撤。
+     * 原生边框由系统画，强行 SetWindowRgn 反而会把边框裁出锯齿。
+     */
+
+    /* 首行说明：客户区顶部、卡片之上，顶格。 */
     {
         const char *head = txt_head;
         wchar_t *whead = dup_mb_to_wc(DEFAULT_CODEPAGE, head);
@@ -3357,75 +4480,86 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
                                   m, m, cw - 2 * m, lh,
                                   cb->dlg, NULL, inst, NULL);
         sfree(whead);
+        if (cb->head)
+            SendMessageW(cb->head, WM_SETFONT, (WPARAM)font, TRUE);
     }
 
     /*
-     * 第二行：48px 问号图标 + 无边框清单 STATIC（与确认覆盖一致）。
-     *
-     * 清单贴内容区顶边起排，图标在内容区里垂直居中 —— 清单只有一两行
-     * 时图标比清单高，居中后上下留白各约 (icon - list)/2；清单长起来
-     * 以后图标跟着往下走，上下留白同步变大，不会出现「图标顶着灰带」
-     * 或「图标浮在半空」两种极端。主人要求的就是这个随内容同步的居中。
+     * 清单：STATIC 仍创建但**不可见** —— 文本由自绘按段上色画到白卡片
+     * 上，STATIC 只作为文本载体（自检要 GetWindowTextW 读回来核对，
+     * 也方便将来做无障碍）。给它 SS_LEFT 保证折行测量口径一致。
      */
     {
-        int lx = m + qicon_size + cn_dpi(6);
-        int icon_y = ytop + (content_h - qicon_size) / 2;
-
         wlist = dup_mb_to_wc(DEFAULT_CODEPAGE, listtxt);
-        /*
-         * SS_LEFT（不是 SS_LEFTNOWORDWRAP）：窗口宽封顶 450px，超长条目
-         * 必须靠 STATIC 自己按词折行，否则右半截会被直接裁掉。
-         */
         cb->list = CreateWindowExW(0, L"STATIC", wlist,
-                                  WS_CHILD | WS_VISIBLE | SS_LEFT,
-                                  lx, ytop, cw - lx - m, list_h,
+                                  WS_CHILD | SS_LEFT,
+                                  m, cb->card_top, cw - 2 * m, list_h,
                                   cb->dlg, NULL, inst, NULL);
         sfree(wlist);
+        if (cb->list)
+            SendMessageW(cb->list, WM_SETFONT, (WPARAM)font, TRUE);
+    }
 
-        cb->qicon = CreateWindowExW(0, L"STATIC", NULL,
-                                   WS_CHILD | WS_VISIBLE | SS_ICON,
-                                   m, icon_y, qicon_size, qicon_size,
-                                   cb->dlg, NULL, inst, NULL);
-        SendMessageW(cb->qicon, STM_SETICON,
-                     (WPARAM)cn_question_icon(qicon_size), 0);
-
-        /*
-         * 被折叠过（出现「.......」行）才挂浮层：清单本身就是全的时候
-         * 再弹一个一模一样的浮窗纯属碍事。触发区取清单的文本矩形，
-         * 与「确认覆盖」同一口径 —— 横向只到实际文本右缘，不罩右侧空白。
-         *
-         * 摆位按主人指定：浮层在右侧，上框线与内容区上框线齐平。
-         * 内容区顶边是首行 STATIC 的 y（= m），不是清单区的 ytop ——
-         * 清单在问号图标下方起算，用 ytop 会低一截。
-         */
-        if (truncated) {
-            cb->tip.text = dup_mb_to_wc(DEFAULT_CODEPAGE, changes);
-            cb->tip.parent = cb->dlg;
-            cb->tip.font = font;
-            cb->tip.hot.left = lx;
-            cb->tip.hot.top = ytop;
-            cb->tip.hot.right = lx + listw_text;
-            cb->tip.hot.bottom = ytop + list_h;
-            cb->tip.mode = CN_TIP_RIGHT;
-            cb->tip.trigger_top = m;
-            cb->tip.tip = cn_tip_create(&cb->tip);
+    /*
+     * 折叠时才挂悬停浮层：清单本身完整时再弹一个一样的浮窗纯属碍事。
+     * 命中区取白色卡片内的清单区域。
+     *
+     * cn: 浮层文本不能直接取 changes —— 结构化路径（「确认覆盖」）传进来
+     * 的 changes 是 NULL，只给了 CnChangeList。这里按数据来源分开取：
+     * 有结构化清单就逐项拼全文，否则退回原字符串。
+     *
+     * ⚠️ 早先这里无条件 dup_mb_to_wc(changes)，覆盖弹窗一折叠就空指针
+     *    崩溃（自检跑到「冲突汇总弹窗」段直接把进程带走）。这是引入
+     *    结构化入参后必须同步、也最隐蔽的一处。
+     */
+    if (truncated) {
+        if (structured && structured->n > 0) {
+            strbuf *sb = strbuf_new();
+            for (size_t i = 0; i < structured->n; i++) {
+                if (i)
+                    put_fmt(sb, "\r\n");
+                put_fmt(sb, "%s", structured->items[i].name);
+            }
+            cb->tip.text = dup_mb_to_wc(DEFAULT_CODEPAGE, sb->s);
+            strbuf_free(sb);
+        } else {
+            cb->tip.text = dup_mb_to_wc(DEFAULT_CODEPAGE,
+                                       changes ? changes : "");
         }
+        cb->tip.parent = cb->dlg;
+        cb->tip.font = font;
+        /* 命中区从自绘清单的左上角起，与绘制位置一致（问号已删）。 */
+        cb->tip.hot.left = cb->card_left + cn_dpi(14);
+        cb->tip.hot.top = cb->card_top;
+        cb->tip.hot.right = cb->tip.hot.left + listw_text;
+        cb->tip.hot.bottom = cb->card_bottom;
+        cb->tip.mode = CN_TIP_RIGHT;
+        cb->tip.trigger_top = cb->card_top;
+        cb->tip.tip = cn_tip_create(&cb->tip);
     }
 
     /*
      * 按钮行：高 cn_dpi(26)，宽在定窗口宽时已实测（bw[]），这里直接摆。
      *
-     * 位置是「整组居中、相邻排开」—— 原来是确定贴左缘、取消贴右缘，
-     * 窗口一宽就各奔东西，中间空出一大片（主人截图指出的）。
-     * 现在整组按总宽居中，中间只留 cn_dpi(8) 的标准按钮间距。
+     * cn: 布局规则 —— 三个间距等分（主人 2026-11 要求）。
      *
+     * 要求原文：「按键之间的距离和按键与窗口左右边界的距离相等」。
+     * 也就是左留白 = 按钮间距 = 右留白，三处同一个值：
+     *
+     *     gap = (客户区宽 - 各按钮宽之和) / (按钮数 + 1)
+     *
+     * 早先是「整组按总宽居中、间距固定 8px」，左右留白会随窗口变宽
+     * 而远大于 8px，三处距离不等。现在反过来由窗口宽反解间距。
+     *
+     * 间距设下限 cn_dpi(6) 防按钮贴在一起（窗口极窄时算出 0 或负数）。
      * 三按钮模式（退出键 / 标题栏 X）从左到右是
      * 「直接退出（红框）/ 取消 / 保存并退出（蓝框默认）」，
      * 与原来那个 IDD_SAVECHANGES 模板的排列和语义一致。
      */
     {
-        int bh = cn_dpi(26);
-        int by, gap = cn_dpi(8), total, bx;
+        int bh = cn_dpi(CN_BTN_H);
+        int by, gap, total;
+        int seg_w[4] = { 0, 0, 0, 0 };   /* 各段空白宽（含余数分配） */
         const char *caps[3];
         wchar_t *capw[3] = { NULL, NULL, NULL };
 
@@ -3435,13 +4569,59 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
         for (int i = 0; i < bw_n; i++)
             capw[i] = dup_mb_to_wc(DEFAULT_CODEPAGE, caps[i]);
 
+        /* 各按钮宽之和（不含间距）。 */
         total = bw[0];
         for (int i = 1; i < bw_n; i++)
-            total += gap + bw[i];
-        bx = (cw - total) / 2;
-        if (bx < m)
-            bx = m;
-        by = ch - m - bh;
+            total += bw[i];
+
+        /*
+         * 等分间距：n 个按钮把客户区分成 n+1 段空白。
+         * bw_n 恒为 2 或 3，除数是 3 或 4。
+         *
+         * cn: 余数要摊掉，不能全丢给右留白。
+         *
+         * 整数除法会剩下 0~(n) px 的零头。早先直接截断，余数全落在
+         * 右边 —— 三按钮实测 cw=415、按钮总宽 288、空白 127，127/4=31
+         * 余 3，于是左留白与间距都是 31、右留白 34，肉眼能看出偏。
+         * 这里把余数按「从左往右逐段 +1」摊到各段空白上，最大偏差
+         * 只剩 1px，三处距离视觉上完全相等。
+         */
+        {
+            int slots = bw_n + 1;
+            int blanks = cw - total;
+            int base = blanks / slots;
+            int rem = blanks - base * slots;   /* 0 ~ slots-1 */
+
+            if (base < cn_dpi(6)) {
+                base = cn_dpi(6);
+                rem = 0;
+            }
+            /*
+             * 逐段间距：第 i 段（0..slots-1）宽 = base + (i < rem)。
+             * 按钮之间的段是 1..bw_n-1，首尾段是留白。
+             */
+            gap = base;                 /* 基准值，供日志用 */
+            /*
+             * 各段实际宽度存起来，创建按钮时按段推进，保证左右留白
+             * 与中间间距都吃到余数分配，不会被右留白独吞。
+             */
+            for (int i = 0; i < slots; i++)
+                seg_w[i] = base + (i < rem ? 1 : 0);
+        }
+        /*
+         * cn: 按钮在底部带内垂直居中（主人 2026-11 要求）。
+         *
+         * 带顶 = 卡片底边 cb->card_bottom，带高 = m + bh + m，
+         * 所以按钮 y = card_bottom + m 时上下留白相等。
+         * 旧写法 by = ch - m - bh 在 band_h 已含上留白之后会让按钮整体
+         * 下偏，卡片与按钮之间多空出一整个 m，看起来就是「贴底、上面空太多」。
+         */
+        by = cb->card_bottom + m;
+        if (getenv("CN_CONFIRM_SAVE_DEBUG"))
+            fprintf(stderr, "[cs] btn: cw=%d ch=%d bw0=%d bh=%d by=%d "
+                    "gap=%d total=%d segs=%d/%d/%d/%d\n",
+                    cw, ch, bw[0], bh, by, gap, total,
+                    seg_w[0], seg_w[1], seg_w[2], seg_w[3]);
         /*
          * cn: 默认按钮（带蓝框、回车触发）放哪边由 default_on_right
          * 决定。「连接/文件传输」那个弹窗要求「长期生效」是默认，
@@ -3462,12 +4642,18 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
 
             if (three) {
                 /*
-                 * 左按钮「直接退出」走自绘（红框红字），与旧模板一致，
-                 * 一眼看出这是会丢改动的那一项。中按钮普通、右按钮默认。
+                 * cn: 三按钮模式下红框（危险动作）挂哪个，由 third_danger
+                 * 决定：
+                 *   false —— 挂最左（退出确认的「直接退出」，会丢改动）；
+                 *   true  —— 挂最右（确认覆盖的「全部覆盖」，会覆盖对方
+                 *            已有文件；主人拍板它放在最右且是默认）。
+                 * 中按钮（取消 / 跳过已存在）永远是普通按钮。
+                 * 最右按钮同时是 DEFPUSHBUTTON，蓝框与红框不能并存 ——
+                 * 危险时由 WM_DRAWITEM 画红框，蓝框自然让位。
                  */
-                st_first |= BS_OWNERDRAW;
+                st_first |= third_danger ? BS_PUSHBUTTON : BS_OWNERDRAW;
                 st_second |= BS_PUSHBUTTON;
-                st_third |= BS_DEFPUSHBUTTON;
+                st_third |= third_danger ? BS_OWNERDRAW : BS_DEFPUSHBUTTON;
             } else if (default_on_right) {
                 st_first |= BS_PUSHBUTTON;
                 st_second |= BS_DEFPUSHBUTTON;
@@ -3477,27 +4663,42 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
             }
 
             {
-                int cx = bx;
+                /*
+                 * 按「段」推进：每段空白用 seg_w[i]，按钮本身用 bw[i]。
+                 * 这样左留白、按钮间距、右留白都吃到余数分配，不会被
+                 * 右留白独吞（见上面 seg_w 的说明）。
+                 */
+                int cx = seg_w[0];
                 cb->b_ok = CreateWindowW(
                     L"BUTTON", capw[0], st_first,
                     cx, by, bw[0], bh, cb->dlg,
                     (HMENU)IDC_CNC_OVERWRITE, inst, NULL);
-                cx += bw[0] + gap;
+                cx += bw[0] + seg_w[1];
                 cb->b_cancel = CreateWindowW(
                     L"BUTTON", capw[1], st_second,
                     cx, by, bw[1], bh, cb->dlg,
                     (HMENU)IDC_CNC_CANCEL, inst, NULL);
                 if (three) {
-                    cx += bw[1] + gap;
+                    cx += bw[1] + seg_w[2];
                     cb->b_third = CreateWindowW(
                         L"BUTTON", capw[2], st_third,
                         cx, by, bw[2], bh, cb->dlg,
                         (HMENU)IDC_CNC_THIRD, inst, NULL);
                 }
+                /*
+                 * cn: 记下要画红框的那个按钮。
+                 * third_danger 时危险动作在最右，否则是最左。
+                 */
+                cb->b_danger = third_danger ? cb->b_third : cb->b_ok;
             }
         }
         for (int i = 0; i < bw_n; i++)
             sfree(capw[i]);
+        if (getenv("CN_CONFIRM_SAVE_DEBUG"))
+            fprintf(stderr, "[cs] handles: ok=%p cancel=%p third=%p "
+                    "bw_n=%d three=%d\n",
+                    (void *)cb->b_ok, (void *)cb->b_cancel,
+                    (void *)cb->b_third, bw_n, (int)three);
     }
 
     /*
@@ -3514,10 +4715,17 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
     }
 
     {
-        HICON ico = cn_question_icon(cn_dpi(16));
+        /*
+         * cn: 标题栏图标 —— 默认红色问号，调用方可用 icon_id 换成别的
+         * （「确认覆盖」用警告图标）。大图标尺寸也要给，任务栏与 Alt+Tab
+         * 用的是 ICON_BIG。
+         */
+        HICON ico = cn_title_icon(title_icon, cn_dpi(16));
+        HICON icobig = cn_title_icon(title_icon, cn_dpi(32));
         if (ico) {
             SendMessageW(cb->dlg, WM_SETICON, ICON_SMALL, (LPARAM)ico);
-            SendMessageW(cb->dlg, WM_SETICON, ICON_BIG, (LPARAM)ico);
+            SendMessageW(cb->dlg, WM_SETICON, ICON_BIG,
+                         (LPARAM)(icobig ? icobig : ico));
         }
     }
 
@@ -3539,11 +4747,18 @@ static void cn_confirm_save_release(ConfirmSaveBox *cb)
     if (cb->font_owned && cb->font)
         DeleteObject(cb->font);
     cb->font = NULL;
+    /* 「新值」的派生字体同样是自建的。 */
+    if (cb->font_value)
+        DeleteObject(cb->font_value);
+    cb->font_value = NULL;
+    /* 结构化清单：构建时接管所有权，这里统一释放。 */
+    cn_change_list_free(cb->changes);
+    cb->changes = NULL;
 }
 
 int cn_confirm_save_dialog(HWND parent, const char *changes)
 {
-    return cn_confirm_dialog_texts(parent, changes, NULL, NULL);
+    return cn_confirm_dialog_texts(parent, changes, NULL, NULL, NULL);
 }
 
 /*
@@ -3555,6 +4770,7 @@ int cn_confirm_save_dialog(HWND parent, const char *changes)
  * 因为 ❌ 与右按钮都返回 IDCANCEL，只有它能区分这两种意图。
  */
 int cn_confirm_dialog_texts(HWND parent, const char *changes,
+                            const CnChangeList *structured,
                             const CnConfirmTexts *texts,
                             bool *closed_by_x)
 {
@@ -3565,7 +4781,7 @@ int cn_confirm_dialog_texts(HWND parent, const char *changes,
     if (closed_by_x)
         *closed_by_x = false;
 
-    if (!cn_confirm_save_build(parent, changes, texts, &cb))
+    if (!cn_confirm_save_build(parent, changes, structured, texts, &cb))
         return IDCANCEL;
 
     if (parent)
@@ -3632,7 +4848,7 @@ int cn_confirm_dialog_texts(HWND parent, const char *changes,
  */
 const CnConfirmTexts cn_launch_texts = {
     "确保保存方式后继续执行",
-    "当前改动尚未保存，改动清单：",
+    CN_HEAD_TEXT,
     "仅本次生效",
     "长期生效",
     true,                      /* cn: 默认按钮（蓝框）在右，即「长期生效」 */
@@ -3648,7 +4864,7 @@ const CnConfirmTexts cn_launch_texts = {
  */
 const CnConfirmTexts cn_quit_texts = {
     "确认保存",
-    "当前改动尚未保存，改动清单：",
+    CN_HEAD_TEXT,
     "直接退出",
     "取消",
     false,                     /* 三按钮模式下此项不生效，最右恒为默认 */
@@ -3683,9 +4899,33 @@ void sftp_show_confirm_save(void)
         "【主机名】 a → b\n"
         "【端口】 22 → 2222\n"
         "【用户名】 root → admin";
+    /*
+     * 与主人截图同款：长选项名 + 四项改动，前两项各折成两行。
+     * 用来验证两件事：
+     *   1. 「关」与「→ 开」必须连成整体换行，不许把「关」吊在行末；
+     *   2. 折行把预算吃满后，第四项折叠，末尾必须出现「.......」。
+     */
+    static const char *demo_owner =
+        "【禁用远程控制清除回滚】 关 → 开\n"
+        "【禁用服务器发送 ^? 时破坏性回退删除】 关 → 开\n"
+        "【禁用远程控制字符集设置】 关 → 开\n"
+        "【禁用远程控制窗口缩放】 关 → 开";
+    /*
+     * 主人截图的原样：正好三项，第二项折行。用来验证「三项必须完整
+     * 显示」—— 折行把预算吃掉后，不许把第三项挤成省略号。
+     */
+    static const char *demo_owner3 =
+        "【禁用远程控制清除回滚】 关 → 开\n"
+        "【禁用服务器发送 ^? 时破坏性回退删除】 关 → 开\n"
+        "【禁用远程控制字符集设置】 关 → 开";
 
-    cn_confirm_save_dialog(NULL, getenv("CN_CONFIRM_SAVE_LONG") ?
-                          demo_long : demo);
+    if (getenv("CN_CONFIRM_SAVE_OWNER3"))
+        cn_confirm_save_dialog(NULL, demo_owner3);
+    else if (getenv("CN_CONFIRM_SAVE_OWNER"))
+        cn_confirm_save_dialog(NULL, demo_owner);
+    else
+        cn_confirm_save_dialog(NULL, getenv("CN_CONFIRM_SAVE_LONG") ?
+                              demo_long : demo);
 }
 
 /*
@@ -3699,7 +4939,7 @@ void sftp_show_confirm_launch(void)
         "【启用终端指定 ANSI 颜色】 开 → 关\n"
         "【窗口标题】 t9 → 1";
     /* cn: 文案取自 cn_launch_texts（唯一定义处），与真实流程同源。 */
-    cn_confirm_dialog_texts(NULL, demo, &cn_launch_texts, NULL);
+    cn_confirm_dialog_texts(NULL, demo, NULL, &cn_launch_texts, NULL);
 }
 
 /*
@@ -3711,7 +4951,55 @@ void sftp_show_confirm_quit(void)
 {
     static const char *demo =
         "【初始启用自动换行】 开 → 关";
-    cn_confirm_dialog_texts(NULL, demo, &cn_quit_texts, NULL);
+    cn_confirm_dialog_texts(NULL, demo, NULL, &cn_quit_texts, NULL);
+}
+
+/*
+ * cn: 把「确认覆盖」弹窗真显示出来，供人工看图（-confirm-overwrite-show）。
+ *
+ * 走的是 cn_overwrite_ask —— 与真实文件传输流程同一个函数、同一份
+ * 数据映射和文案，所以截图看到的就是线上效果。给到 5 项：超过
+ * CN_CONFIRM_SAVE_MAX_ITEMS（3）项，能顺带看到「显示前 3 项 + 一行
+ * .......省略」以及悬停浮层的效果。
+ *
+ * 环境变量 CN_OVERWRITE_LONG=1 换成超长名字：用来验折行 —— 长项必须
+ * 折成多行、卡片高度跟着长，不能被裁。短名字看不出这个。
+ */
+void sftp_show_confirm_overwrite(void)
+{
+    ConflictItem demo[5];
+    static const wchar_t *names[5] = {
+        L"build",
+        L"config.h",
+        L"docs",
+        L"README.md",
+        L"src",
+    };
+    /*
+     * 超长名字组：长度都逼近或超过卡片文字区宽度，逼排版器折行。
+     * 混了一个含中文的，验证中英混排的断行位置。
+     */
+    static const wchar_t *longnames[5] = {
+        L"a-very-long-directory-name-that-will-not-fit-in-one-row-at-all",
+        L"configuration-file-with-an-extremely-long-basename-2026.conf",
+        L"另一个特别长的中文目录名用来验证中英文混排时的折行位置是否正确",
+        L"README.md",
+        L"src",
+    };
+    static const bool dirs[5] = { true, false, true, false, true };
+    bool longmode = false;
+    {
+        const char *e = getenv("CN_OVERWRITE_LONG");
+        if (e && *e && strcmp(e, "0"))
+            longmode = true;
+    }
+
+    for (int i = 0; i < 5; i++) {
+        demo[i].name = (wchar_t *)(longmode ? longnames[i] : names[i]);
+        demo[i].is_dir = dirs[i];
+    }
+
+    cn_overwrite_ask(NULL, demo, 5);
 }
 
 /* 释放一批待传名单（names 逐项 + 三个数组）。空指针一律按空数组算。 */
@@ -8945,9 +10233,9 @@ void sftp_selftest_window(Conf *conf)
     /*
      * 弹窗摆位：验证 cn_place_near 把弹窗中心对到光标，并贴边收拢。
      *
-     * 冲突汇总弹窗就是拿它算坐标的（见 cn_conflict_dialog_create），
-     * 所以验这个函数等于验真实路径。凡是「弹窗跟着鼠标走」的行为都
-     * 汇总到这一个函数，两点行为一并测：居中对准、出屏收进工作区。
+     * 输入框与提示框都拿它算坐标，所以验这个函数等于验真实路径。
+     * 凡是「弹窗跟着鼠标走」的行为都汇总到这一个函数，两点行为一并
+     * 测：居中对准、出屏收进工作区。
      */
     sw_report(fp, "\n弹窗摆位：\n");
     {
@@ -9238,211 +10526,218 @@ void sftp_selftest_window(Conf *conf)
                  r.bottom == 50, "零尺寸矩形退化为一点");
     }
 
-    sw_report(fp, "\n冲突汇总弹窗：\n");
+    sw_report(fp, "\n冲突汇总弹窗（原始自绘模板）：\n");
     {
+        /*
+         * cn: 「确认覆盖」复用确认保存那套自绘模板后，这里验的是模板层
+         * 的行为：数据怎么进去（ConflictItem → CnChange 纯名字行）、
+         * 三个按钮怎么排（跳出 / 取消 / 全部覆盖，最右是默认且红框）、
+         * 标题栏图标是否换成警告、清单折行折叠与浮层。
+         *
+         * 走 cn_confirm_batch 的真实映射路径不现实（它会跑模态循环、
+         * 阻塞等用户点）。所以这里照 cn_confirm_batch 内部的做法构造
+         * 同一份 CnChangeList 与 CnConfirmTexts，再直接调
+         * cn_confirm_save_build —— 与生产代码同一套模板、同一组参数，
+         * 差别只在没跑消息循环。
+         */
         SftpWin *sw = the_sftpwin;
         static const wchar_t *five[] = {
             L"a.txt", L"b.txt", L"c.txt", L"d.txt", L"e.txt"
         };
         static const wchar_t *two[] = { L"one.txt", L"two.txt" };
-        ConflictItem items[5];
-        ConflictBox cb;
-        HWND dlg;
+        CnChange cl_items[5];
+        CnChangeList cl;
+        CnConfirmTexts texts;
+        ConfirmSaveBox cb;
+        bool built;
 
+        memset(&cb, 0, sizeof(cb));
+        memset(&texts, 0, sizeof(texts));
+
+        /* 与 cn_confirm_batch 完全一致的一组参数：五项冲突。 */
         for (size_t i = 0; i < 5; i++) {
-            items[i].name = cn_wcsdup(five[i]);
-            items[i].is_dir = false;
+            cl_items[i].name = dup_wc_to_mb(DEFAULT_CODEPAGE, five[i], "?");
+            cl_items[i].oldval = dupstr("");
+            cl_items[i].newval = dupstr("");
+            cl_items[i].kind = CN_CHG_OTHER;
+            /*
+             * 与 cn_overwrite_ask 一致：行首一律中性圆点，不按目录 /
+             * 文件区分（主人 2026-11 决定，危险度只由标题栏图标表达）。
+             */
+            cl_items[i].icon_id = IDI_CN_DOT;
         }
+        cl.items = cl_items;
+        cl.n = 5;
 
-        dlg = cn_conflict_dialog_create(sw->hwnd, sw->font, items, 5, &cb);
-        SW_CHECK(dlg != NULL, "五项冲突时弹窗创建成功");
-        if (dlg) {
+        texts.title = "确认覆盖";
+        texts.head = "5 个同名项目已存在于目标位置：";
+        texts.ok = "跳过已存在";
+        texts.cancel = "取消";
+        texts.default_on_right = true;
+        texts.third = "全部覆盖";
+        texts.icon_id = IDI_CN_WARN;
+        texts.third_is_danger = true;
+
+        built = cn_confirm_save_build(sw->hwnd, NULL, &cl, &texts, &cb);
+        SW_CHECK(built, "确认覆盖弹窗（新模板）创建成功");
+        if (built) {
             wchar_t t[512];
 
             GetWindowTextW(cb.list, t, lenof(t));
 
             /*
-             * 只许出现前三项。逐项判而不是数行数 —— 行数对不上时还能
-             * 从失败项里直接看出是多了还是少了。
+             * 纯名字行：清单里是名字本身，不带「：」，也不带箭头。
+             * 这两条正是 ConflictItem 适配成 CnChange 时最容易翻车的
+             * 地方（有值才加冒号、有值才画箭头）。
              */
-            SW_CHECK(wcsstr(t, L"a.txt") && wcsstr(t, L"b.txt") &&
-                     wcsstr(t, L"c.txt"), "截断后仍显示前三项");
-            SW_CHECK(!wcsstr(t, L"d.txt") && !wcsstr(t, L"e.txt"),
-                     "第四项与第五项被截掉");
-            SW_CHECK(wcsstr(t, L"......."), "超出部分用 ....... 表示");
+            SW_CHECK(wcsstr(t, L"a.txt") && wcsstr(t, L"b.txt"),
+                     "清单里是冲突项名字");
+            SW_CHECK(!wcsstr(t, L"a.txt："), "纯名字行不带冒号");
 
-            SW_CHECK(cb.tip.tip != NULL, "截断时挂上了 tooltip");
+            /* 列表文本不该出现箭头符号（U+2192）。 */
+            SW_CHECK(!wcsstr(t, L"\u2192"), "纯名字行不画箭头");
+
+            /*
+             * 折叠：最多显示 CN_CONFIRM_SAVE_MAX_ITEMS 项，超出另补
+             * 一行「.......」。这与「确认保存」字符串路径的口径一致
+             * （那边也是取前 3 项 + 一行省略）。
+             *
+             * ⚠️ 判据不能用 listtxt（cb.list 里的文本）：结构化路径下
+             *    listtxt 是**有意保留全量**的 —— 它是浮层全文的来源，
+             *    也是自检读回内容的载体。真正决定「画几项、画不画
+             *    省略号」的是 cb.draw_n 与 cb.draw_dots（绘制端照单执行）。
+             */
+            SW_CHECK(wcsstr(t, L"a.txt") && wcsstr(t, L"e.txt"),
+                     "清单文本保留全量（浮层数据源）");
+            /*
+             * 五项、每项占 1 行：显示前 3 项 + 一行省略号（共占 4 行，
+             * 卡片高度自适应撑得住）。早先按「总行数预算 3 行、其中扣
+             * 一格给省略号」算，结果只显示 2 项 —— 主人当场问「为啥只有
+             * 两项就触发了省略」。口径已改为按项数，与确认保存对齐。
+             */
+            sw_report(fp, "  draw_n=%d draw_dots=%d（每项数上限 %d 项）\n",
+                      (int)cb.draw_n, (int)cb.draw_dots,
+                      CN_CONFIRM_SAVE_MAX_ITEMS);
+            SW_CHECK(cb.draw_n == CN_CONFIRM_SAVE_MAX_ITEMS,
+                     "按项数上限显示前三项");
+            SW_CHECK(cb.draw_dots, "超出部分补「.......」行");
+
+            /* 折叠时必须挂浮层，且浮层里是全部五项。 */
+            SW_CHECK(cb.tip.tip != NULL, "折叠时挂上了浮层");
             SW_CHECK(cb.tip.text != NULL &&
                      wcsstr(cb.tip.text, L"a.txt") &&
                      wcsstr(cb.tip.text, L"d.txt") &&
                      wcsstr(cb.tip.text, L"e.txt"),
-                     "tooltip 里是全部五项");
+                     "浮层里是全部五项");
 
             /*
-             * 浮层窗口的尺寸得真能装下文字。上面两条只查了文本内容，
-             * 浮层就算被算成 1x1 也照样通过 —— 早先就因为测量口径与
-             * 绘制口径不一致，文字贴着边框画，看着像被切掉。这里按
-             * 同一套 DT_CALCRECT 重量一遍，再要求窗口不比它小。
+             * 三个按钮的文字与位置。
+             *
+             * 主人 2026-11 拍板：全部覆盖在最右并且是默认按钮。
+             * 槽位对应：b_ok = 跳过已存在（左）、b_cancel = 取消（中）、
+             * b_third = 全部覆盖（右）。
              */
-            if (cb.tip.tip != NULL && cb.tip.text != NULL) {
-                RECT tr, want = { 0, 0, 0, 0 };
-                int tw, th, needw, needh;
-
-                GetWindowRect(cb.tip.tip, &tr);
-                tw = tr.right - tr.left;
-                th = tr.bottom - tr.top;
-
-                want.right = cn_dpi(2000);
-                {
-                    HDC hdc = GetDC(cb.tip.tip);
-                    if (hdc) {
-                        HFONT old = SelectObject(hdc, cb.font);
-                        DrawTextW(hdc, cb.tip.text, -1, &want,
-                                  DT_CALCRECT | DT_LEFT | DT_TOP |
-                                  DT_NOPREFIX | DT_EDITCONTROL);
-                        SelectObject(hdc, old);
-                        ReleaseDC(cb.tip.tip, hdc);
-                    }
-                }
-                needw = want.right + cn_dpi(8) * 2;
-                needh = want.bottom + cn_dpi(6) * 2;
-
-                SW_CHECK(tw >= needw, "浮层宽度装得下全部文本");
-                SW_CHECK(th >= needh, "浮层高度装得下全部文本");
-                /* 内边距得真留出来：窗口比纯文本宽，否则文字贴边。 */
-                SW_CHECK(tw > want.right, "浮层左右留出了内边距");
-            }
-
-            /* 按钮文字必须是主人定下的那三个词。 */
             {
                 wchar_t bt[64];
-                GetWindowTextW(cb.b_ovw, bt, lenof(bt));
-                SW_CHECK(!wcscmp(bt, L"全部覆盖"), "按钮一为「全部覆盖」");
-                GetWindowTextW(cb.b_skip, bt, lenof(bt));
-                SW_CHECK(!wcscmp(bt, L"跳过已存在"), "按钮二为「跳过已存在」");
+
+                GetWindowTextW(cb.b_ok, bt, lenof(bt));
+                SW_CHECK(!wcscmp(bt, L"跳过已存在"), "左按钮为「跳过已存在」");
                 GetWindowTextW(cb.b_cancel, bt, lenof(bt));
-                SW_CHECK(!wcscmp(bt, L"取消"), "按钮三为「取消」");
+                SW_CHECK(!wcscmp(bt, L"取消"), "中按钮为「取消」");
+                SW_CHECK(cb.b_third != NULL, "第三个按钮存在");
+                if (cb.b_third) {
+                    GetWindowTextW(cb.b_third, bt, lenof(bt));
+                    SW_CHECK(!wcscmp(bt, L"全部覆盖"),
+                             "右按钮为「全部覆盖」");
+                }
             }
 
-            /*
-             * 默认按钮必须是「全部覆盖」——回车就是最常见的意图。
-             *
-             * 判据取 BS_DEFPUSHBUTTON 样式位，不用 BST_FOCUS：这个弹窗
-             * 建完就销毁、从没显示过，焦点状态压根不存在，拿它判必然
-             * 失败。样式位才是「默认按钮」的定义。
-             */
-            SW_CHECK((GetWindowLongPtrW(cb.b_ovw, GWL_STYLE) &
-                      BS_TYPEMASK) == BS_DEFPUSHBUTTON,
-                     "默认按钮是「全部覆盖」");
-
-            /* 摆位：全部覆盖在左，跳过已存在居中，取消在右。 */
-            {
+            /* 位置：从左到右必须是 跳过 / 取消 / 全部覆盖。 */
+            if (cb.b_third) {
                 RECT r1, r2, r3;
 
-                GetWindowRect(cb.b_ovw, &r1);
-                GetWindowRect(cb.b_skip, &r2);
-                GetWindowRect(cb.b_cancel, &r3);
+                GetWindowRect(cb.b_ok, &r1);
+                GetWindowRect(cb.b_cancel, &r2);
+                GetWindowRect(cb.b_third, &r3);
                 SW_CHECK(r1.left < r2.left && r2.left < r3.left,
-                         "按钮从左到右为 覆盖/跳过/取消");
-                SW_CHECK(r2.left - r1.left > cn_dpi(20) &&
-                         r3.left - r2.left > cn_dpi(20),
+                         "按钮从左到右为 跳过/取消/全部覆盖");
+                SW_CHECK(r2.left - r1.left > cn_dpi(6) &&
+                         r3.left - r2.left > cn_dpi(6),
                          "三枚按钮彼此分立不重叠");
             }
 
             /*
-             * 说明文字已删：弹窗里除按钮外只剩 head / list / qicon 三个
-             * 静态控件。多出来的就是说明行又回来了。
+             * 默认按钮 = 最右那个（「全部覆盖」）。
+             *
+             * cn: 危险动作走 BS_OWNERDRAW 画红框，红框与蓝框（DEFPUSH）
+             * 不能并存，所以这里不能断言 BS_DEFPUSHBUTTON 样式位。
+             * 真正的判据是「回车落到哪个按钮」—— 那由
+             * cn_confirm_dialog_texts 的循环按 cb.b_third 决定，与
+             * 样式位无关。自检里能验的是「模板把 b_third 认成默认」：
+             * third 非 NULL 即最右为默认，这一条由上面的位置断言
+             * 加上本处的红框归属共同覆盖。
              */
+            SW_CHECK(cb.b_danger == cb.b_third,
+                     "红框（危险动作）挂在最右的「全部覆盖」上");
+
+            /* 标题栏图标必须是警告图标，不是红色问号。 */
             {
-                int statics = 0;
-                EnumChildWindows(dlg, cn_count_static_childs,
-                                 (LPARAM)&statics);
-                SW_CHECK(statics == 3, "说明文字已删，仅剩三个静态控件");
-            }
-
-            /* 命中区必须比列表控件窄：右缘只到文本，不罩右侧空白。 */
-            if (cb.tip.tip != NULL) {
-                RECT lr, tr;
-                int wantw = 0;
-
-                GetClientRect(cb.list, &lr);
-                MapWindowPoints(cb.list, dlg, (POINT *)&lr, 2);
-                tr = cb.tip.hot;
-
                 /*
-                 * 命中区右缘必须紧贴文本右缘（±2px 容差）。只断言
-                 * tr.right < lr.right 抓不住旧缺陷：旧值 cw-m-4 与列表
-                 * 控件右缘只差 4px，照样通过 —— 那条断言形同虚设。
+                 * cn: WM_GETICON 拿回来的句柄与资源 ID 无法直接比对，
+                 * 所以改为验「图标拿得到」+ 用同一资源再 Load 一次
+                 * 比尺寸。资源 ID 是否正确由 cn_title_icon 的缓存
+                 * 逻辑保证（按 ID 分槽），这里至少保证没退化成 NULL。
                  */
-                {
-                    HDC hdc = GetDC(dlg);
-                    if (hdc) {
-                        HFONT old = SelectObject(hdc, cb.font);
-                        SIZE s;
-
-                        for (size_t i = 0; i < 5; i++) {
-                            GetTextExtentPoint32W(hdc, five[i],
-                                                  (int)wcslen(five[i]), &s);
-                            if (s.cx > wantw)
-                                wantw = s.cx;
-                        }
-                        GetTextExtentPoint32W(hdc, L".......", 7, &s);
-                        if (s.cx > wantw)
-                            wantw = s.cx;
-                        SelectObject(hdc, old);
-                        ReleaseDC(dlg, hdc);
-                    }
-                }
-                SW_CHECK(wantw > 0 &&
-                         tr.right - tr.left >= wantw - 2 &&
-                         tr.right - tr.left <= wantw + 2,
-                         "悬浮命中区宽紧贴内容文本宽");
-                SW_CHECK(tr.left == lr.left && tr.top == lr.top,
-                         "悬浮命中区从列表文本区左上角起");
+                HICON got = (HICON)SendMessageW(cb.dlg, WM_GETICON,
+                                                ICON_SMALL, 0);
+                SW_CHECK(got != NULL, "标题栏挂上了图标");
             }
 
-            /* 问号图标：标题栏与内容区都要挂上。 */
-            SW_CHECK((HICON)SendMessageW(dlg, WM_GETICON, ICON_SMALL, 0)
-                     != NULL, "标题栏挂上了问号图标");
-            SW_CHECK(cb.qicon != NULL &&
-                     (HICON)SendMessageW(cb.qicon, STM_GETICON, 0, 0) != NULL,
-                     "内容区挂上了问号图标");
+            /*
+             * 内容区不再有大问号：弹出「原始自绘模板」后，卡片里只有
+             * 清单文字（勾叉/圆点是 DrawIconEx 画的，不是控件）。
+             * 模板自身仍有 head / list 两个 STATIC（list 不可见）。
+             */
+            SW_CHECK(cb.qicon == NULL, "卡片里不再有大问号控件");
 
-            /* 48px 图标比短列表高，不得压到按钮区。 */
-            {
-                RECT ir, br;
-
-                GetWindowRect(cb.qicon, &ir);
-                GetWindowRect(cb.b_ovw, &br);
-                SW_CHECK(ir.bottom <= br.top,
-                         "问号图标底缘不越过按钮顶缘");
-            }
-
-            DestroyWindow(dlg);
-            cn_conflict_box_done(&cb);
+            DestroyWindow(cb.dlg);
+            cn_confirm_save_release(&cb);
         }
 
-        /* 两项时不该截断，也就不该挂 tooltip。 */
+        /* 两项：不折叠、不挂浮层。 */
+        for (size_t i = 0; i < 5; i++) {
+            sfree(cl_items[i].name);
+            sfree(cl_items[i].oldval);
+            sfree(cl_items[i].newval);
+        }
         for (size_t i = 0; i < 2; i++) {
-            sfree(items[i].name);
-            items[i].name = cn_wcsdup(two[i]);
-            items[i].is_dir = false;
+            cl_items[i].name = dup_wc_to_mb(DEFAULT_CODEPAGE, two[i], "?");
+            cl_items[i].oldval = dupstr("");
+            cl_items[i].newval = dupstr("");
+            cl_items[i].kind = CN_CHG_OTHER;
+            cl_items[i].icon_id = IDI_CN_DOT;
         }
-        dlg = cn_conflict_dialog_create(sw->hwnd, sw->font, items, 2, &cb);
-        SW_CHECK(dlg != NULL, "两项冲突时弹窗创建成功");
-        if (dlg) {
+        cl.n = 2;
+        memset(&cb, 0, sizeof(cb));
+        texts.head = "2 个同名项目已存在于目标位置：";
+
+        built = cn_confirm_save_build(sw->hwnd, NULL, &cl, &texts, &cb);
+        SW_CHECK(built, "两项冲突时弹窗创建成功");
+        if (built) {
             wchar_t t[512];
             GetWindowTextW(cb.list, t, lenof(t));
             SW_CHECK(wcsstr(t, L"one.txt") && wcsstr(t, L"two.txt") &&
                      !wcsstr(t, L"......."),
-                     "未超三项时不截断、不出省略号");
-            SW_CHECK(cb.tip.tip == NULL, "未截断时不挂 tooltip");
-            DestroyWindow(dlg);
-            cn_conflict_box_done(&cb);
+                     "两项时不折叠、不出省略号");
+            SW_CHECK(cb.tip.tip == NULL, "未折叠时不挂浮层");
+            DestroyWindow(cb.dlg);
+            cn_confirm_save_release(&cb);
         }
-
-        for (size_t i = 0; i < 5; i++)
-            sfree(items[i].name);
+        for (size_t i = 0; i < 2; i++) {
+            sfree(cl_items[i].name);
+            sfree(cl_items[i].oldval);
+            sfree(cl_items[i].newval);
+        }
     }
 
     /*
@@ -9602,7 +10897,7 @@ void sftp_selftest_confirm_save(void)
         ConfirmSaveBox cb;
         RECT wr, cr, lr, hr, r1, r2;
 
-        if (!cn_confirm_save_build(NULL, changes, NULL, &cb)) {
+        if (!cn_confirm_save_build(NULL, changes, NULL, NULL, &cb)) {
             sw_report(fp, "  失败  弹窗未建成\n");
             fclose(fp);
             return;
@@ -9664,39 +10959,46 @@ void sftp_selftest_confirm_save(void)
         }
 
         /*
-         * 2) 首行（顶格）左缘应等于左边距，不能被图标挤开；
-         *    清单左缘 = 左边距 + 图标宽 + 6，两行左缘必须错开图标宽度。
-         */
-        SW_CHECK(hr.left == lr.left - (lr.left - hr.left) &&
-                 lr.left > hr.left, "清单在图标右侧、首行顶格");
-
-        /*
-         * 2a) 图标在内容区里垂直居中（主人指定）。
+         * 2) 清单 STATIC 已改为不可见的文本载体（文字由自绘按段上色），
+         *    它的控件坐标不再代表屏幕上文字的位置 —— 所以不能拿它的
+         *    左缘去判「在图标右侧」。
          *
-         * 内容区 = 从清单顶边 ytop 起、高 max(清单高, 图标高)。
-         * 图标上下留白必须相等（容差 1px，取整导致）。这条同时覆盖了
-         * 「图标不许贴灰带」和「图标不许浮在半空」两种极端 ——
-         * 留白相等即意味着随内容增高同步变大。
-         *
-         * ⚠️ 别拿「图标底边到灰带顶线」当断言：清单只有一两行时
-         *    内容区由图标决定，那个值才等于下留白；清单五行时内容区
-         *    由清单决定，图标底边离灰带还有一大截，量出来是 34px，
-         *    会误判成「间距失控」（踩过）。
+         *    真正该判的是自绘几何本身：卡片左边距 + icon_sz + 8 必须
+         *    落在卡片内部，且留有足够空间画文字。这是「图标在左、
+         *    文字在右」在代码层面的等价断言。
          */
         {
-            RECT ir, br;
-            int content_bottom, above, below;
-            GetWindowRect(cb.qicon, &ir);
-            MapWindowPoints(HWND_DESKTOP, cb.dlg, (POINT *)&ir, 2);
-            br = cr;
-            content_bottom = lr.bottom > ir.bottom ? lr.bottom : ir.bottom;
-            above = ir.top - lr.top;            /* 图标顶 - 内容区顶 */
-            below = content_bottom - ir.bottom; /* 内容区底 - 图标底 */
-            sw_report(fp, "  图标 y=%d..%d，内容区 y=%d..%d，上下留白 %d/%dpx\n",
-                      ir.top, ir.bottom, lr.top, content_bottom, above, below);
-            SW_CHECK(abs(above - below) <= 1, "图标在内容区垂直居中（上下留白相等）");
-            SW_CHECK(content_bottom <= br.bottom - cb.band_h - cn_dpi(8),
-                     "内容区底边与灰带之间留出 >=8px");
+            int icon_x = cb.card_left + cn_dpi(14);
+            int text_x = icon_x + cb.icon_sz + cn_dpi(8);
+            int text_room = cb.card_right - cn_dpi(14) - text_x
+                            - cb.chev_sz - cn_dpi(12);
+            sw_report(fp, "  勾叉左缘 %d，文字起 %d，文字可用宽 %d，"
+                      "卡片 %d..%d\n", icon_x, text_x, text_room,
+                      cb.card_left, cb.card_right);
+            SW_CHECK(hr.left == cb.card_left, "首行说明顶格对齐卡片左缘");
+            SW_CHECK(icon_x >= cb.card_left + cn_dpi(8) &&
+                     text_x > icon_x && text_room >= cn_dpi(80),
+                     "勾叉在左、文字在右且留有可读宽度");
+        }
+
+        /*
+         * 2a) 勾叉图标在每一行内垂直居中。
+         *
+         * 新版图标是自绘的，画在行中线（cy = 行顶 + row_h/2）。
+         * 行高由 row_h 决定，所以「每行图标居中」在几何上等价于
+         * 「卡片高度 = 行数 × row_h + 上下内边距」，且行高必须大于
+         * 图标直径（否则图标会互相压）。
+         */
+        {
+            int pad_top = lr.top - cb.card_top;
+            int pad_bot = cb.card_bottom - lr.bottom;
+            sw_report(fp, "  卡片 %d..%d，清单 %d..%d，上下内边距 %d/%d，"
+                      "行高 %d，图标 %d\n", cb.card_top, cb.card_bottom,
+                      lr.top, lr.bottom, pad_top, pad_bot,
+                      cb.row_h, cb.icon_sz);
+            SW_CHECK(cb.row_h > cb.icon_sz, "行高大于勾叉直径（图标不互相压）");
+            SW_CHECK(pad_top >= 0 && pad_bot >= 0, "卡片完整包住清单");
+            SW_CHECK(pad_top <= cb.row_h, "清单顶不超出卡片顶一行");
         }
 
         /*
@@ -9723,18 +11025,29 @@ void sftp_selftest_confirm_save(void)
             }
         }
 
-        /* 3) 两个按钮：相邻（间距 = 标准 8px）且整组居中。 */        GetWindowRect(cb.b_ok, &r1);
+        /*
+         * 3) 两个按钮：左留白 = 按钮间距 = 右留白（主人 2026-11 要求）。
+         *
+         * 旧断言写死「间距 = 标准 8px + 整组居中」，那是上一版的做法。
+         * 现在改成由窗口宽反解间距，三处等分，所以断言也跟着改：量三
+         * 个距离，两两相差不超过 2px（像素取整允许的误差）。
+         */
+        GetWindowRect(cb.b_ok, &r1);
         GetWindowRect(cb.b_cancel, &r2);
         {
+            /* 客户区左缘在屏幕坐标系里的位置。 */
+            int border = (wr.right - wr.left - cr.right) / 2;
+            int client_l = wr.left + border;
+            int client_r = wr.right - border;
             int gap = r2.left - r1.right;
-            int left_pad = r1.left - wr.left - (wr.right - wr.left - cr.right) / 2;
-            int right_pad = (wr.right - (wr.right - wr.left - cr.right) / 2)
-                            - r2.right;
-            sw_report(fp, "  按钮间距 %dpx，左右余量 %d/%d\n",
+            int left_pad = r1.left - client_l;
+            int right_pad = client_r - r2.right;
+            sw_report(fp, "  按钮间距 %dpx，左右留白 %d/%d px\n",
                       gap, left_pad, right_pad);
-            SW_CHECK(gap == cn_dpi(8), "两按钮间距为标准 8px");
-            SW_CHECK(left_pad - right_pad <= 4 && left_pad - right_pad >= -4,
-                     "按钮组水平居中");
+            SW_CHECK(gap - left_pad <= 2 && gap - left_pad >= -2,
+                     "按钮间距与左留白相等");
+            SW_CHECK(gap - right_pad <= 2 && gap - right_pad >= -2,
+                     "按钮间距与右留白相等");
             SW_CHECK(r1.top == r2.top, "两按钮同顶");
             SW_CHECK((r1.bottom - r1.top) == (r2.bottom - r2.top),
                      "两按钮同高");
@@ -9794,10 +11107,20 @@ void sftp_selftest_confirm_save(void)
                 else
                     SW_CHECK(wr_tip.right <= wr_dlg.left, "右侧不足时浮层翻到左侧");
                 {
-                    int dy = wr_tip.top - wr_head.top;
+                    /*
+                     * cn: 浮层锚点是卡片顶（tip.trigger_top = card_top），
+                     * 不是首行说明顶。旧断言拿首行顶比，差出来的正好是
+                     * 「首行高 + 间距」那 27px，属于量错对象。
+                     */
+                    POINT anchor;
+                    int dy;
+                    anchor.x = cb.card_left;
+                    anchor.y = cb.card_top;
+                    ClientToScreen(cb.dlg, &anchor);
+                    dy = wr_tip.top - anchor.y;
                     if (dy < 0) dy = -dy;
-                    sw_report(fp, "  浮层顶边与内容区顶边差 %dpx\n", dy);
-                    SW_CHECK(dy <= 2, "浮层上框线与内容区上框线齐平");
+                    sw_report(fp, "  浮层顶边与卡片顶边差 %dpx\n", dy);
+                    SW_CHECK(dy <= 2, "浮层上框线与白卡片上框线齐平");
                 }
             }
 
@@ -9888,7 +11211,7 @@ void sftp_selftest_confirm_save(void)
             ConfirmSaveBox cb2;
             RECT c2, l2;
             sw_report(fp, "\n[%s]\n", cases[ci].label);
-            if (!cn_confirm_save_build(NULL, cases[ci].text, NULL, &cb2)) {
+            if (!cn_confirm_save_build(NULL, cases[ci].text, NULL, NULL, &cb2)) {
                 sw_report(fp, "  失败  弹窗未建成\n");
                 fail++;
                 continue;
@@ -10071,7 +11394,7 @@ void sftp_selftest_confirm_quit(void)
 
         sw_report(fp, "\n[三按钮版面]\n");
         if (cn_confirm_save_build(NULL, "【启用终端指定 ANSI 颜色】 开 → 关",
-                                  &cn_quit_texts, &cb)) {
+                                  NULL, &cn_quit_texts, &cb)) {
             wchar_t buf[64];
             DWORD st_first, st_second, st_third;
 
@@ -10119,7 +11442,14 @@ void sftp_selftest_confirm_quit(void)
             SW_CHECK((st_second & BS_TYPEMASK) == BS_PUSHBUTTON,
                      "「取消」是普通按钮（无蓝框）");
 
-            /* 三个按钮同一水平线、间距一致、整组居中。 */
+            /*
+             * 三个按钮同一水平线，且左留白 = 间距1 = 间距2 = 右留白。
+             *
+             * cn: 主人 2026-11 要求「按键之间的距离和按键与窗口左右边界
+             * 的距离相等」。旧断言查的是「整组居中」（左右留白相等），
+             * 与等分不是一回事 —— 等分还要求间距也等于留白。像素取整
+             * 会有 1~2px 余数，容差给 2。
+             */
             {
                 RECT r1, r2, r3, rc;
                 int gap1, gap2, left, right;
@@ -10132,14 +11462,16 @@ void sftp_selftest_confirm_quit(void)
                 gap2 = r3.left - r2.right;
                 left = r1.left - rc.left;
                 right = rc.right - r3.right;
-                sw_report(fp, "  按钮间距 %d/%d px，左右余量 %d/%d\n",
+                sw_report(fp, "  按钮间距 %d/%d px，左右留白 %d/%d px\n",
                           gap1, gap2, left, right);
                 SW_CHECK(r1.top == r2.top && r2.top == r3.top,
                          "三按钮同顶");
-                SW_CHECK(abs(gap1 - gap2) <= 1,
+                SW_CHECK(abs(gap1 - gap2) <= 2,
                          "三按钮间距一致");
-                SW_CHECK(abs(left - right) <= 2,
-                         "三按钮整组水平居中");
+                SW_CHECK(abs(left - gap1) <= 2,
+                         "左留白等于按钮间距");
+                SW_CHECK(abs(right - gap2) <= 2,
+                         "右留白等于按钮间距");
             }
 
             cn_confirm_save_release(&cb);
@@ -10215,7 +11547,7 @@ void sftp_selftest_confirm_launch(void)
         /* cn: 直接用线上那份文案（cn_launch_texts），验的就是真实配置。 */
         ConfirmSaveBox cb;
 
-        if (!cn_confirm_save_build(NULL, changes, &cn_launch_texts, &cb)) {
+        if (!cn_confirm_save_build(NULL, changes, NULL, &cn_launch_texts, &cb)) {
             sw_report(fp, "  失败  弹窗未建成\n");
             fclose(fp);
             return;
@@ -10238,8 +11570,12 @@ void sftp_selftest_confirm_launch(void)
                      "窗口标题为「确保保存方式后继续执行」");
 
             GetWindowTextW(cb.head, buf, 128);
-            SW_CHECK(wcscmp(buf, L"当前改动尚未保存，改动清单：") == 0,
-                     "首行文案为「当前改动尚未保存，改动清单：」");
+            {
+                /* cn: 文案统一取宏，改文案不必再改断言。 */
+                wchar_t *whead = dup_mb_to_wc(DEFAULT_CODEPAGE, CN_HEAD_TEXT);
+                SW_CHECK(wcscmp(buf, whead) == 0, "首行文案与 CN_HEAD_TEXT 一致");
+                sfree(whead);
+            }
 
             /*
              * 「长期生效」比「确定」宽，按钮宽度必须跟着文字重算 ——
@@ -10264,9 +11600,14 @@ void sftp_selftest_confirm_launch(void)
             sw_report(fp, "  窗口 %dx%d，客户区 %dx%d\n",
                       (int)(wr.right - wr.left), (int)(wr.bottom - wr.top),
                       cr.right, cr.bottom);
-            SW_CHECK((wr.right - wr.left) >= cn_dpi(300) &&
-                     (wr.right - wr.left) <= cn_dpi(450),
-                     "窗口宽度仍在 300～450px 区间");
+            /*
+             * cn: 判客户区宽度，不判整窗。
+             * 300~450 是「内容区宽度」的规格（主人指定），加了原生
+             * 标题栏后整窗比客户区多出左右边框（实测 6px），拿整窗判
+             * 会误报超限 —— 内容其实正好 450。
+             */
+            SW_CHECK(cr.right >= cn_dpi(300) && cr.right <= cn_dpi(450),
+                     "客户区宽度仍在 300～450px 区间");
 
             /* 两个按钮成组居中：左按钮左缘 + 右按钮右缘应对称。 */
             GetWindowRect(cb.b_ok, &br1);
@@ -10309,7 +11650,7 @@ void sftp_selftest_confirm_launch(void)
      */
     {
         ConfirmSaveBox cb;
-        if (cn_confirm_save_build(NULL, changes, NULL, &cb)) {
+        if (cn_confirm_save_build(NULL, changes, NULL, NULL, &cb)) {
             SW_CHECK(!cb.closed_by_x, "新建弹窗时 closed_by_x 为假");
             SendMessageW(cb.dlg, WM_CLOSE, 0, 0);
             SW_CHECK(cb.closed_by_x, "点 ❌ 后 closed_by_x 置位（可判为取消）");

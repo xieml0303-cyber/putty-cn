@@ -1060,6 +1060,20 @@ void test_conf_key_info(void)
 }
 
 /*
+ * cn: 前置声明 —— 这两个辅助函数的定义放在 check_changelist 之后
+ * （它们内部用到它的兄弟函数），但调用点在 test_changelist 里，
+ * 位置在定义之前。C 要求先声明后使用。
+ */
+static void check_changelist_struct(const char *what,
+                                    void (*apply)(Conf *),
+                                    const char *expect_name,
+                                    const char *expect_old,
+                                    const char *expect_new,
+                                    CnChangeKind expect_kind);
+static void check_struct_matches_text(const char *what,
+                                      void (*apply)(Conf *));
+
+/*
  * cn: check that conf_describe_changes() names each changed option the
  * way the configuration UI actually labels it, and shows the option
  * text rather than a bare 开/关 or enum number for radio-button
@@ -1099,6 +1113,8 @@ static void cl_appcursor(Conf *c) { conf_set_bool(c, CONF_app_cursor, true); }
 static void cl_appkeypad(Conf *c) { conf_set_bool(c, CONF_app_keypad, true); }
 static void cl_nethack(Conf *c)
 { conf_set_bool(c, CONF_nethack_keypad, true); }
+/* cn: 纯字符串改动，用于验证「非开关类一律打勾」的分类。 */
+static void cl_title(Conf *c) { conf_set_str(c, CONF_wintitle, "新标题"); }
 static void cl_localecho(Conf *c)
 { conf_set_int(c, CONF_localecho, FORCE_ON); }
 static void cl_proxydns(Conf *c) { conf_set_int(c, CONF_proxy_dns, FORCE_ON); }
@@ -1303,6 +1319,127 @@ void test_changelist(void)
                      "【AltGr 用作 Compose 键】 关 → 开\r\n");
     check_changelist("ctrlaltkeys", cl_ctrlalt,
                      "【Ctrl+Alt 键与 AltGr 不同】 开 → 关\r\n");
+
+    /*
+     * cn: 结构化清单的分段与勾叉分类。
+     *
+     * 分类规则（主人指定）：新值「开/启用」→ 打勾，「关/禁用」→ 打叉，
+     * 字符串与数字等非开关改动一律打勾。这里逐个钉住三种情形，
+     * 界面画错勾叉时能立刻定位是分类错还是绘制错。
+     *
+     * ⚠️ bksp 的新值是「Control-H」这种字符串，不是「开」——
+     *    它归 CN_CHG_OTHER（打勾）。要验「开」的判定得用真正把
+     *    bool 写成 开/关 的选项（ctrlalt 的反向即 开→关）。
+     */
+    check_changelist_struct("bksp 字符串值", cl_bksp,
+                            "Backspace 回退键", "Control-? (127)",
+                            "Control-H", CN_CHG_OTHER);
+    check_changelist_struct("ctrlalt 开→关", cl_ctrlalt,
+                            "Ctrl+Alt 键与 AltGr 不同", "开", "关",
+                            CN_CHG_TOGGLE_OFF);
+    check_changelist_struct("enum 非开关", cl_sharrow,
+                            "Shift/Ctrl/Alt 配合方向键", "Ctrl 切换应用模式",
+                            "xterm 风格位图", CN_CHG_OTHER);
+    check_changelist_struct("net hack 三态", cl_nethack,
+                            "数字小键盘初始状态", "常规", "NetHack",
+                            CN_CHG_OTHER);
+    /* wintitle 默认是空串，所以旧值显示 (空)。 */
+    check_changelist_struct("字符串改动", cl_title,
+                            "窗口标题", "(空)", "新标题", CN_CHG_OTHER);
+    /* 文本版必须与结构版逐行对应，不能各改一边。 */
+    check_struct_matches_text("bksp", cl_bksp);
+    check_struct_matches_text("proxy_type", cl_proxyhttp);
+    check_struct_matches_text("resize_action", cl_resize);
+    check_struct_matches_text("title", cl_title);
+}
+
+/*
+ * cn: 验证结构化改动清单（供自绘弹窗分段上色用）。
+ *
+ * 重点锁两件事：
+ *   1) 分段正确 —— 选项名、旧值、新值分别落在各自字段，不是从
+ *      纯字符串里解析出来的（值本身含「】」或「→」时会解析错）；
+ *   2) 勾叉分类正确 —— 新值是「开/启用」打勾，是「关/禁用」打叉，
+ *      字符串与数字等非开关改动一律打勾（主人指定）。
+ *
+ * 这两条是界面正确性的根，靠人眼看截图看不出分类错没错。
+ */
+static void check_changelist_struct(const char *what,
+                                    void (*apply)(Conf *),
+                                    const char *expect_name,
+                                    const char *expect_old,
+                                    const char *expect_new,
+                                    CnChangeKind expect_kind)
+{
+    Conf *base = conf_new();
+    Conf *cur = conf_new();
+    do_defaults(NULL, base);
+    conf_copy_into(cur, base);
+    apply(cur);
+
+    CnChangeList *list = conf_describe_changes_struct(base, cur);
+    if (list->n != 1) {
+        fprintf(stderr, "fail structlist(%s): 条目数 %d，期望 1\n",
+                what, (int)list->n);
+        nfails++;
+    } else {
+        CnChange *it = &list->items[0];
+        if (strcmp(it->name, expect_name) != 0) {
+            fprintf(stderr, "fail structlist(%s): name 是「%s」，期望「%s」\n",
+                    what, it->name, expect_name);
+            nfails++;
+        }
+        if (strcmp(it->oldval, expect_old) != 0) {
+            fprintf(stderr, "fail structlist(%s): old 是「%s」，期望「%s」\n",
+                    what, it->oldval, expect_old);
+            nfails++;
+        }
+        if (strcmp(it->newval, expect_new) != 0) {
+            fprintf(stderr, "fail structlist(%s): new 是「%s」，期望「%s」\n",
+                    what, it->newval, expect_new);
+            nfails++;
+        }
+        if (it->kind != expect_kind) {
+            fprintf(stderr, "fail structlist(%s): kind 是 %d，期望 %d\n",
+                    what, (int)it->kind, (int)expect_kind);
+            nfails++;
+        }
+    }
+    cn_change_list_free(list);
+    conf_free(base);
+    conf_free(cur);
+}
+
+/*
+ * cn: 结构化清单与文本清单必须逐行对应 —— 文本由结构拼出，若两者
+ * 出现分歧说明有人只改了一边。
+ */
+static void check_struct_matches_text(const char *what, void (*apply)(Conf *))
+{
+    Conf *base = conf_new();
+    Conf *cur = conf_new();
+    do_defaults(NULL, base);
+    conf_copy_into(cur, base);
+    apply(cur);
+
+    CnChangeList *list = conf_describe_changes_struct(base, cur);
+    char *text = conf_describe_changes(base, cur);
+    strbuf *sb = strbuf_new();
+    for (size_t i = 0; i < list->n; i++)
+        put_fmt(sb, "【%s】 %s → %s\r\n",
+                list->items[i].name, list->items[i].oldval,
+                list->items[i].newval);
+    char *rebuilt = strbuf_to_str(sb);
+    if (strcmp(rebuilt, text) != 0) {
+        fprintf(stderr, "fail struct2text(%s):\n  结构拼回: %s  文本版:   %s",
+                what, rebuilt, text);
+        nfails++;
+    }
+    sfree(rebuilt);
+    sfree(text);
+    cn_change_list_free(list);
+    conf_free(base);
+    conf_free(cur);
 }
 
 /*

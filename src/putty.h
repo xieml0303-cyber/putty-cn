@@ -1978,6 +1978,53 @@ char *get_remote_username(Conf *conf); /* dynamically allocated */
 char *save_settings(const char *section, Conf *conf);
 /* cn: one line per changed option ("keyword: old → new"); caller frees. */
 char *conf_describe_changes(const Conf *baseline, const Conf *current);
+/*
+ * cn: 结构化改动清单 —— 供自绘弹窗按段上色用。
+ *
+ * 早先只有 conf_describe_changes 输出的纯字符串，自绘弹窗拿它交给
+ * STATIC 控件，整行一个颜色。新界面要把「选项名+旧值」与「箭头+新值」
+ * 分成两种颜色、行首还要按动作方向画勾或叉，纯字符串办不到 ——
+ * 靠解析「【】」和「→」反解出分段在值本身含这些字符时会错。
+ *
+ * 所以改成结构化：conf_describe_changes 也走这份数据拼字符串，
+ * 两条路径同一份来源，格式不会分叉（test_conf 那批断言依赖原格式）。
+ */
+typedef enum {
+    CN_CHG_TOGGLE_ON,     /* 新值表示「开启/启用/勾选」→ 行首画勾 */
+    CN_CHG_TOGGLE_OFF,    /* 新值表示「关闭/禁用」→ 行首画叉 */
+    CN_CHG_OTHER,         /* 字符串/数字/字体等改动 → 一律画勾 */
+} CnChangeKind;
+
+typedef struct CnChange {
+    char *name;      /* 选项名（已去掉【】，如「括号自动补全」） */
+    char *oldval;    /* 旧值（可能含子键前缀，如「127.0.0.1:8080：…」） */
+    char *newval;    /* 新值 */
+    CnChangeKind kind;
+    /*
+     * cn: 行首图标的资源 ID 覆盖（0 = 按 kind 用勾/叉）。
+     *
+     * 为什么需要它：「确认覆盖」弹窗复用同一套清单排版，但它的行首
+     * 语义不是「开/关」，而是「这个同名项是目录还是文件」——
+     * 目录冲突用警告图标（覆盖目录会连带覆盖里面的东西），文件用中性
+     * 圆点。kind 那套勾/叉在这儿讲不通，又不能为此再复制一份排版器，
+     * 所以留一个资源 ID 直填口。
+     *
+     * ⚠️ 用 int 而不是把 PNG/ICO 的资源宏搬进本头：本头同时编进非
+     *    Windows 目标，那些宏只在 Windows 端存在。这里只存数字，
+     *    Windows 端填 putty-rc.h 里的 ID，其他平台恒为 0。
+     */
+    int icon_id;
+} CnChange;
+
+typedef struct CnChangeList {
+    CnChange *items;
+    size_t n;
+} CnChangeList;
+
+/* cn: 生成结构化改动清单；调用方用 cn_change_list_free 释放。 */
+CnChangeList *conf_describe_changes_struct(const Conf *baseline,
+                                           const Conf *current);
+void cn_change_list_free(CnChangeList *list);
 /* cn: field-by-field equality, same traversal as the change list. */
 bool conf_equal(const Conf *a, const Conf *b);
 /* cn: persist "默认设置" with H3 and connection-target protections;
@@ -2031,6 +2078,23 @@ typedef struct CnConfirmTexts {
      * 默认按钮的设置就静默失效了。
      */
     const char *third;
+    /*
+     * cn: 标题栏那个小图标的资源 ID 覆盖（0 = 沿用红色问号 IDI_QHELP）。
+     *
+     * 「确认覆盖」弹窗复用本模板后，标题栏该挂警告图标（红圈叹号）
+     * 而不是问号 —— 它问的不是「要不要保存」而是一个会覆盖掉目标端
+     * 文件的破坏性动作。同样是 int（资源宏只在 Windows 端存在）。
+     */
+    int icon_id;
+    /*
+     * cn: 第三个按钮是否画成「危险动作」（红框红字）。
+     *
+     * 现在三按钮模式里红框固定给最左那个（「直接退出」，放弃改动）。
+     * 但「确认覆盖」的左按钮是「全部覆盖」—— 它确实是破坏性的，
+     * 而中按钮「跳过已存在」不是。「全部覆盖」在主人拍板的布局里
+     * 位于最右并且是默认，所以红框挂哪个不能靠位置猜，得显式指定。
+     */
+    bool third_is_danger;
 } CnConfirmTexts;
 /*
  * cn: 「连接 / 文件传输」前那个改动确认弹窗的文案，唯一定义处。
@@ -2046,6 +2110,7 @@ extern const CnConfirmTexts cn_launch_texts;
  */
 extern const CnConfirmTexts cn_quit_texts;
 int cn_confirm_dialog_texts(HWND parent, const char *changes,
+                            const CnChangeList *structured,
                             const CnConfirmTexts *texts,
                             bool *closed_by_x);
 void save_open_settings(settings_w *sesskey, Conf *conf);
