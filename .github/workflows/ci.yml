@@ -1,4 +1,4 @@
-# Minimal CI: build the seven deliverables and run the unit tests.
+# Minimal CI: build putty and run the unit tests.
 name: CI
 
 on: [push, pull_request]
@@ -28,8 +28,8 @@ jobs:
           cd src
           cmake --build build
         # no --target: build everything, including the test_* binaries
-        # that ctest needs (a target list of the seven deliverables
-        # left ctest with "Not Run" for all nine tests).
+        # that ctest needs (a narrow target list left ctest with
+        # "Not Run" for all nine tests).
       - name: Test
         shell: msys2 {0}
         run: |

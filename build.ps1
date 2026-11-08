@@ -7,7 +7,7 @@
 # Full release process: reports/2026-11-01-发布v0.85-cn3.md
 
 param(
-    [string[]]$Targets = @("putty", "puttygen", "plink", "pscp", "psftp", "pageant", "puttytel"),
+    [string[]]$Targets = @("putty"),
     [switch]$CleanRc,
     [switch]$VersionOnly,
     [string]$BuildDir = (Join-Path $PSScriptRoot "src\build")
@@ -20,8 +20,17 @@ if (-not (Test-Path $Ninja)) {
     throw "ninja.exe not found at $Ninja. Install MSYS2 (mingw-w64-x86_64-ninja)."
 }
 
+# cn: 版本号从 src\version.h 的 TEXTVER 读，不再依赖 plink.exe -V
+# （plink 已从构建中移除；且 putty.exe 是 GUI 程序，-V 不会打印到控制台）。
+function Get-TextVer {
+    $vh = Join-Path $PSScriptRoot "src\version.h"
+    $m = Select-String -Path $vh -Pattern '#define\s+TEXTVER\s+"([^"]*)"'
+    if ($m) { return $m.Matches[0].Groups[1].Value }
+    return "(version.h 中未找到 TEXTVER)"
+}
+
 if ($VersionOnly) {
-    & (Join-Path $BuildDir "plink.exe") -V
+    Write-Host (Get-TextVer)
     exit 0
 }
 
@@ -51,4 +60,4 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "Build OK: $($Targets -join ', ')"
 
-& (Join-Path $BuildDir "plink.exe") -V
+Write-Host (Get-TextVer)

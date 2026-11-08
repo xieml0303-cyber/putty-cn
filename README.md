@@ -1,6 +1,8 @@
 # PuTTY 0.85-cn4 中文版（Windows 64 位）
 
-基于 [larryli/PuTTY](https://github.com/larryli/PuTTY)（原 Google Code `puttycn` 项目）的中文翻译源码，使用 MSYS2 + MinGW-w64 + CMake 在本地编译生成的 `putty.exe`、`puttygen.exe`、`plink.exe`、`pscp.exe`、`psftp.exe`、`pageant.exe`、`puttytel.exe`。
+基于 [larryli/PuTTY](https://github.com/larryli/PuTTY)（原 Google Code `puttycn` 项目）的中文翻译源码，使用 MSYS2 + MinGW-w64 + CMake 在本地编译生成 `putty.exe`。
+
+> 本构建只交付 `putty.exe` 本体（含内置 SFTP 双栏文件传输）。上游的 `puttygen.exe`、`plink.exe`、`pscp.exe`、`psftp.exe`、`pageant.exe`、`puttytel.exe` 已从构建与安装包中移除 —— 它们在本汉化分支中从未随 `putty.exe` 同步维护。
 
 在汉化基线之上，本仓库针对国内网络设备运维场景做了界面与交互改造：默认 SSH 连接（主机名留空、端口 22）、「保存」不携带连接目标、串口一键切换且串口线自动匹配本机真实端口、会话页历史连接记录、配置页标题样式统一等。
 
@@ -11,7 +13,7 @@
 | 目录 | 内容 |
 |------|------|
 | `src/` | 完整源码，基线为 larryli/PuTTY master（commit `7ddf3ae`，版本 0.85），含本项目的界面与串口改造 |
-| `dist/` | 本地构建产物（不入版本库）：`putty.exe`（图形界面）、`puttygen.exe`（密钥工具）、`plink.exe`、`pscp.exe`、`psftp.exe`（命令行工具）、`pageant.exe`（密钥代理）、`puttytel.exe`（纯 Telnet） |
+| `dist/` | 本地构建产物（不入版本库）：`putty.exe`（图形界面，含 SFTP 双栏） |
 
 
 
@@ -32,7 +34,7 @@
 | `unix/storage.c`、`unix/dialog.c` | 对应接口的非 Windows 实现 |
 | `conf.h`、`be_list.c` | 默认连接方式 SSH（主机名留空、端口 22），「保存」不携带连接目标；串口参数按华为、华三网络设备 Console 口的标准预置（9600、8 数据位、1 停止位、无校验、无流控）；串口线默认留空，由界面按本机端口自动匹配 |
 | `version.h`、`LATEST.VER` | 版本号递增为 0.85-cn4（`TEXTVER`、`SSHVER`、`BINARY_VERSION` 同步） |
-| `pscp.c`、`psftp.c`、`cmdgen.c`、`windows/puttygen.c`、`windows/plink.c` | 命令行工具错误提示与 usage 汉化；plink 错误提示补行尾换行 |
+| `pscp.c`、`psftp.c`、`cmdgen.c`、`windows/puttygen.c`、`windows/plink.c` | 命令行工具错误提示与 usage 汉化；plink 错误提示补行尾换行。**注**：这些程序已不参与构建，改动仅保留在源码中 |
 | `terminal/terminal.c` | 终端体验改造：窗口尺寸记忆与拖动实时重排（reflow）、内容贴屏边、串口 DEL(0x7F) 退格可跨软换行、窗口标题含端口/串口号 |
 | `windows/serial.c` | 串口 realhost 返回串口名供标题显示；串口错误提示翻译修正 |
 | `windows/putty.c`、`windows/window.c`、`windows/console.c`、`windows/dialog.c`、`windows/network.c`、`windows/pageant.c`、`ssh/common.c`、`ssh/ca-config.c` | 界面与协议提示的翻译修正：术语统一、标点规范、语义反转与错别字修复 |
@@ -50,26 +52,19 @@
 
 ## 免安装版
 
-七个程序均为 0.85-cn4 构建、64 位、免安装。安装包已含全部程序；如需单文件版本，可按
+`putty.exe` 为 0.85-cn4 构建、64 位、免安装。安装包仅含该程序；如需单文件版本，可按
 [构建说明](#自行构建)自行编译，或用解压工具从安装包中取出。
 
 下表为 0.85-cn4 构建产物的基准值，可用于核对自行构建或从安装包提取的文件：
 
 | 文件 | 用途 | 大小（字节） | SHA256 |
 |------|------|-------------|--------|
-| `putty.exe` | 图形界面终端（SSH / Telnet / 串口） | 2,033,169 | `2eb157df939ae0730170ce209418037998fcf8d6409dc1935adf8e23a0a32d92` |
-| `puttygen.exe` | 密钥生成 / 转换工具 | 938,512 | `b591ab9db48ebb35abb8057aea3fd28c0d72bbcc477fd9c7e253d99bb5107a72` |
-| `plink.exe` | 命令行 SSH 客户端 | 1,425,411 | `b799a68af10df009eb9700634b3c4a82f045ae7e7b4763828b0e13376dbcd75e` |
-| `pscp.exe` | SCP 文件传输 | 1,437,948 | `3026661a79ecf60571c6c500d34d9a9a455edb870e8b3f567a97f244d7d81ccb` |
-| `psftp.exe` | SFTP 文件传输 | 1,452,883 | `1e0bdf6620ab923fd19bbdb9fcd100662ddb3555c34886216fe382e7c8199703` |
-| `pageant.exe` | 密钥代理（SSH 公钥认证） | 781,574 | `07c5304df9296cb0c8252d24c6276e4d6c1956a8343dcf21237ab3c1d9ef7b80` |
-| `puttytel.exe` | 纯 Telnet 客户端（不含 SSH） | 1,005,771 | `913244012558dccfb0f84fbf6e23a4c591a69c428d5fa94780fd6b4af044f2ae` |
+| `putty.exe` | 图形界面终端（SSH / Telnet / 串口 / SFTP 双栏） | 2,033,169 | `2eb157df939ae0730170ce209418037998fcf8d6409dc1935adf8e23a0a32d92` |
 
 - 仅依赖系统 DLL（ADVAPI32、COMCTL32、GDI32、IMM32、KERNEL32、SHELL32、USER32、comdlg32、msvcrt、ole32），无需 MinGW 运行库。
 - `putty.exe` 启动后窗口标题为「PuTTY 配置」（英文版为 "PuTTY Configuration"）。
-- 命令行工具可执行 `plink -V` 确认版本，输出应为 `发布版 0.85-cn4`。
-- **哈希表的正确用法**：PE 头嵌入链接时间戳，同一份源码两次构建的产物哈希必然不同（实测已验证），因此哈希只用于**校验下载完整性**，不能用于判断「是不是最新版」；判断版本请用 `plink -V` 输出与 exe 文件属性。
-- **二进制不入库**：`dist/` 已加入 `.gitignore`。入库等于每次重建都多存一份无法复用的 1.8MB 对象，故仓库只保留源码与上表基准值，发布产物统一走 Releases。
+- **哈希表的正确用法**：PE 头嵌入链接时间戳，同一份源码两次构建的产物哈希必然不同（实测已验证），因此哈希只用于**校验下载完整性**，不能用于判断「是不是最新版」；判断版本请用 exe 文件属性里的版本信息。
+- **二进制不入库**：`dist/` 已加入 `.gitignore`。入库等于每次重建都多存一份无法复用的对象，故仓库只保留源码与上表基准值，发布产物统一走 Releases。
 
 ## 串口默认配置
 
@@ -111,17 +106,17 @@ PuTTY 不会自动保存设置。改完参数后需要点窗口右下角的「�
 | T2 | 公钥认证（ed25519，PPK v3）+ 命令执行 | PASS |
 | T3 | 本地端口转发 `-L 18080:127.0.0.1:18081` | PASS |
 | T4 | 交互式终端会话 | PASS |
-| T5 | Pageant 加载 ed25519 PPK + plink 无密码公钥认证 | PASS |
+| T5 | ~~Pageant 加载 ed25519 PPK + plink 无密码公钥认证~~ | 不适用（相关程序已移除构建） |
 
 界面汉化与串口改造未影响协议层行为。测试记录见 `workspace/docs/2026-10-17-PuTTY功能测试.md`，串口改造见 `workspace/docs/2026-10-18-串口默认值自动匹配.md`。
 
 ## 已知限制
 
 1. **GUI 版不支持 `-batch`**。该选项属于 plink，传给 `putty.exe` 会弹「命令行错误」。
-2. **`putty host command` 写法有陷阱**。`putty 127.0.0.1 "echo hello"` 会把 `"echo hello"` 当作端口号（atoi 得 0），报「无法分配请求的地址」。远程命令请用 `-m <命令文件>` 传入，或改用 plink。
-3. **只认 PuTTY 原生 `.ppk` 私钥**。OpenSSH 新格式与旧 PEM 格式均无法加载；可用 puttygen 图形界面导入转换，或用 `workspace/tests/gen-ppk.js` 生成 ed25519 PPK v3。
+2. **`putty host command` 写法有陷阱**。`putty 127.0.0.1 "echo hello"` 会把 `"echo hello"` 当作端口号（atoi 得 0），报「无法分配请求的地址」。远程命令请用 `-m <命令文件>` 传入。
+3. **只认 PuTTY 原生 `.ppk` 私钥**。OpenSSH 新格式与旧 PEM 格式均无法加载；可用 `workspace/tests/gen-ppk.js` 生成 ed25519 PPK v3，或用官方 PuTTYgen 导入转换后指向该文件。
 4. **串口下拉框只读**，只能从本机枚举到的端口中选择，不能手输 `\\.\COM10` 这类设备路径；本机没有任何串口时列表为空。Unix 版不受影响。
-5. **`pageant.exe` 与 `puttytel.exe` 已包含在 0.85-cn4 安装包中**（0.85-cn4 构建）。`pageant` 为密钥代理，`puttytel` 为不含 SSH 的 Telnet 客户端；两者功能与官方 0.85 一致，仅界面汉化。命令行工具为实验性汉化，错误提示可能存在个别未翻译或格式瑕疵。
+5. **只提供 `putty.exe`**。`puttygen`、`plink`、`pscp`、`psftp`、`pageant`、`puttytel` 已从构建与安装包中移除。如需这些程序，可用官方 PuTTY 0.85 对应版本，或按上方构建说明把 CMake 里的对应目标加回来自行编译（源码仍在树上）。
 
 ## 自行构建
 
@@ -130,7 +125,7 @@ PuTTY 不会自动保存设置。改完参数后需要点窗口右下角的「�
 pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-make perl
 cd src
 cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -B build
-cmake --build build --target putty puttygen plink pscp psftp pageant puttytel -j
+cmake --build build --target putty -j
 ```
 
 产物为 `src/build/` 下的同名 exe。发布时复制到 `dist/` 便于本地取用，但 `dist/*.exe`

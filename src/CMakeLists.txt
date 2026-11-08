@@ -148,47 +148,15 @@ add_executable(bidi_test
   terminal/bidi_test.c)
 target_link_libraries(bidi_test guiterminal utils ${platform_libraries})
 
-add_executable(plink
-  ${platform}/plink.c
-  stubs/no-lineedit.c)
-# Note: if we ever port Plink to a platform where we can't implement a
-# serial backend, this be_list command will need to become platform-
-# dependent, so that it only sets the SERIAL option on platforms where
-# that backend exists. For the moment, though, we have serial port
-# backends for both our platforms, so we can do this unconditionally.
-be_list(plink Plink SSH SERIAL OTHERBACKENDS)
-target_link_libraries(plink
-  eventloop noterminal console sshclient otherbackends settings network crypto
-  utils
-  ${platform_libraries})
-installed_program(plink)
-
-add_executable(pscp
-  pscp.c)
-be_list(pscp PSCP SSH)
-target_link_libraries(pscp
-  sftpclient eventloop console sshclient settings network crypto utils
-  ${platform_libraries})
-installed_program(pscp)
-
-add_executable(psftp
-  psftp.c)
-be_list(psftp PSFTP SSH)
-target_link_libraries(psftp
-  sftpclient eventloop console sshclient settings network crypto utils
-  ${platform_libraries})
-installed_program(psftp)
-
-add_executable(psocks
-  ${platform}/psocks.c
-  psocks.c
-  stubs/no-rand.c
-  proxy/nocproxy.c
-  proxy/nosshproxy.c
-  ssh/portfwd.c)
-target_link_libraries(psocks
-  eventloop console network utils
-  ${platform_libraries})
+# cn: 本项目只交付 putty 本体（图形界面，含内置 SFTP 双栏）。
+#
+# 上游的 plink / pscp / psftp / psocks / pageant / puttygen / puttytel
+# 已从构建中移除：它们从未随本汉化分支维护，其中 puttytel 甚至无法链接
+# （弹窗实现只在 sftpwin.c，而该文件只编进 putty 目标）。
+# putty 本体对这些程序零依赖 —— SFTP 走内置 ssh/sftp.c，Pageant 通过
+# 共享内存 PageantRequest 通信，缺了 exe 只影响「有没有代理可用」。
+#
+# 源码文件仍保留在树上，需要时把对应 add_executable 加回来即可。
 
 add_executable(test_conf
   test/test_conf.c

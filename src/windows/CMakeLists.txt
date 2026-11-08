@@ -77,27 +77,8 @@ target_sources(network PRIVATE $<TARGET_OBJECTS:handle-io>)
 add_library(guimisc STATIC
   select-gui.c)
 
-add_executable(pageant
-  pageant.c
-  help.c
-  pageant.rc)
-add_dependencies(pageant generated_licence_h)
-target_link_libraries(pageant
-  guimisc eventloop agent network crypto utils
-  ${platform_libraries})
-set_target_properties(pageant PROPERTIES WIN32_EXECUTABLE ON)
-installed_program(pageant)
-
-add_sources_from_current_dir(plink no-jump-list.c nohelp.c plink.rc)
-add_dependencies(plink generated_licence_h)
-
-add_sources_from_current_dir(pscp no-jump-list.c nohelp.c pscp.rc)
-add_dependencies(pscp generated_licence_h)
-
-add_sources_from_current_dir(psftp no-jump-list.c nohelp.c psftp.rc)
-add_dependencies(psftp generated_licence_h)
-
-add_sources_from_current_dir(psocks nohelp.c)
+# cn: pageant / puttytel / puttygen 已从构建中移除，只交付 putty 本体。
+# 详见 src/CMakeLists.txt 里的说明。
 
 add_executable(putty
   window.c
@@ -121,45 +102,7 @@ target_link_libraries(putty
 set_target_properties(putty PROPERTIES WIN32_EXECUTABLE ON)
 installed_program(putty)
 
-add_executable(puttytel
-  window.c
-  putty.c
-  help.c
-  ${CMAKE_SOURCE_DIR}/stubs/no-gss.c
-  ${CMAKE_SOURCE_DIR}/stubs/no-ca-config.c
-  ${CMAKE_SOURCE_DIR}/stubs/no-console.c
-  ${CMAKE_SOURCE_DIR}/stubs/no-rand.c
-  ${CMAKE_SOURCE_DIR}/stubs/no-dit.c
-  ${CMAKE_SOURCE_DIR}/stubs/no-keyimport.c
-  ${CMAKE_SOURCE_DIR}/stubs/no-sftp.c
-  ${CMAKE_SOURCE_DIR}/proxy/nocproxy.c
-  ${CMAKE_SOURCE_DIR}/proxy/nosshproxy.c
-  puttytel.rc)
-be_list(puttytel PuTTYtel SERIAL OTHERBACKENDS)
-add_dependencies(puttytel generated_licence_h)
-target_link_libraries(puttytel
-  guiterminal guimisc eventloop otherbackends settings network utils
-  ${platform_libraries})
-set_target_properties(puttytel PROPERTIES WIN32_EXECUTABLE ON)
-installed_program(puttytel)
-
-add_executable(puttygen
-  puttygen.c
-  ${CMAKE_SOURCE_DIR}/stubs/no-timing.c
-  noise.c
-  no-jump-list.c
-  storage.c
-  help.c
-  ${CMAKE_SOURCE_DIR}/sshpubk.c
-  ${CMAKE_SOURCE_DIR}/sshrand.c
-  controls.c
-  puttygen.rc)
-add_dependencies(puttygen generated_licence_h)
-target_link_libraries(puttygen
-  keygen guimisc crypto utils
-  ${platform_libraries})
-set_target_properties(puttygen PROPERTIES WIN32_EXECUTABLE ON)
-installed_program(puttygen)
+# cn: puttytel 目标已移除（它在本汉化分支里无法链接，且从未维护）。
 
 if(HAVE_CONPTY)
   add_executable(pterm

@@ -46,24 +46,14 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务："
 
 [Files]
+; cn: 只交付 putty 本体（含内置 SFTP 双栏）。puttygen / plink / pscp /
+; psftp / pageant / puttytel 已不再构建，源码仍保留在树上。
 Source: "..\dist\putty.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dist\puttygen.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dist\plink.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dist\pscp.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dist\psftp.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dist\pageant.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dist\puttytel.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENCE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\PuTTY"; Filename: "{app}\putty.exe"
-Name: "{group}\PuTTYgen 密钥工具"; Filename: "{app}\puttygen.exe"
-Name: "{group}\PLink 命令行 SSH"; Filename: "{app}\plink.exe"
-Name: "{group}\PSCP 文件传输"; Filename: "{app}\pscp.exe"
-Name: "{group}\PSFTP 文件传输"; Filename: "{app}\psftp.exe"
-Name: "{group}\Pageant 密钥代理"; Filename: "{app}\pageant.exe"
-Name: "{group}\PuTTYtel 纯 Telnet"; Filename: "{app}\puttytel.exe"
 Name: "{group}\使用说明"; Filename: "{app}\README.md"
 Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\PuTTY"; Filename: "{app}\putty.exe"; Tasks: desktopicon
