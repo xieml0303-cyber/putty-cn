@@ -776,6 +776,42 @@ void dlg_mark_clean(dlgparam *dp);
 bool dlg_undo_change(dlgparam *dp);
 
 /*
+ * 「退出」按钮与标题栏 X 共用的未保存改动确认。两者走同一个自绘弹窗
+ * （与「确认保存」同源），三个按钮：直接退出 / 取消 / 保存并退出。
+ * 清单为空（本来没改动）时直接返回 CN_QUIT_DISCARD，不弹窗。
+ */
+typedef enum {
+    CN_QUIT_DISCARD,       /* 直接退出：放弃改动关窗 */
+    CN_QUIT_SAVE,          /* 保存并退出：落盘后关窗 */
+    CN_QUIT_STAY,          /* 取消：留在配置框里 */
+} CnQuitChoice;
+
+/*
+ * 返回用户的选择。调用方按结果决定「关窗 / 落盘后关窗 / 什么都不做」。
+ * 本函数只负责询问，不落盘也不关窗。
+ */
+CnQuitChoice dlg_confirm_quit(dlgparam *dp);
+
+/*
+ * 点「连接」或「文件传输」前的改动确认。清单为空时直接放行，不弹窗。
+ * 有改动时弹出与「确认保存」同款的弹窗，左按钮「仅本次生效」、右按钮
+ * 「长期生效」，右上角关闭等同「仅本次生效」。
+ */
+typedef enum {
+    CN_LAUNCH_GO,          /* 无改动，直接继续 */
+    CN_LAUNCH_ONCE,        /* 仅本次生效：继续，不落盘 */
+    CN_LAUNCH_PERSIST,     /* 长期生效：落盘后继续 */
+    CN_LAUNCH_CANCEL,      /* 点了右上角 ❌：连弹窗带操作一起取消 */
+} CnLaunchChoice;
+
+/*
+ * 返回用户的选择；调用方据此决定是否落盘、是否继续执行。除
+ * CN_LAUNCH_CANCEL 外，都必须继续原定的连接 / 文件传输操作
+ * （本函数不触发它们，只负责询问）。
+ */
+CnLaunchChoice dlg_confirm_launch(dlgparam *dp);
+
+/*
  * Routines to manage a (per-platform) colour selector.
  * dlg_coloursel_start() is called in an event handler, and
  * schedules the running of a colour selector after the event

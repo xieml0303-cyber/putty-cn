@@ -107,148 +107,6 @@ static void pds_free(PortableDialogStuff *pds)
 }
 
 /*
- * Ask what to do about unsaved changes when the config box is closed
- * with the title-bar X. Returns 1 for "保存并退出", 2 for "discard
- * and exit", and 0 for "cancel" (stay in the box).
- */
-static INT_PTR CALLBACK SaveChangesProc(HWND hwnd, UINT msg,
-                                        WPARAM wParam, LPARAM lParam)
-{
-    switch (msg) {
-      case WM_INITDIALOG:
-        if (lParam) {
-            const char *text = (const char *)lParam;
-            SetDlgItemText(hwnd, IDC_CHANGE_LIST, text);
-            /*
-             * cn: size the change-list area (and the dialog itself)
-             * to the actual number of lines, capped at the template
-             * height so very long lists keep scrolling.
-             */
-            {
-                int lines = 1;
-                for (const char *p = text; *p; p++)
-                    if (*p == '\n')
-                        lines++;
-                if (lines > 12)
-                    lines = 12;
-                /* Full template = 12 lines of list (height 100 dlg
-                 * units). Each missing line shrinks the dialog by
-                 * 8 dlg units of height. */
-                int missing = 12 - lines;
-                if (missing > 0) {
-                    RECT r;
-                    r.left = r.top = r.right = 0;
-                    r.bottom = missing * 8;
-                    MapDialogRect(hwnd, &r);
-                    int dy = r.bottom;
-                    HWND he = GetDlgItem(hwnd, IDC_CHANGE_LIST);
-                    HWND hn = GetDlgItem(hwnd, IDC_CHANGE_NOTE);
-                    HWND h1 = GetDlgItem(hwnd, IDC_DISCARD_EXIT);
-                    HWND h2 = GetDlgItem(hwnd, IDCANCEL);
-                    HWND h3 = GetDlgItem(hwnd, IDC_SAVE_EXIT);
-                    RECT re;
-                    GetWindowRect(he, &re);
-                    POINT pt = { re.left, re.bottom };
-                    ScreenToClient(hwnd, &pt);
-                    /* shrink the list area */
-                    SetWindowPos(he, NULL, 0, 0, re.right - re.left,
-                                 re.bottom - re.top - dy,
-                                 SWP_NOMOVE | SWP_NOZORDER);
-                    /* shift the trailing controls up, keeping their x */
-                    HWND moves[] = { hn, h1, h2, h3 };
-                    for (int i = 0; i < 4; i++) {
-                        RECT r2;
-                        GetWindowRect(moves[i], &r2);
-                        POINT p2 = { r2.left, r2.top };
-                        ScreenToClient(hwnd, &p2);
-                        SetWindowPos(moves[i], NULL, p2.x, p2.y - dy,
-                                     0, 0, SWP_NOSIZE | SWP_NOZORDER);
-                    }
-                    RECT rw;
-                    GetWindowRect(hwnd, &rw);
-                    SetWindowPos(hwnd, NULL, 0, 0,
-                                 rw.right - rw.left, rw.bottom - rw.top - dy,
-                                 SWP_NOMOVE | SWP_NOZORDER);
-                }
-            }
-        }
-        return TRUE;
-      case WM_DRAWITEM: {
-        /*
-         * cn: render the "直接退出" button with a red frame and red
-         * text, signalling the destructive choice.
-         */
-        DRAWITEMSTRUCT *dis = (DRAWITEMSTRUCT *)lParam;
-        if (dis->CtlID != IDC_DISCARD_EXIT)
-            break;
-        COLORREF red = RGB(0xC0, 0x1E, 0x1E);
-        HPEN pen = CreatePen(PS_SOLID, 2, red);
-        HPEN oldpen = SelectObject(dis->hDC, pen);
-        bool selected = (dis->itemState & ODS_SELECTED) != 0;
-        HBRUSH bg = selected
-            ? CreateSolidBrush(RGB(0xF5, 0xD0, 0xD0))
-            : GetSysColorBrush(COLOR_BTNFACE);
-        RECT rc = dis->rcItem;
-        FillRect(dis->hDC, &rc, bg);
-        SelectObject(dis->hDC, oldpen);
-        HBRUSH redb = CreateSolidBrush(red);
-        FrameRect(dis->hDC, &rc, redb);
-        DeleteObject(redb);
-        SetBkMode(dis->hDC, TRANSPARENT);
-        SetTextColor(dis->hDC, red);
-        char text[64];
-        GetWindowText(dis->hwndItem, text, sizeof(text));
-        DrawText(dis->hDC, text, -1, &rc,
-                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        DeleteObject(pen);
-        if (selected)
-            DeleteObject(bg);
-        return TRUE;
-      }
-      case WM_COMMAND:
-        switch (LOWORD(wParam)) {
-          case IDC_SAVE_EXIT:
-            EndDialog(hwnd, 1);
-            return TRUE;
-          case IDC_DISCARD_EXIT: {
-            /*
-             * cn: second confirmation for the destructive choice.
-             */
-            int mb = message_box(hwnd,
-                                 "确定不保存直接退出吗？\n未保存的修改将丢失。",
-                                 "确认直接退出",
-                                 MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2,
-                                 true, 0);
-            if (mb != IDYES)
-                return TRUE;
-            EndDialog(hwnd, 2);
-            return TRUE;
-          }
-          case IDCANCEL:
-            EndDialog(hwnd, 0);
-            return TRUE;
-        }
-        break;
-      case WM_CTLCOLORSTATIC:
-        /*
-         * cn: the read-only change list should look like plain text
-         * on the dialog background, not a grayed-out edit control.
-         */
-        if (GetDlgItem(hwnd, IDC_CHANGE_LIST) == (HWND)lParam) {
-            HDC hdc = (HDC)wParam;
-            SetBkColor(hdc, GetSysColor(COLOR_BTNFACE));
-            SetTextColor(hdc, GetSysColor(COLOR_WINDOWTEXT));
-            return (INT_PTR)GetSysColorBrush(COLOR_BTNFACE);
-        }
-        break;
-      case WM_CLOSE:
-        EndDialog(hwnd, 0);
-        return TRUE;
-    }
-    return FALSE;
-}
-
-/*
  * cn: restyle the Delete and 设置初始化 buttons of the startup config
  * box — smaller font (so 设置初始化 fits on one line), shorter
  * buttons, and the pair pinned to the bottom edge of the history
@@ -415,13 +273,6 @@ static void cn_style_snapshot_buttons(HWND hwnd)
     }
 }
 
-static int ask_save_changes(HWND hwnd, const char *changelog)
-{
-    INT_PTR ret = DialogBoxParam(hinst, MAKEINTRESOURCE(IDD_SAVECHANGES),
-                                 hwnd, SaveChangesProc, (LPARAM)changelog);
-    return (ret == 1 || ret == 2) ? (int)ret : 0;
-}
-
 /*
  * cn: Save-confirmation prompt for the save button, showing the list
  * of changes about to be persisted. Returns true to go ahead.
@@ -445,6 +296,72 @@ bool dlg_confirm_changes(dlgparam *dp, const char *title,
     int mbret = message_box(dp->hwnd, changes, title,
                             MB_OKCANCEL | MB_ICONQUESTION, true, 0);
     return mbret == IDOK;
+}
+
+/*
+ * cn: 「退出」按钮与标题栏 X 共用的未保存改动确认。
+ *
+ * 两者走同一套判据、同一个自绘弹窗（与「确认保存」同源），避免两条
+ * 退出路径给出不同界面、不同答案 —— 这正是主人截图指出的问题：
+ * 点 X 弹的是旧的 IDD_SAVECHANGES 模板（三个按钮、另一套字号），
+ * 点「退出」弹的是通用 message_box，两处长得完全不一样。
+ *
+ * 三个按钮，语义与旧模板一一对应：
+ *   直接退出（左，红框）→ CN_QUIT_DISCARD，放弃改动关窗；
+ *   取消（中）          → CN_QUIT_STAY，留在配置框里；
+ *   保存并退出（右，蓝框默认）→ CN_QUIT_SAVE，落盘后关窗。
+ *
+ * 清单为空（本来就没改动）直接返回 CN_QUIT_DISCARD，一次弹窗都不出。
+ */
+CnQuitChoice dlg_confirm_quit(dlgparam *dp)
+{
+    if (!dlg_has_unsaved_changes(dp))
+        return CN_QUIT_DISCARD;
+
+    char *changes = conf_describe_changes(dp->baseline, dp->data);
+    /* cn: 文案取自 cn_quit_texts（唯一定义处），与看图入口同源。 */
+    int mbret = cn_confirm_dialog_texts(dp->hwnd, changes, &cn_quit_texts,
+                                        NULL);
+    sfree(changes);
+
+    if (mbret == IDYES)
+        return CN_QUIT_SAVE;           /* 右按钮「保存并退出」 */
+    if (mbret == IDOK)
+        return CN_QUIT_DISCARD;        /* 左按钮「直接退出」 */
+    return CN_QUIT_STAY;               /* 中按钮「取消」/ ❌ / Esc */
+}
+
+/*
+ * cn: 点「连接」或「文件传输」前的改动确认。
+ *
+ * 清单为空（没改过任何配置）就直接放行，一次弹窗都不出现 —— 大多数
+ * 用户就是「打开、填个地址、连接」，不该被拦一道。
+ *
+ * 有改动才弹，复用「确认保存」那套自绘弹窗，只换文案：
+ *   左按钮「仅本次生效」→ 改动跟着这次连接走，不落盘；
+ *   右按钮「长期生效」  → 改动写进注册表（默认按钮，蓝框）；
+ *   右上角 ❌           → 什么都不做，连弹窗带连接一起取消。
+ *
+ * ⚠️ 本函数只负责问，不负责启动连接 —— 调用方拿到 CN_LAUNCH_ONCE /
+ * CN_LAUNCH_PERSIST 后必须继续原定的操作，避免「弹了框却没连」。
+ */
+CnLaunchChoice dlg_confirm_launch(dlgparam *dp)
+{
+    if (!dlg_has_unsaved_changes(dp))
+        return CN_LAUNCH_GO;
+
+    char *changes = conf_describe_changes(dp->baseline, dp->data);
+    /* cn: 文案取自 cn_launch_texts（唯一定义处），与看图入口同源。 */
+    bool closed_by_x = false;
+    int mbret = cn_confirm_dialog_texts(dp->hwnd, changes, &cn_launch_texts,
+                                        &closed_by_x);
+    sfree(changes);
+
+    if (mbret == IDOK)
+        return CN_LAUNCH_ONCE;         /* 左按钮「仅本次生效」 */
+    if (closed_by_x)
+        return CN_LAUNCH_CANCEL;       /* ❌：只关弹窗，不连接 */
+    return CN_LAUNCH_PERSIST;          /* 右按钮「长期生效」 */
 }
 
 static INT_PTR pds_default_dlgproc(PortableDialogStuff *pds, HWND hwnd,
@@ -481,15 +398,18 @@ static INT_PTR pds_default_dlgproc(PortableDialogStuff *pds, HWND hwnd,
             MessageBeep(0);
         break;
       case WM_CLOSE:
+        /*
+         * cn: 标题栏 X 与「退出」按钮现在走同一个确认函数、同一个自绘
+         * 弹窗（三个按钮：直接退出 / 取消 / 保存并退出）。此前这里是
+         * 另一套旧的 IDD_SAVECHANGES 模板，两处界面长得完全不一样 ——
+         * 主人截图对比后要求统一，故删掉旧模板，只留这一条路径。
+         */
         if (dlg_has_unsaved_changes(pds->dp)) {
-            char *changes = conf_describe_changes(pds->dp->baseline,
-                                                  pds->dp->data);
-            int choice = ask_save_changes(hwnd, changes);
-            sfree(changes);
-            if (choice == 0)
-                return TRUE;           /* stay in the box */
-            quit_help(hwnd);
-            if (choice == 1) {
+            switch (dlg_confirm_quit(pds->dp)) {
+              case CN_QUIT_STAY:
+                return TRUE;           /* 取消：留在配置框里 */
+              case CN_QUIT_SAVE:
+                quit_help(hwnd);
                 if (pds->dp->apply_cb) {
                     /* Mid-session box: apply the settings in place. */
                     if (dlg_apply_config(pds->dp))
@@ -507,10 +427,13 @@ static INT_PTR pds_default_dlgproc(PortableDialogStuff *pds, HWND hwnd,
                     }
                     ShinyEndDialog(hwnd, 1);
                 }
-            } else {
+                return TRUE;
+              case CN_QUIT_DISCARD:
+              default:
+                quit_help(hwnd);
                 ShinyEndDialog(hwnd, 0);   /* discard, then exit */
+                return TRUE;
             }
-            return TRUE;
         }
         quit_help(hwnd);
         ShinyEndDialog(hwnd, 0);

@@ -2864,7 +2864,17 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
         if (msg == WM_COMMAND &&
             (HIWORD(wParam) == BN_CLICKED ||
              HIWORD(wParam) == BN_DOUBLECLICKED)) {
+            /*
+             * cn: 处理器可能已经自己决定了「关窗还是不关」。凡是它
+             * 明确认领过的点击，就不能再返回 false —— 一旦返回
+             * false，IDCANCEL 这类系统 ID 会被 Windows 对话框管理器
+             * 接手直接关窗，处理器拦不住（配置框「退出」按钮正是
+             * 这个 ID）。
+             */
+            dp->action_handled = false;
             dlg_send_event(ctrl, dp, EVENT_ACTION);
+            if (dp->action_handled)
+                ret = true;
         }
         break;
       case CTRL_LISTBOX:

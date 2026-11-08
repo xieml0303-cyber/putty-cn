@@ -23,7 +23,7 @@
 #define IDD_HOSTKEY      114
 #define IDD_HK_MOREINFO  116
 #define IDD_CA_CONFIG    117
-#define IDD_SAVECHANGES  118
+/* cn: 118 原为 IDD_SAVECHANGES（已删：X 与「退出」按钮改用自绘弹窗） */
 #define IDD_KEYPASS      119
 
 #define IDN_LIST        1001
@@ -40,10 +40,8 @@
 #define IDC_TABLIST     1004
 #define IDC_HELPBTN     1005
 #define IDC_ABOUT       1006
-#define IDC_SAVE_EXIT    1007
-#define IDC_DISCARD_EXIT 1008
-#define IDC_CHANGE_LIST  1009
-#define IDC_CHANGE_NOTE  1010
+/* cn: 1007~1010 原属已删的 IDD_SAVECHANGES 模板（保存并退出 / 直接退出 /
+ * 改动清单 / 提示语），保留空号不复用，免得与旧资源编号撞车。 */
 
 #define IDC_HK_ICON       98
 #define IDC_HK_TITLE      99

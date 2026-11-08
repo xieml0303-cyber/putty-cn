@@ -1750,6 +1750,25 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
              * 第二条连接。失败时不置 cn_session_wants_xfer、不 dlg_end，
              * 保留配置框供改参数重试。
              */
+            /*
+             * cn: 与「连接」同一道确认：清单为空直接放行，有改动才
+             * 问「仅本次 / 长期」。选长期就把改动落盘，然后继续开
+             * 传输窗口；点 ❌ 则什么都不做（连窗口都不开）。
+             */
+            {
+                CnLaunchChoice lc = dlg_confirm_launch(dlg);
+                if (lc == CN_LAUNCH_CANCEL)
+                    return;
+                if (lc == CN_LAUNCH_PERSIST) {
+                    char *errmsg = cn_persist_default_settings(conf);
+                    if (errmsg) {
+                        dlg_error_msg(dlg, errmsg);
+                        sfree(errmsg);
+                        return;
+                    }
+                    dlg_mark_clean(dlg);
+                }
+            }
             {
                 char *err = sftp_window_open(conf, NULL);
                 if (err) {
@@ -1774,6 +1793,44 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                                     ssd->history[id].username);
                     refresh_history(ssd, dlg);
                 }
+            }
+        } else if (!ssd->midsession && ctrl == ssd->cancelbutton) {
+            /*
+             * cn: 「退出」按钮。这个按钮的控件 ID 被映射成系统
+             * IDCANCEL（见 controls.c 里 button.iscancel 的处理），
+             * 而按钮点击默认让 winctrl_handle_command 返回 false，
+             * 消息就落到 Windows 对话框管理器的默认处理上直接关窗
+             * —— 未保存的改动被无声丢弃。这里认领这次点击
+             * （action_handled），关不关窗完全由下面的判断说了算：
+             * 有改动就走与标题栏 X 相同的确认流程，用户点「取消」
+             * 时留在配置框里。
+             */
+            dlg->action_handled = true;
+            switch (dlg_confirm_quit(dlg)) {
+              case CN_QUIT_DISCARD:
+                /* 放弃改动，直接关窗。 */
+                dlg_end(dlg, 0);
+                break;
+              case CN_QUIT_SAVE:
+                /*
+                 * 保存并退出：先落盘，成功才关窗。落盘失败就留在
+                 * 配置框里，让用户看见错误、还有机会重试或改。
+                 */
+                {
+                    char *errmsg = cn_persist_default_settings(conf);
+                    if (errmsg) {
+                        dlg_error_msg(dlg, errmsg);
+                        sfree(errmsg);
+                    } else {
+                        dlg_mark_clean(dlg);
+                        dlg_end(dlg, 0);
+                    }
+                }
+                break;
+              case CN_QUIT_STAY:
+              default:
+                /* 取消：什么都不做，留在配置框里。 */
+                break;
             }
         } else if (ctrl == ssd->okbutton) {
             /* 退出时关闭窗口固定为「从不」。 */
@@ -1836,6 +1893,25 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                         dlg_info_msg(dlg, msg);
                         sfree(msg);
                         return;
+                    }
+                }
+                /*
+                 * cn: 启动前先问改动怎么生效。清单为空直接放行；
+                 * 有改动才弹「仅本次生效 / 长期生效」。点 ❌ 则取消
+                 * 本次连接；其余情况都继续连，不中断、不重复触发。
+                 */
+                {
+                    CnLaunchChoice lc = dlg_confirm_launch(dlg);
+                    if (lc == CN_LAUNCH_CANCEL)
+                        return;
+                    if (lc == CN_LAUNCH_PERSIST) {
+                        char *errmsg = cn_persist_default_settings(conf);
+                        if (errmsg) {
+                            dlg_error_msg(dlg, errmsg);
+                            sfree(errmsg);
+                            return;
+                        }
+                        dlg_mark_clean(dlg);
                     }
                 }
                 /*

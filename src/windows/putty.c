@@ -15,6 +15,18 @@ static bool sftp_win_selftest = false;
 static bool sftp_win_open_only = false;
 /* cn: -sftp-open-fail 故意让连接失败，验证不弹框/不残留窗口 */
 static bool sftp_win_open_fail = false;
+/* cn: -confirm-save 「确认保存」弹窗版面自检（建窗即量、不跑循环） */
+static bool confirm_save_selftest = false;
+/* cn: -confirm-quit 「退出」按钮未保存改动拦截自检 */
+static bool confirm_quit_selftest = false;
+/* cn: -confirm-launch 「连接/文件传输」前改动确认自检 */
+static bool confirm_launch_selftest = false;
+/* cn: -confirm-launch-show 显示该弹窗供人工看图 */
+static bool confirm_launch_show = false;
+/* cn: -confirm-save-show 把「确认保存」弹窗真显示出来，供人工看图 */
+static bool confirm_save_show = false;
+/* cn: -confirm-quit-show 把退出确认（三按钮）真显示出来，供人工看图 */
+static bool confirm_quit_show = false;
 /* cn: -sftp-recurse 目录递归传输自检的源与目标 */
 static char *sftp_recurse_src = NULL;
 static char *sftp_recurse_dst = NULL;
@@ -26,6 +38,17 @@ static char *sftp_resume_dst = NULL;
 void sftp_selftest_list(Conf *conf, const char *path);
 void sftp_selftest_window(Conf *conf);
 void sftp_selftest_open_fail(Conf *conf);
+void sftp_selftest_confirm_save(void);
+/* cn: 「退出」按钮未保存改动拦截自检 */
+void sftp_selftest_confirm_quit(void);
+/* cn: 「连接 / 文件传输」前改动确认自检 */
+void sftp_selftest_confirm_launch(void);
+/* cn: -confirm-launch-show 把该弹窗真显示出来供截图 */
+void sftp_show_confirm_launch(void);
+/* cn: -confirm-quit-show 把退出确认（三按钮）真显示出来供截图 */
+void sftp_show_confirm_quit(void);
+/* cn: 把「确认保存」弹窗真显示出来，供人工看图 */
+void sftp_show_confirm_save(void);
 void sftp_selftest_recurse_run(Conf *conf, const char *src, const char *dst);
 void sftp_selftest_resume_run(Conf *conf, const char *localpath,
                               const char *remotepath);
@@ -174,6 +197,45 @@ void gui_term_process_cmdline(Conf *conf, char *cmdline)
                  * 结果写 sftp-open-fail-selftest.txt。
                  */
                 sftp_win_open_fail = true;
+            } else if (!strcmp(p, "-confirm-save")) {
+                /*
+                 * cn: 「确认保存」弹窗版面自检。只建窗不跑循环，
+                 * 量完几何就销毁，结果写 confirm-save-selftest.txt。
+                 * 不需要任何连接参数，纯本地跑。
+                 */
+                confirm_save_selftest = true;
+            } else if (!strcmp(p, "-confirm-quit")) {
+                /*
+                 * cn: 「退出」按钮未保存改动拦截自检。纯本地跑，
+                 * 结果写 confirm-quit-selftest.txt。
+                 */
+                confirm_quit_selftest = true;
+            } else if (!strcmp(p, "-confirm-launch")) {
+                /*
+                 * cn: 「连接 / 文件传输」前改动确认自检。纯本地跑，
+                 * 结果写 confirm-launch-selftest.txt。
+                 */
+                confirm_launch_selftest = true;
+            } else if (!strcmp(p, "-confirm-launch-show")) {
+                /*
+                 * cn: 把「连接/文件传输」前那个确认弹窗显示出来，
+                 * 供人工看图/截图。关掉即退出程序。
+                 */
+                confirm_launch_show = true;
+            } else if (!strcmp(p, "-confirm-save-show")) {
+                /*
+                 * cn: 把「确认保存」弹窗真显示出来，供人工看图/截图。
+                 * 自检模式建完就销毁，截不到图，所以单独留这个入口。
+                 * 弹窗正常等按钮，关掉即退出程序。
+                 */
+                confirm_save_show = true;
+            } else if (!strcmp(p, "-confirm-quit-show")) {
+                /*
+                 * cn: 把退出确认（三按钮：直接退出 / 取消 / 保存并退出）
+                 * 真显示出来，供人工看图。自检只能量样式位，红框和蓝框
+                 * 画得对不对得看图。
+                 */
+                confirm_quit_show = true;
             } else if (!strcmp(p, "-sftp-recurse")) {
                 /*
                  * cn: 目录递归传输自检。用法：
@@ -235,6 +297,30 @@ void gui_term_process_cmdline(Conf *conf, char *cmdline)
     } else if (sftp_win_open_fail) {
         /* cn: 打开失败自检，不弹框、不残留窗口，结果写文件后退出。 */
         sftp_selftest_open_fail(conf);
+        cleanup_exit(0);
+    } else if (confirm_save_selftest) {
+        /* cn: 「确认保存」弹窗版面自检，量完即退。 */
+        sftp_selftest_confirm_save();
+        cleanup_exit(0);
+    } else if (confirm_quit_selftest) {
+        /* cn: 「退出」按钮未保存改动拦截自检，纯逻辑、不弹窗。 */
+        sftp_selftest_confirm_quit();
+        cleanup_exit(0);
+    } else if (confirm_launch_selftest) {
+        /* cn: 「连接/文件传输」前改动确认自检。 */
+        sftp_selftest_confirm_launch();
+        cleanup_exit(0);
+    } else if (confirm_launch_show) {
+        /* cn: 真把该弹窗显示出来，供人工看图/截图。 */
+        sftp_show_confirm_launch();
+        cleanup_exit(0);
+    } else if (confirm_save_show) {
+        /* cn: 真把「确认保存」弹窗显示出来，供人工看图/截图。 */
+        sftp_show_confirm_save();
+        cleanup_exit(0);
+    } else if (confirm_quit_show) {
+        /* cn: 真把退出确认（三按钮）显示出来，供人工看图/截图。 */
+        sftp_show_confirm_quit();
         cleanup_exit(0);
     } else if (sftp_win_open_only) {
         /* cn: 只开窗口，等人看/截图，关窗后退出。 */

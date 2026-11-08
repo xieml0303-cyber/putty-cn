@@ -506,6 +506,14 @@ struct dlgparam {
     } coloursel_result;
     tree234 *privdata;                 /* stores per-control private data */
     bool ended;                        /* has the dialog been ended? */
+    /*
+     * cn: set by an EVENT_ACTION handler that has taken full
+     * responsibility for a button click (including the decision not to
+     * close the box). Without it, a button whose id is IDCANCEL falls
+     * through to the Windows dialog manager's default handling, which
+     * closes the dialog regardless of what the handler decided.
+     */
+    bool action_handled;
     int endresult;                     /* and if so, what was the result? */
     bool fixed_pitch_fonts;            /* are we constrained to fixed fonts? */
     void (*apply_cb)(void *ctx);       /* adopt settings without closing,

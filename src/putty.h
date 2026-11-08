@@ -1997,6 +1997,57 @@ char *sftp_window_open(Conf *conf, HWND parent);
 bool sftp_window_is_open(void);
 /* cn: 「确认保存」自绘弹窗（照「确认覆盖」的画法）。返回 IDOK/IDCANCEL。 */
 int cn_confirm_save_dialog(HWND parent, const char *changes);
+/*
+ * cn: 同一个弹窗，文案可换 —— 点「连接」「文件传输」时用：左按钮
+ * 「仅本次生效」、右按钮「长期生效」。texts 传 NULL 等同
+ * cn_confirm_save_dialog。返回 IDOK（仅本次）/ IDCANCEL（长期生效
+ * 或右上角关闭，两者对调用方含义不同，见 config.c 的调用处）。
+ */
+typedef struct CnConfirmTexts {
+    const char *title;                   /* 窗口标题 */
+    const char *head;                    /* 首行说明 */
+    const char *ok;                      /* 左按钮（返回 IDOK） */
+    const char *cancel;                  /* 右按钮（返回 IDCANCEL） */
+    /*
+     * cn: 默认按钮（回车触发、带蓝框）是否放在右边。false = 在左边，
+     * 这是「确认保存」的旧行为；true = 在右边，是「连接/文件传输」
+     * 那套要的样子（右按钮「长期生效」为默认）。
+     *
+     * 字段名刻意描述位置而不是「哪个按钮是默认」：按钮语义随调用方
+     * 变化（有时右按钮叫「取消」，有时叫「长期生效」），只有位置是
+     * 稳定的，所以按位置命名。
+     */
+    bool default_on_right;
+    /*
+     * cn: 可选的第三个按钮，为 NULL 时只出两个按钮（原有行为不变）。
+     *
+     * 「退出」按钮和标题栏 X 需要三个选择：直接退出 / 取消 / 保存并退出。
+     * 三按钮模式下 ok 是「直接退出」（左，红框，放弃改动），cancel 是
+     * 「取消」（中，留下），third 是「保存并退出」（右，蓝框默认）。
+     * third 被点击时返回 IDYES。
+     *
+     * ⚠️ 必须留在结构体末尾：现有调用方都用位置初始化（{标题, 首行,
+     * 左, 右, 默认在右}），插到中间会让最后那个 bool 落到新字段上，
+     * 默认按钮的设置就静默失效了。
+     */
+    const char *third;
+} CnConfirmTexts;
+/*
+ * cn: 「连接 / 文件传输」前那个改动确认弹窗的文案，唯一定义处。
+ * dlg_confirm_launch()（真实流程）与 sftp_show_confirm_launch()
+ * （-confirm-launch-show 看图入口）都引用这一份，改文案只改这里，
+ * 不会出现「截图看到的不是线上效果」。
+ */
+extern const CnConfirmTexts cn_launch_texts;
+/*
+ * cn: 退出确认（三按钮：直接退出 / 取消 / 保存并退出）的文案，
+ * 唯一定义处。dlg_confirm_quit()（真实流程）与
+ * sftp_show_confirm_quit()（-confirm-quit-show 看图入口）共用。
+ */
+extern const CnConfirmTexts cn_quit_texts;
+int cn_confirm_dialog_texts(HWND parent, const char *changes,
+                            const CnConfirmTexts *texts,
+                            bool *closed_by_x);
 void save_open_settings(settings_w *sesskey, Conf *conf);
 bool load_settings(const char *section, Conf *conf);
 void load_open_settings(settings_r *sesskey, Conf *conf);
