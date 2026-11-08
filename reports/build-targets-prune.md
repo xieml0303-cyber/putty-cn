@@ -133,12 +133,13 @@ CreateProcess(b, cl, ...);
 | `README.md` | 首段交付物说明、`dist/` 目录说明、哈希基准表（七行收为一行）、`plink -V` 版本确认方式、`T5` 功能验证项、已知限制第 2/3/5 条、构建命令 `--target` 列表 |
 | `.github/workflows/ci.yml` | 两处「七个交付物」注释更新。构建步骤本就不带 `--target`（注释已说明原因），功能不受影响 |
 
-### 4.5 产物清理
+### 4.5 产物清理与安装包重打
 
 - 删除 `dist/` 下六个旧 exe。
-- 删除 `dist/putty-cn-0.85-cn4-setup.exe`：该安装包内含六个已移除程序的安装条目，保留会误导。目录中三个历史安装包均为 `.gitignore` 覆盖的本地产物，不入库。
+- 删除 `dist/putty-cn-0.85-cn4-setup.exe` 旧包：内含六个已移除程序的安装条目，保留会误导。
+- 用 ISCC 重新编译安装包，产物复制到 `dist/`。
 
-> 注：本机未安装 Inno Setup（`ISCC.exe` 不在默认路径），安装包未重新打包。`installer/putty-cn.iss` 已更新，具备编译环境时执行 `ISCC.exe installer\putty-cn.iss` 即可产出不含旧程序的新安装包。
+> **勘误**：本节初版曾写「本机未安装 Inno Setup，安装包未重新打包」。该结论错误 —— 当时只检查了 `C:\Program Files (x86)\Inno Setup 6` 默认路径，未做全盘搜索。实际编译器位于 `%LOCALAPPDATA%\Programs\Python\Python313\InnoSetup\ISCC.exe`（Inno Setup 7.1.0），本机历史上数十次打包均使用该路径，`workspace/reports/2026-11-05-发布v0.85-cn4.md` 有明确记录。经主人指出后已重打包并完成安装验证。
 
 ---
 
@@ -190,8 +191,60 @@ Build OK: putty
 发布版 0.85-cn4
 ```
 
-### 5.4 已知遗留
+### 5.4 安装包编译与安装验证
 
-- 安装包未重新编译（本机无 Inno Setup），详见 4.5。
+编译器：`%LOCALAPPDATA%\Programs\Python\Python313\InnoSetup\ISCC.exe`（Inno Setup 7.1.0）。
+
+```
+$ ISCC.exe installer/putty-cn.iss
+Successful compile (1.828 sec).
+Resulting Setup program filename is:
+C:\Users\Wrok\Repos\putty-cn\installer\output\putty-cn-0.85-cn4-setup.exe
+```
+
+ISCC 编译日志中的压缩清单仅三项：
+
+```
+Compressing: dist\putty.exe
+Compressing: LICENCE
+Compressing: README.md
+```
+
+产物大小 **3,011,695** 字节，较上一版旧包（3,257,223）减少 245,528 字节，与移除六个程序的预期一致。
+
+**安装实测**（静默安装到临时目录后逐项核对，非仅凭编译日志）：
+
+```
+$ Start-Process putty-cn-0.85-cn4-setup.exe \
+    -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART', \
+                  '/DIR=C:\tmp_install_test','/LOG=C:\tmp_install_test.log' -Wait
+EXIT=0
+```
+
+安装目录实际内容：
+
+```
+LICENCE              1,283
+README.md           11,258
+putty.exe        3,166,671
+unins000.dat         3,303
+unins000.exe     4,379,126
+```
+
+六个旧程序无一存在。`putty.exe` 的 SHA256 与 `src/build/putty.exe` 完全一致
+（`f353d789dd5e886dd6d9126db4b41461885931db302724835d5f16fa0e97dd9a`），
+且运行该安装副本执行 `-confirm-save` 自检通过 25 项、0 失败。
+
+卸载验证：执行 `unins000.exe /VERYSILENT` 后安装目录清空，注册表
+`HKCU\...\Uninstall` 下无 PuTTY 残留项。
+
+> 打包过程踩到的坑：在 Git Bash 中直接调用安装包时，MSYS 会把 `/VERYSILENT`
+> 之类的开关当成路径转换成 `C:/Program Files/Git/VERYSILENT`，导致安装程序
+> 识别不到参数而卡在交互界面。须改用 PowerShell 的 `Start-Process -ArgumentList`
+> 传参，或使用 `//VERYSILENT` 双斜杠写法。
+
+### 5.5 已知遗留
+
 - `src/unix/CMakeLists.txt` 与 `src/doc/CMakeLists.txt` 中仍有 `plink` / `pscp` / `psftp` / `puttygen` / `pageant` 相关定义。二者不参与 Windows 构建，本次未改动，避免扩大改动面。
 - 七个程序的源码文件全部保留在树上。需要恢复时，把对应的 `add_executable` 段加回 CMake 即可；`puttytel` 若要恢复，还须先解决第 1.2 节的桩缺失问题。
+- 安装包未做代码签名，首次运行仍会触发 SmartScreen 提示（与历史版本一致）。

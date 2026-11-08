@@ -42,7 +42,7 @@
 
 ## 安装包（推荐）
 
-从 [Releases](https://github.com/xieml0303-cyber/putty-cn/releases/latest) 下载 `putty-cn-0.85-cn4-setup.exe`（SHA256 `3a3c74d52e8bd5619a3bebff249e35241d0971a126143cfe46cd338d038b4509`），双击运行、按中文向导安装即可：
+从 [Releases](https://github.com/xieml0303-cyber/putty-cn/releases/latest) 下载 `putty-cn-0.85-cn4-setup.exe`（SHA256 `9f4bbebaa9fc6e025df4b4935fa22fd4debe3cebb788e555ec8ad2dc7029e034`），双击运行、按中文向导安装即可：
 
 - 装到当前用户目录 `%LOCALAPPDATA%\Programs\PuTTY-cn`，不需要管理员权限；
 - 自动创建开始菜单项与桌面快捷方式，安装完可直接启动；
@@ -59,7 +59,7 @@
 
 | 文件 | 用途 | 大小（字节） | SHA256 |
 |------|------|-------------|--------|
-| `putty.exe` | 图形界面终端（SSH / Telnet / 串口 / SFTP 双栏） | 2,033,169 | `2eb157df939ae0730170ce209418037998fcf8d6409dc1935adf8e23a0a32d92` |
+| `putty.exe` | 图形界面终端（SSH / Telnet / 串口 / SFTP 双栏） | 3,166,671 | `f353d789dd5e886dd6d9126db4b41461885931db302724835d5f16fa0e97dd9a` |
 
 - 仅依赖系统 DLL（ADVAPI32、COMCTL32、GDI32、IMM32、KERNEL32、SHELL32、USER32、comdlg32、msvcrt、ole32），无需 MinGW 运行库。
 - `putty.exe` 启动后窗口标题为「PuTTY 配置」（英文版为 "PuTTY Configuration"）。
