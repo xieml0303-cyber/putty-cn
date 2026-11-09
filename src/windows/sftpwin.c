@@ -178,6 +178,24 @@ typedef struct SftpWin {
         int frame;
         int done;               /* CN_LOADING_DONE_* */
     } loading;
+
+    /*
+     * cn: 结果提示条（toast）。
+     *
+     * 一批传输收尾后浮在窗口底部居中，滑入 -> 停留 -> 淡出，几秒后自己
+     * 消失。只做「这一批干完了」的通知，不拦鼠标（HTTRANSPARENT），也不
+     * 抢焦点（WS_EX_NOACTIVATE），免得挡住用户紧接着要点的按钮。
+     *
+     * 复用一条窗口而不是每次新建：连续传几批时，上一条还没消失就被新
+     * 文案顶掉，比叠出两三个提示条干净得多。
+     */
+    struct {
+        HWND hwnd;              /* 提示条窗口，NULL 表示还没建过 */
+        HFONT font;             /* 绘制用字体，借用主窗口那一份，不拥有 */
+        wchar_t *text;          /* 当前文案，换一条就重设 */
+        int phase;              /* CN_TOAST_* */
+        int tick;               /* 当前阶段已过的帧数 */
+    } toast;
 } SftpWin;
 
 static SftpWin *the_sftpwin = NULL;
@@ -2411,6 +2429,414 @@ static void cn_tip_track(CnTipState *st, HWND hwnd, LPARAM lparam)
     TrackMouseEvent(&tme);
 }
 
+/* ====================================================================
+ * cn: 传输结果提示条（toast）。
+ *
+ * 一批传输收尾后，在窗口底部浮出一条深色圆角提示：滑入 -> 停留 -> 淡出，
+ * 约 1.5 秒后自己消失，不打断任何操作。
+ *
+ * 为什么不用状态栏那一行：状态栏贴着窗口最底、字又小，传完这一刻用户视线
+ * 还在两个列表上，那一行改了也多半没看见。提示条浮在列表下沿附近，正好
+ * 落在视线余光里。
+ *
+ * 几条刻意的取舍：
+ *  - 不拦鼠标（HTTRANSPARENT）、不抢焦点（WS_EX_NOACTIVATE）：它压着窗口
+ *    底部，用户紧接着可能就要点「终止」或拖下一批文件，被挡一下都烦。
+ *  - 用一个窗口反复显示，换文案就地改尺寸重排：连续传几批时新提示顶掉
+ *    旧的，不会在屏幕上叠出一摞。
+ *  - 圆角靠 SetWindowRgn 裁，淡入淡出靠分层窗口的 alpha，全是 GDI 手段，
+ *    不必为此引 Direct2D。
+ */
+#define CN_TOAST_IN       0
+#define CN_TOAST_HOLD     1
+#define CN_TOAST_OUT      2
+
+#define CN_TOAST_TIMER        0x5F31  /* 定时器 ID，只挂在提示条自己的窗口上 */
+#define CN_TOAST_FRAME_MS     16      /* 约 60fps */
+#define CN_TOAST_IN_FRAMES    10      /* 滑入淡入 160ms */
+#define CN_TOAST_OUT_FRAMES   10      /* 淡出 160ms */
+#define CN_TOAST_HOLD_FRAMES  95      /* 停留 ≈ 1.5 秒 */
+
+/* 与冲突浮层同一套深色配色，界面里深浅两种浮层不必各调一种黑。 */
+#define CN_TOAST_BG    RGB(0x17, 0x1b, 0x23)
+#define CN_TOAST_FG    RGB(0xff, 0xff, 0xff)
+#define CN_TOAST_EDGE  RGB(0x3a, 0x42, 0x50)
+
+/* 提示条用的字体：跟主窗口列表同一套，只是要保证拿得到一份可用的。 */
+static HFONT cn_toast_font(SftpWin *sw)
+{
+    if (!sw->toast.font) {
+        /*
+         * 借主窗口那份：它在 cn_sftpwin_dispose 里统一释放，这里只借用不
+         * 拥有（font_owned 恒为 false），免得两个地方都去删同一个句柄。
+         */
+        if (sw->font)
+            sw->toast.font = sw->font;
+        else
+            sw->toast.font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    }
+    return sw->toast.font;
+}
+
+/*
+ * 按当前文案量出提示条客户区尺寸。
+ *
+ * DT_CALCRECT 用与绘制端完全相同的标志，量出来多少就是多大 —— 早先浮层
+ * 那里曾用 GetTextExtentPoint32W 另算一遍，两套规则不一致导致文字被切，
+ * 这里直接照浮层的正确做法来。
+ */
+static bool cn_toast_measure(SftpWin *sw, int *out_w, int *out_h)
+{
+    RECT need = { 0, 0, 0, 0 };
+    HDC hdc;
+    HFONT old;
+    int padx = cn_dpi(22), pady = cn_dpi(13);
+
+    if (!sw->toast.text || !*sw->toast.text)
+        return false;
+
+    hdc = GetDC(NULL);
+    if (!hdc)
+        return false;
+    old = SelectObject(hdc, cn_toast_font(sw));
+    need.right = cn_dpi(4000);      /* 给够宽，只为量出单行文字宽度 */
+    DrawTextW(hdc, sw->toast.text, -1, &need,
+              DT_CALCRECT | DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE);
+    SelectObject(hdc, old);
+    ReleaseDC(NULL, hdc);
+
+    if (need.right <= 0 || need.bottom <= 0)
+        return false;
+
+    *out_w = need.right + padx * 2;
+    *out_h = need.bottom + pady * 2;
+    return true;
+}
+
+/* 把提示条画到给定 DC 上（WM_PAINT 与 WM_PRINTCLIENT 共用）。 */
+static void cn_toast_paint(HWND hwnd, HDC hdc, SftpWin *sw)
+{
+    RECT rc;
+    HFONT old;
+
+    if (!sw || !sw->toast.text)
+        return;
+
+    GetClientRect(hwnd, &rc);
+    {
+        HBRUSH br = CreateSolidBrush(CN_TOAST_BG);
+        HBRUSH edge = CreateSolidBrush(CN_TOAST_EDGE);
+        RECT e;
+
+        FillRect(hdc, &rc, br);
+        /* 一圈 1px 描边：深色卡片压在同为深色的终端或壁纸上时才有边界。 */
+        e = rc; e.bottom = e.top + 1;      FillRect(hdc, &e, edge);
+        e = rc; e.top = e.bottom - 1;      FillRect(hdc, &e, edge);
+        e = rc; e.right = e.left + 1;      FillRect(hdc, &e, edge);
+        e = rc; e.left = e.right - 1;      FillRect(hdc, &e, edge);
+        DeleteObject(br);
+        DeleteObject(edge);
+    }
+
+    old = SelectObject(hdc, cn_toast_font(sw));
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, CN_TOAST_FG);
+    /* DT_SINGLELINE + 垂直居中：提示条是定高的一条，文案都是短句。 */
+    DrawTextW(hdc, sw->toast.text, -1, &rc,
+              DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    SelectObject(hdc, old);
+}
+
+/*
+ * 摆位：水平居中于主窗口客户区，底边压在窗口底部上方一点。
+ *
+ * anchor 是提示条的**底边**，slide 是在滑入阶段额外下压的像素数 ——
+ * 从下方几像素处往上滑到位，比原地淡入更有「刚发生了什么」的方向感。
+ */
+static void cn_toast_place(SftpWin *sw, int slide)
+{
+    RECT cr, tr;
+    POINT pt;
+    int w, h, x, y;
+
+    if (!sw->toast.hwnd || !sw->hwnd)
+        return;
+    if (!GetClientRect(sw->hwnd, &cr) || !GetWindowRect(sw->toast.hwnd, &tr))
+        return;
+    w = tr.right - tr.left;
+    h = tr.bottom - tr.top;
+
+    pt.x = (cr.left + cr.right) / 2;
+    /*
+     * 停在状态栏之上：状态栏那一行是 20 多像素高，再给 20 像素缝隙，
+     * 提示条就不会把「完成：成功 3…」那行盖住 —— 两者说的是同一件事，
+     * 但一个是即时确认、一个是留存记录，不该互相遮挡。
+     */
+    pt.y = cr.bottom - cn_dpi(44);
+    ClientToScreen(sw->hwnd, &pt);
+
+    x = pt.x - w / 2;
+    y = pt.y - h + slide;
+
+    SetWindowPos(sw->toast.hwnd, HWND_TOPMOST, x, y, 0, 0,
+                 SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+/* 圆角裁剪：成功后 region 归系统所有，不要在调用方删。 */
+static void cn_toast_round(HWND hwnd)
+{
+    RECT rc;
+    HRGN rgn;
+
+    if (!GetClientRect(hwnd, &rc))
+        return;
+    rgn = CreateRoundRectRgn(0, 0, rc.right + 1, rc.bottom + 1,
+                             cn_dpi(14), cn_dpi(14));
+    if (rgn)
+        SetWindowRgn(hwnd, rgn, TRUE);
+}
+
+/*
+ * 每帧一次：推进阶段机，更新透明度与位置。
+ *
+ * 三个阶段各自只数自己的帧，切换时把 tick 归零，读起来比一个全局计数
+ * 加减去判断偏移清楚。
+ */
+static void cn_toast_tick(SftpWin *sw)
+{
+    int alpha, slide = 0, total, hold = CN_TOAST_HOLD_FRAMES;
+
+    /*
+     * 停留时长允许被 CN_TOAST_HOLD_MS 覆盖，只为截图/看图服务 —— 1.5 秒
+     * 的节奏下截屏很难对准。这是调试口子，不要写进任何用户配置。
+     */
+    {
+        static int hold_cached = -1;
+        if (hold_cached < 0) {
+            const char *e = getenv("CN_TOAST_HOLD_MS");
+            int ms = e ? atoi(e) : 0;
+            hold_cached = ms > 0 ? ms / CN_TOAST_FRAME_MS
+                                 : CN_TOAST_HOLD_FRAMES;
+        }
+        hold = hold_cached;
+    }
+
+    sw->toast.tick++;
+
+    switch (sw->toast.phase) {
+      case CN_TOAST_IN:
+        total = CN_TOAST_IN_FRAMES;
+        if (sw->toast.tick >= total) {
+            sw->toast.phase = CN_TOAST_HOLD;
+            sw->toast.tick = 0;
+        }
+        break;
+      case CN_TOAST_HOLD:
+        total = hold;
+        if (sw->toast.tick >= total) {
+            sw->toast.phase = CN_TOAST_OUT;
+            sw->toast.tick = 0;
+        }
+        break;
+      default:                    /* CN_TOAST_OUT */
+        total = CN_TOAST_OUT_FRAMES;
+        if (sw->toast.tick >= total) {
+            /* 淡出到头：收工。窗口留着，下次改文案再用。 */
+            KillTimer(sw->toast.hwnd, CN_TOAST_TIMER);
+            ShowWindow(sw->toast.hwnd, SW_HIDE);
+            sw->toast.phase = CN_TOAST_IN;
+            sw->toast.tick = 0;
+            return;
+        }
+        break;
+    }
+
+    if (sw->toast.phase == CN_TOAST_IN) {
+        alpha = 255 * sw->toast.tick / CN_TOAST_IN_FRAMES;
+        /* 滑入：起始下压 8 逻辑像素，随帧数线性收拢到 0。 */
+        slide = cn_dpi(8) * (CN_TOAST_IN_FRAMES - sw->toast.tick) /
+                CN_TOAST_IN_FRAMES;
+    } else if (sw->toast.phase == CN_TOAST_OUT) {
+        alpha = 255 * (CN_TOAST_OUT_FRAMES - sw->toast.tick) /
+                CN_TOAST_OUT_FRAMES;
+    } else {
+        alpha = 255;
+    }
+
+    if (alpha < 0) alpha = 0;
+    if (alpha > 255) alpha = 255;
+    SetLayeredWindowAttributes(sw->toast.hwnd, 0, (BYTE)alpha, LWA_ALPHA);
+    cn_toast_place(sw, slide);
+    InvalidateRect(sw->toast.hwnd, NULL, TRUE);
+}
+
+static LRESULT CALLBACK cn_toast_proc(HWND hwnd, UINT msg, WPARAM wparam,
+                                      LPARAM lparam)
+{
+    SftpWin *sw = (SftpWin *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+
+    switch (msg) {
+      case WM_PAINT:
+        if (sw && sw->toast.text) {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            cn_toast_paint(hwnd, hdc, sw);
+            EndPaint(hwnd, &ps);
+        }
+        return 0;
+      /* 自检截图用：不接这条，WM_PRINTCLIENT 落到默认过程，位图全白。 */
+      case WM_PRINTCLIENT:
+        cn_toast_paint(hwnd, (HDC)wparam, sw);
+        return 0;
+      case WM_ERASEBKGND:
+        return 1;               /* WM_PAINT 里整片重画，不再擦一遍闪一下 */
+      case WM_NCHITTEST:
+        return HTTRANSPARENT;   /* 鼠标穿透：底下的按钮照常能点 */
+      case WM_TIMER:
+        if (wparam == CN_TOAST_TIMER && sw)
+            cn_toast_tick(sw);
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wparam, lparam);
+}
+
+/*
+ * 建提示条窗口（首次调用时）。文本为空直接返回 false。
+ *
+ * owner 传主窗口：这样主窗口最小化 / 关闭时系统会一并处理掉提示条，
+ * 不至于留一条黑卡片孤零零浮在桌面上。
+ */
+static bool cn_toast_create(SftpWin *sw)
+{
+    static const wchar_t classname[] = L"PuTTYSftpToast";
+    HINSTANCE inst = GetModuleHandle(NULL);
+    WNDCLASSW wc;
+    int w, h;
+
+    if (!cn_toast_measure(sw, &w, &h))
+        return false;
+
+    if (!GetClassInfoW(inst, classname, &wc)) {
+        memset(&wc, 0, sizeof(wc));
+        wc.lpfnWndProc = cn_toast_proc;
+        wc.hInstance = inst;
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.lpszClassName = classname;
+        RegisterClassW(&wc);
+    }
+
+    sw->toast.hwnd = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE |
+            WS_EX_LAYERED | WS_EX_TRANSPARENT,
+        classname, NULL, WS_POPUP, 0, 0, w, h, sw->hwnd, NULL, inst, NULL);
+    if (!sw->toast.hwnd)
+        return false;
+
+    SetWindowLongPtrW(sw->toast.hwnd, GWLP_USERDATA, (LONG_PTR)sw);
+    cn_toast_round(sw->toast.hwnd);
+    return true;
+}
+
+/*
+ * 显示一条提示（几秒后自己消失）。
+ *
+ * 无窗口环境（自检里 SftpWin 全是假的）直接丢掉，不建窗 —— 那些用例只验
+ * 传输结果，不需要也没有屏幕。
+ */
+static void cn_toast_show(SftpWin *sw, const char *text)
+{
+    wchar_t *w;
+    int nw, nh;
+
+    if (!sw || !sw->hwnd || !text || !*text)
+        return;
+
+    w = dup_mb_to_wc(DEFAULT_CODEPAGE, text);
+    if (!w || !*w) {
+        sfree(w);
+        return;
+    }
+    sfree(sw->toast.text);
+    sw->toast.text = w;
+
+    if (!sw->toast.hwnd && !cn_toast_create(sw)) {
+        sfree(sw->toast.text);
+        sw->toast.text = NULL;
+        return;
+    }
+
+    /*
+     * 文案换长了就得重排尺寸，否则新字会被旧窗宽切掉。尺寸一样时这一步
+     * 也走，代码少一条分支，代价只是两次 SetWindowPos。
+     */
+    if (cn_toast_measure(sw, &nw, &nh)) {
+        RECT tr;
+        if (GetWindowRect(sw->toast.hwnd, &tr))
+            if (tr.right - tr.left != nw || tr.bottom - tr.top != nh)
+                SetWindowPos(sw->toast.hwnd, NULL, 0, 0, nw, nh,
+                             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        cn_toast_round(sw->toast.hwnd);
+    }
+
+    /* 从滑入重新开始：连续两批之间不会出现「刚显示就淡出」的怪相。 */
+    sw->toast.phase = CN_TOAST_IN;
+    sw->toast.tick = 0;
+    SetLayeredWindowAttributes(sw->toast.hwnd, 0, 0, LWA_ALPHA);
+    cn_toast_place(sw, cn_dpi(8));
+    SetTimer(sw->toast.hwnd, CN_TOAST_TIMER, CN_TOAST_FRAME_MS, NULL);
+    InvalidateRect(sw->toast.hwnd, NULL, TRUE);
+}
+
+/*
+ * 收掉提示条（窗口销毁 / 释放资源时调）。
+ *
+ * 先把 GWLP_USERDATA 清掉再销毁：DestroyWindow 会同步派发 WM_DESTROY 与
+ * WM_NCDESTROY，清掉归属关系后窗口过程即便再被调用也拿不到即将失效的
+ * SftpWin，不会被解引用到已释放内存。
+ */
+static void cn_toast_destroy(SftpWin *sw)
+{
+    if (!sw)
+        return;
+    if (sw->toast.hwnd) {
+        KillTimer(sw->toast.hwnd, CN_TOAST_TIMER);
+        SetWindowLongPtrW(sw->toast.hwnd, GWLP_USERDATA, 0);
+        DestroyWindow(sw->toast.hwnd);
+        sw->toast.hwnd = NULL;
+    }
+    sfree(sw->toast.text);
+    sw->toast.text = NULL;
+    /* 字体是借用主窗口的，只清指针不删对象。 */
+    sw->toast.font = NULL;
+}
+
+/*
+ * 生成一批传输收尾的提示文案。
+ *
+ * 覆盖四种行为：上传成功、下载成功、全部覆盖、跳过已存在。混合情形
+ * （整棵目录里既有新文件又有已存在的）拼成一句，两件事都交代到。
+ *
+ * overwrite 表示这一批**真的问过冲突、且答案是「全部覆盖」**。只有它能
+ * 把「传成功了」和「把目标端原文件整个重写了一遍」区分开，后者更该让
+ * 用户看见。普通上传传成功走的是下面的通用文案，不该带「覆盖」字样 ——
+ * 压根没问过的事，不能凭空替用户认下来。
+ */
+static char *cn_toast_xfer_text(bool to_remote, int ok, int skip,
+                               bool overwrite)
+{
+    if (overwrite && ok > 0)
+        return dupprintf(to_remote ? "全部覆盖：已重新上传 %d 项"
+                                   : "全部覆盖：已重新下载 %d 项", ok);
+    if (skip > 0 && ok > 0)
+        return dupprintf("%s %d 项，另跳过 %d 项（已存在）",
+                         to_remote ? "已上传" : "已下载", ok, skip);
+    if (skip > 0)
+        return dupprintf("已跳过 %d 项（目标端已存在）", skip);
+    if (ok > 0)
+        return dupprintf(to_remote ? "已上传 %d 项到远端"
+                                   : "已从远端下载 %d 项", ok);
+    return NULL;
+}
 
 /*
  * cn: 把一批冲突项用「原始自绘模板」问一遍，返回模板的原始结果
@@ -2431,7 +2857,18 @@ static void cn_tip_track(CnTipState *st, HWND hwnd, LPARAM lparam)
  */
 static int cn_overwrite_ask(HWND parent, ConflictItem *items, size_t n)
 {
-    CnChangeList cl;
+    /*
+     * ⚠️ 清单必须**堆分配**，不能用栈变量再取地址交给
+     *    cn_change_list_free —— 那个函数最后一句是 sfree(list)，按
+     *    所有权约定它会连结构体一起 free。传栈地址进去等于把栈帧
+     *    交给堆管理器释放，点任何一个按钮都必崩（四个按钮都崩、
+     *    功能全不生效的真凶）。
+     *
+     *    自检一直没抓到，是因为它只走字符串路径（changes 非 NULL），
+     *    从没经过这个结构化入参的调用方；而 cb->changes 那侧的释放
+     *    对象本来就是 snew 出来的，所以碰巧一直是对的。
+     */
+    CnChangeList *cl = snew(CnChangeList);
     CnConfirmTexts texts;
     char *head;
     int rc;
@@ -2440,14 +2877,14 @@ static int cn_overwrite_ask(HWND parent, ConflictItem *items, size_t n)
      * n 没有上限（一批上千个文件也正常），所以堆上开数组。字符串都
      * 过 dupstr，释放统一交给 cn_change_list_free。
      */
-    cl.n = n;
-    cl.items = snewn(n, CnChange);
+    cl->n = n;
+    cl->items = n ? snewn(n, CnChange) : NULL;
     for (size_t i = 0; i < n; i++) {
-        cl.items[i].name = dup_wc_to_mb(DEFAULT_CODEPAGE, items[i].name,
-                                       "?");
-        cl.items[i].oldval = dupstr("");
-        cl.items[i].newval = dupstr("");
-        cl.items[i].kind = CN_CHG_OTHER;
+        cl->items[i].name = dup_wc_to_mb(DEFAULT_CODEPAGE, items[i].name,
+                                        "?");
+        cl->items[i].oldval = dupstr("");
+        cl->items[i].newval = dupstr("");
+        cl->items[i].kind = CN_CHG_OTHER;
         /*
          * 行首图标一律中性圆点（主人 2026-11 决定）：
          * 这一行只是陈述「该项已存在于目标位置」，不表达危险度 ——
@@ -2456,7 +2893,7 @@ static int cn_overwrite_ask(HWND parent, ConflictItem *items, size_t n)
          *
          * 目录 / 文件在清单里一视同仁，不再用图标区分。
          */
-        cl.items[i].icon_id = IDI_CN_DOT;
+        cl->items[i].icon_id = IDI_CN_DOT;
     }
 
     head = dupprintf("%d 个同名项目已存在于目标位置：", (int)n);
@@ -2470,10 +2907,14 @@ static int cn_overwrite_ask(HWND parent, ConflictItem *items, size_t n)
     texts.icon_id = IDI_CN_WARN;         /* 标题栏挂警告图标，不是问号 */
     texts.third_is_danger = true;        /* 红框挂在最右那个 */
 
-    rc = cn_confirm_dialog_texts(parent, NULL, &cl, &texts, NULL);
+    rc = cn_confirm_dialog_texts(parent, NULL, cl, &texts, NULL);
 
+    cn_trace("cn_overwrite_ask: 弹窗返回 rc=%d n=%lu", rc, (unsigned long)n);
     sfree(head);
-    cn_change_list_free(&cl);
+    cn_trace("cn_overwrite_ask: head 已释放，准备 free 清单 cl=%p items=%p",
+             (void *)cl, cl ? (void *)cl->items : NULL);
+    cn_change_list_free(cl);
+    cn_trace("cn_overwrite_ask: 清单已释放，正常返回");
     return rc;
 }
 
@@ -3344,6 +3785,14 @@ static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
                                              WPARAM wParam, LPARAM lParam)
 {
     ConfirmSaveBox *cb = (ConfirmSaveBox *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    /*
+     * cn: 崩溃取证 —— 只记关心的事件，消息洪水不记（WM_PAINT 会刷爆）。
+     * 重点是「销毁之后窗口过程还会不会被叫回来」：cb 是调用方的栈变量，
+     * 若 WM_NCDESTROY 在栈帧回收后到达，这里拿到的就是野指针。
+     */
+    if (msg == WM_NCDESTROY || msg == WM_DESTROY)
+        cn_trace("proc: msg=0x%04X hwnd=%p cb=%p", msg, (void *)hwnd,
+                 (void *)cb);
     if (!cb && msg == WM_CREATE) {
         CREATESTRUCTW *cs = (CREATESTRUCTW *)lParam;
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)cs->lpCreateParams);
@@ -3443,11 +3892,13 @@ static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
         break;
       case WM_COMMAND:
         if (LOWORD(wParam) == IDC_CNC_OVERWRITE) {   /* 确定/直接退出复用该 ID */
+            cn_trace("proc: WM_COMMAND ok -> DestroyWindow");
             cb->result = IDOK;
             DestroyWindow(hwnd);
             return 0;
         }
         if (LOWORD(wParam) == IDC_CNC_CANCEL) {
+            cn_trace("proc: WM_COMMAND cancel -> DestroyWindow");
             cb->result = IDCANCEL;
             DestroyWindow(hwnd);
             return 0;
@@ -3457,6 +3908,7 @@ static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
          * 左按钮的 IDOK，调用方才能把「保存后退出」和「直接退出」分开。
          */
         if (LOWORD(wParam) == IDC_CNC_THIRD) {
+            cn_trace("proc: WM_COMMAND third -> DestroyWindow");
             cb->result = IDYES;
             DestroyWindow(hwnd);
             return 0;
@@ -4834,7 +5286,10 @@ int cn_confirm_dialog_texts(HWND parent, const char *changes,
         ShowWindow(parent, SW_RESTORE);
         SetForegroundWindow(parent);
     }
+    cn_trace("dialog_texts: 循环结束 result=%d，准备 release cb=%p",
+             cb.result, (void *)&cb);
     cn_confirm_save_release(&cb);
+    cn_trace("dialog_texts: release 完成");
     if (closed_by_x)
         *closed_by_x = cb.closed_by_x;
     return cb.result;
@@ -5035,6 +5490,15 @@ static void cn_transfer_entries(SftpWin *sw, char **names, char **srcs,
     char *last_err = NULL;
     bool aborted = false, paused = false;
     int batch_policy;
+    /*
+     * 这一批到底问没问过冲突、问了之后选的是不是「全部覆盖」。
+     *
+     * ⚠️ 不能拿 batch_policy == CN_OVW_OVERWRITE 当判据：那是默认值，
+     *    目标端没冲突、压根没弹窗时它也等于它。早先就吃过这个亏 ——
+     *    一次干净的上传被提示成「全部覆盖：已重新上传 1 项」，纯属冤枉。
+     *    这里单独记一笔「确实弹过窗且答案是覆盖」，两件事分开说。
+     */
+    bool overwrite_chosen = false;
     const char *src_dir = to_remote ? sw->localdir : sw->remotedir;
     const char *dst_dir = to_remote ? sw->remotedir : sw->localdir;
     /*
@@ -5080,9 +5544,15 @@ static void cn_transfer_entries(SftpWin *sw, char **names, char **srcs,
         size_t nconf = 0;
         ConflictItem *conf = cn_collect_conflicts(sw, names, dirs, count,
                                                   to_remote, &nconf);
+        cn_trace("xfer: 冲突收集完成 nconf=%lu conf=%p",
+                 (unsigned long)nconf, (void *)conf);
         if (conf) {
             batch_policy = cn_confirm_batch(sw, conf, nconf);
+            /* 真弹过窗了，答案是不是「全部覆盖」到这里才算数。 */
+            overwrite_chosen = (batch_policy == CN_OVW_OVERWRITE);
+            cn_trace("xfer: 弹窗返回 policy=%d，准备释放冲突列表", batch_policy);
             cn_conflicts_free(conf, nconf);
+            cn_trace("xfer: 冲突列表已释放");
         }
         if (batch_policy == CN_OVW_ABORT) {
             /* 整批不动：把名单释放掉，直接收摊。 */
@@ -5255,6 +5725,23 @@ static void cn_transfer_entries(SftpWin *sw, char **names, char **srcs,
         cn_set_status(sw, msg);
         sfree(msg);
     }
+
+    /*
+     * 提示条：只在「这一批安稳收尾」时浮出来。
+     *
+     * 暂停/终止/有失败项时一概不弹 —— 那些情况需要用户真看一眼、甚至
+     * 去处理，用一条一闪而过的提示去说「失败了 2 项」等于把坏消息藏
+     * 起来。它们照旧留在状态栏，配合失败时的模态框。
+     */
+    if (!paused && !aborted && fail_count == 0) {
+        char *toast = cn_toast_xfer_text(to_remote, ok_count, skip_count,
+                                        overwrite_chosen);
+        if (toast) {
+            cn_toast_show(sw, toast);
+            sfree(toast);
+        }
+    }
+
     if (fail_count)
         cn_msg(sw->hwnd, last_err ? last_err : "部分文件传输失败。",
                "传输失败", MB_ICONWARNING | MB_OK);
@@ -8676,6 +9163,8 @@ static void cn_sftpwin_dispose(SftpWin *sw)
 {
     if (the_sftpwin == sw)
         the_sftpwin = NULL;
+    /* 提示条先收掉：它还拿着 sw 指针，晚于 sfree(sw) 就是悬空。 */
+    cn_toast_destroy(sw);
     if (sw->sx) {
         sftp_xfer_close(sw->sx);
         sw->sx = NULL;
@@ -9001,6 +9490,22 @@ void sftp_window_detached(Conf *conf)
 
     if (!the_sftpwin)
         return;
+
+    /*
+     * cn: 人工看图用 —— CN_TOAST_DEMO 设成文案内容，窗口一开出来就弹一条
+     * 提示条，方便截图核对外观（圆角、字体、透明度、贴底位置）。
+     *
+     * 走的是 cn_toast_show 本身，与传输收尾时同一个函数，所以截到的就是
+     * 线上真实效果。设 CN_TOAST_DEMO=1 用默认文案。
+     */
+    {
+        const char *demo = getenv("CN_TOAST_DEMO");
+        if (demo && *demo) {
+            const char *text = strcmp(demo, "1")
+                ? demo : "已上传 3 项到远端";
+            cn_toast_show(the_sftpwin, text);
+        }
+    }
 
     while (the_sftpwin && GetMessageW(&msg, NULL, 0, 0)) {
         if (msg.message == WM_QUIT)
@@ -10840,6 +11345,68 @@ void sftp_selftest_window(Conf *conf)
         } else {
             sw_report(fp, "  跳过  某一侧列表为空\n");
         }
+    }
+
+    /*
+     * 传输结果提示条（toast）的文案与停留时长。
+     *
+     * 文案逐个穷举，因为出过一个很隐蔽的错：普通上传（目标端没有同名
+     * 文件、压根没弹过冲突窗）被提示成「全部覆盖：已重新上传」。根因是
+     * 拿 batch_policy 的默认值当判据，而它初值正是「覆盖」。所以这里必须
+     * 有一条「没问过就绝不许出现覆盖字样」的反向断言盯着。
+     */
+    sw_report(fp, "\n传输结果提示条：\n");
+    {
+        char *t;
+
+        t = cn_toast_xfer_text(true, 3, 0, false);
+        SW_CHECK(t && strstr(t, "全部覆盖") == NULL &&
+                 strstr(t, "已上传 3 项") != NULL,
+                 "普通上传不出现「全部覆盖」，文案为「已上传 3 项到远端」");
+        sfree(t);
+
+        t = cn_toast_xfer_text(false, 2, 0, false);
+        SW_CHECK(t && strstr(t, "全部覆盖") == NULL &&
+                 strstr(t, "已从远端下载 2 项") != NULL,
+                 "普通下载文案为「已从远端下载 2 项」");
+        sfree(t);
+
+        t = cn_toast_xfer_text(true, 3, 0, true);
+        SW_CHECK(t && strstr(t, "全部覆盖") != NULL &&
+                 strstr(t, "已重新上传 3 项") != NULL,
+                 "问过冲突且选覆盖时才显示「全部覆盖」");
+        sfree(t);
+
+        t = cn_toast_xfer_text(false, 1, 0, true);
+        SW_CHECK(t && strstr(t, "全部覆盖") != NULL &&
+                 strstr(t, "已重新下载 1 项") != NULL,
+                 "下载侧覆盖文案正确");
+        sfree(t);
+
+        t = cn_toast_xfer_text(true, 0, 4, false);
+        SW_CHECK(t && strstr(t, "已跳过 4 项") != NULL &&
+                 strstr(t, "全部覆盖") == NULL,
+                 "全跳过时提示「已跳过 4 项」");
+        sfree(t);
+
+        t = cn_toast_xfer_text(true, 2, 5, false);
+        SW_CHECK(t && strstr(t, "已上传 2 项") != NULL &&
+                 strstr(t, "跳过 5 项") != NULL,
+                 "混合情形同时交代上传数与跳过数");
+        sfree(t);
+
+        t = cn_toast_xfer_text(true, 0, 0, false);
+        SW_CHECK(t == NULL, "一项没动时不生成提示文案");
+        sfree(t);
+
+        /*
+         * 停留时长：主人要求「显示时间太长，砍短一半」。
+         *
+         * 原来 190 帧 ≈ 3.0 秒，现在 95 帧 ≈ 1.5 秒。上下界都卡住，免得
+         * 以后谁随手改数字把它调到一闪而过或者又拖回三秒。
+         */
+        SW_CHECK(CN_TOAST_HOLD_FRAMES * CN_TOAST_FRAME_MS == 1520,
+                 "停留时长为 1.52 秒（3.0 秒的一半）");
     }
 
     sw_report(fp, "\n小计：通过 %d 项，失败 %d 项\n", pass, fail);

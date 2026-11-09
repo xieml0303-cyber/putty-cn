@@ -87,6 +87,7 @@ add_executable(putty
   keyimport.c
   sftpxfer.c
   sftpwin.c
+  cn-crash-trace.c
   ${CMAKE_SOURCE_DIR}/ssh/sftp.c
   ${CMAKE_SOURCE_DIR}/ssh/sftpcommon.c
   ${CMAKE_SOURCE_DIR}/stubs/no-console.c

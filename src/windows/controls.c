@@ -15,6 +15,7 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <wctype.h>
 
 #include "putty.h"
 #include "misc.h"
@@ -504,53 +505,67 @@ void checkbox(struct ctlpos *cp, const char *text, int id)
           text, id);
 }
 
-static BOOL _GetTextExtentExPoint(HDC hdc, LPCSTR lpszString, int cchString, int nMaxExtent, LPINT lpnFit, LPINT lpnDx, LPSIZE lpSize)
+/*
+ * cn: 判断一个宽字符是不是「拉丁单词内」的字符。折行时只有断在
+ * 这种字符中间才算错（会把 word 劈成两半）；中文汉字之间随处可断，
+ * 不受此限。
+ */
+static bool wrap_is_latin_word_char(WCHAR c)
 {
-    BOOL ret = GetTextExtentExPoint(hdc, lpszString, cchString, nMaxExtent, lpnFit, lpnDx, lpSize);
-    if (ret && GetACP() == CP_UTF8) {
-        // fix lpnFit to bytes from characters on utf-8 codepage
-        int n = 0;
-        for (int i = 0; i < *lpnFit; i++) {
-            unsigned char c = lpszString[n];
-            if (c >= 0 && c <= 127 ) {
-                n += 1;
-            } else if (c >= 192 && c <= 223) {
-                n += 2;
-            } else if (c >= 224 && c <= 239) {
-                n += 3;
-            } else if (c >= 240 && c <= 247) {
-                n += 4;
-            } else if (c >= 248 && c <= 255) {
-                n += 1;
-            }
-            if (n >= cchString) {
-                n = cchString;
-                break;
-            }
-        }
-        *lpnFit = n;
-    }
-    return ret;
+    return (c >= L'0' && c <= L'9') ||
+           (c >= L'a' && c <= L'z') ||
+           (c >= L'A' && c <= L'Z') ||
+           c == L'_';
 }
 
 /*
  * Wrap a piece of text for a static text control. Returns the
  * wrapped text (a malloc'ed string containing \ns), and also
  * returns the number of lines required.
+ *
+ * The text passed in is always UTF-8, but the static control that
+ * displays it is an ANSI control: the -W/-A character-set mismatch
+ * is resolved one level up, when the string is handed to
+ * SetDlgItemText/create. Measurement has to happen in the same
+ * character space as that final conversion, so this function
+ * converts to wide characters first and measures with the wide-entry
+ * GDI calls. Measuring the raw UTF-8 bytes through the ANSI entry
+ * points makes GDI decode UTF-8 as the active code page, so a
+ * three-byte CJK sequence is billed as three glyphs instead of one;
+ * the computed break point then lands far short of the real control
+ * width and lines wrap early. Deciding break points on a wide string
+ * makes the break offsets exact, since one wide character is one
+ * `\n`-free unit no matter what the code page is.
  */
 char *staticwrap(struct ctlpos *cp, HWND hwnd, const char *text, int *lines)
 {
     HDC hdc = GetDC(hwnd);
-    int width, nlines, j;
+    int width, nlines, j, nwchars;
+    WCHAR *wtext, *wp;
     INT *pwidths, nfit;
     SIZE size;
-    const char *p;
     RECT r;
     HFONT oldfont, newfont;
+    strbuf *sb;
 
-    strbuf *sb = strbuf_new();
-    p = text;
-    pwidths = snewn(1+strlen(text), INT);
+    /* Count wide characters (excluding the terminating NUL). */
+    nwchars = MultiByteToWideChar(CP_UTF8, 0, text, -1, NULL, 0);
+    if (nwchars <= 0) {
+        /*
+         * Nothing measurable (empty string, or the conversion failed).
+         * Hand the text through unchanged as a single line.
+         */
+        if (lines) *lines = 1;
+        return dupstr(text);
+    }
+    nwchars--;                         /* drop the NUL */
+
+    wtext = snewn(nwchars + 1, WCHAR);
+    MultiByteToWideChar(CP_UTF8, 0, text, -1, wtext, nwchars + 1);
+
+    sb = strbuf_new();
+    wp = wtext;
+    pwidths = snewn(nwchars + 1, INT);
 
     /*
      * Work out the width the text will need to fit in, by doing
@@ -572,39 +587,72 @@ char *staticwrap(struct ctlpos *cp, HWND hwnd, const char *text, int *lines)
     newfont = (HFONT)SendMessage(hwnd, WM_GETFONT, 0, 0);
     oldfont = SelectObject(hdc, newfont);
 
-    while (*p) {
-        if (!_GetTextExtentExPoint(hdc, p, strlen(p), width,
+    while (*wp) {
+        int remaining = nwchars - (int)(wp - wtext);
+        int take;
+
+        if (!GetTextExtentExPointW(hdc, wp, remaining, width,
                                    &nfit, pwidths, &size) ||
-            (size_t)nfit >= strlen(p)) {
+            nfit >= remaining) {
             /*
-             * Either GetTextExtentExPoint returned failure, or the
+             * Either GetTextExtentExPointW returned failure, or the
              * whole of the rest of the text fits on this line.
              * Either way, we stop wrapping, copy the remainder of
              * the input string unchanged to the output, and leave.
              */
-            put_datapl(sb, ptrlen_from_asciz(p));
+            int nbytes = WideCharToMultiByte(CP_UTF8, 0, wp, -1,
+                                             NULL, 0, NULL, NULL);
+            if (nbytes > 0) {
+                char *tail = snewn(nbytes, char);
+                WideCharToMultiByte(CP_UTF8, 0, wp, -1, tail, nbytes,
+                                    NULL, NULL);
+                put_datapl(sb, ptrlen_from_asciz(tail));
+                sfree(tail);
+            }
             break;
         }
 
         /*
-         * Now we search backwards along the string from `nfit',
-         * looking for a space at which to break the line. If we
-         * don't find one at all, that's fine - we'll just break
-         * the line at `nfit'.
+         * Pick where to break this line.
+         *
+         * Chinese has no spaces between words, so a break between two
+         * CJK characters is perfectly normal. A break is only wrong
+         * when it lands in the middle of a Latin word: there we back
+         * up to the preceding space so the word stays in one piece.
+         * The earlier code backed up to a space unconditionally, which
+         * on mostly-Chinese text found the one or two spaces in the
+         * line and broke there, leaving a short first line and a
+         * nearly empty second one.
          */
-        for (j = nfit; j > 0; j--) {
-            if (isspace((unsigned char)p[j])) {
-                nfit = j;
-                break;
+        take = nfit;
+        if (nfit > 0 && nfit < remaining &&
+            wrap_is_latin_word_char(wp[nfit-1]) &&
+            wrap_is_latin_word_char(wp[nfit])) {
+            for (j = nfit; j > 0; j--) {
+                if (iswspace(wp[j])) {
+                    take = j;
+                    break;
+                }
             }
         }
 
-        put_data(sb, p, nfit);
+        /* Emit the first `take` wide characters, back in UTF-8. */
+        {
+            int nbytes = WideCharToMultiByte(CP_UTF8, 0, wp, take,
+                                             NULL, 0, NULL, NULL);
+            if (nbytes > 0) {
+                char *chunk = snewn(nbytes + 1, char);
+                WideCharToMultiByte(CP_UTF8, 0, wp, take, chunk, nbytes,
+                                    NULL, NULL);
+                put_data(sb, chunk, nbytes);
+                sfree(chunk);
+            }
+        }
         put_byte(sb, '\n');
 
-        p += nfit;
-        while (*p && isspace((unsigned char)*p))
-            p++;
+        wp += take;
+        while (*wp && iswspace(*wp))
+            wp++;
 
         nlines++;
     }
@@ -615,6 +663,7 @@ char *staticwrap(struct ctlpos *cp, HWND hwnd, const char *text, int *lines)
     if (lines) *lines = nlines;
 
     sfree(pwidths);
+    sfree(wtext);
 
     return strbuf_to_str(sb);
 }

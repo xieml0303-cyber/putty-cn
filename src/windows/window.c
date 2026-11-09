@@ -514,6 +514,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     dll_hijacking_protection();
     enable_dit();
 
+    /* cn: 崩溃取证 —— 越早装越好，后面任何一步崩都能留下现场。 */
+    cn_crash_trace_init();
+
     hinst = inst;
     hprev = prev;
 

@@ -2045,6 +2045,17 @@ bool sftp_window_is_open(void);
 /* cn: 「确认保存」自绘弹窗（照「确认覆盖」的画法）。返回 IDOK/IDCANCEL。 */
 int cn_confirm_save_dialog(HWND parent, const char *changes);
 /*
+ * cn: 崩溃取证（cn-crash-trace.c）。
+ *
+ * cn_crash_trace_init 在 main 入口调一次：装未处理异常过滤器，
+ * 把异常码 / 出错地址 / 寄存器落盘到 exe 同目录的 cn-trace.log。
+ * cn_trace 是面包屑，只在定义了 CN_CRASH_TRACE 时有实现；
+ * 其余构建里两者都是空宏，零开销。
+ */
+void cn_crash_trace_init(void);
+void cn_trace(const char *fmt, ...);
+
+/*
  * cn: 同一个弹窗，文案可换 —— 点「连接」「文件传输」时用：左按钮
  * 「仅本次生效」、右按钮「长期生效」。texts 传 NULL 等同
  * cn_confirm_save_dialog。返回 IDOK（仅本次）/ IDCANCEL（长期生效

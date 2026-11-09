@@ -4166,19 +4166,22 @@ void setup_config_box(struct controlbox *b, bool midsession,
             /*
              * 导入按钮下方的格式说明。
              *
-             * 每行一个 ctrl_text，不用 \n 或自动换行：staticwrap()
-             * 把 _GetTextExtentExPoint() 返回的字符数当字节偏移用，
-             * 只在 ACP==UTF-8 时才做字节修正（见 windows/controls.c
-             * 的 _GetTextExtentExPoint 包装）。简体中文系统 ACP 是
-             * 936，修正分支不生效，含中文的自动换行会切在字符中间。
-             * 分行写就不依赖那段逻辑。
+             * 每行一个 ctrl_text，各自独立成段，不靠 \n 拼接。
+             * staticwrap() 现在是在宽字符空间测量与断行的（见
+             * windows/controls.c），中文折行本身已经可靠；分成两个
+             * 控件仍然更合适：这两句说的是两件事（支持哪些格式 /
+             * 转换后做什么），分成两段在视觉上就是两组信息。
+             *
+             * 两句长度都控制在卡片可用宽度内（120 DPI 下约 266 px），
+             * 一行放得下，不再出现「第二行只剩几个字」的断行。
+             * 改文案时请复测：超宽会被折行，且第二行会明显短于第一行。
              *
              * 内容必须与 keyimport.c 的 importable_formats 一致：
              * 转换器实际只吃 OpenSSH 新旧两种和 ssh.com 三种。
              */
-            ctrl_text(s, "支持 OpenSSH 私钥（新旧格式）与 ssh.com 私钥。",
+            ctrl_text(s, "支持 OpenSSH 新旧格式与 ssh.com 私钥。",
                       HELPCTX(no_help));
-            ctrl_text(s, "转换后将在同一目录生成 .ppk 文件，并自动填入上方的私钥文件框。",
+            ctrl_text(s, "转换后同目录生成 .ppk 并填入上方私钥框。",
                       HELPCTX(no_help));
 
             s = ctrl_getset(b, "连接/SSH/认证/证书", "plugin",

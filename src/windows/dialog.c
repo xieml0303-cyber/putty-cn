@@ -956,6 +956,12 @@ static HTREEITEM treeview_insert(struct treeview_faff *faff,
 Filename *dialog_box_demo_screenshot_filename = NULL;
 
 /*
+ * cn: 演示截图要落的页面路径，来自 PUTTY_CN_DEMO_PANEL。
+ * 空/NULL 表示保持默认的第一页。
+ */
+static char *demo_screenshot_panel = NULL;
+
+/*
  * cn: 在树控件里按 pathname 找对应项。树项的 lParam 保存的正是
  * ctrl_settitle / ctrl_getset 用过的 pathname 字符串，所以深度
  * 优先比对即可，无需拼装父节点文字。
@@ -1167,10 +1173,38 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
             cn_hostbox_subclass_tree(pds, TREE_PANEL);
         }
 
-        if (dialog_box_demo_screenshot_filename)
-            SetTimer(hwnd, DEMO_SCREENSHOT_TIMER_ID, TICKSPERSEC, NULL);
+        if (dialog_box_demo_screenshot_filename) {
+            /*
+             * cn: 演示截图默认落在树的第一页；环境变量
+             * PUTTY_CN_DEMO_PANEL 可以指定要截的页面路径
+             * （形如 "连接/SSH/认证/证书"），用于只核对某一页的
+             * 文案排版。取值走宽字符入口，避免中文在 ANSI
+             * getenv() 下取成乱码。
+             */
+            WCHAR wpath[256];
+            DWORD n = GetEnvironmentVariableW(L"PUTTY_CN_DEMO_PANEL",
+                                              wpath, lenof(wpath));
+            if (n > 0 && n < lenof(wpath)) {
+                char *utf8 = dup_wc_to_mb(CP_UTF8, wpath, "");
+                if (utf8 && *utf8)
+                    demo_screenshot_panel = dupstr(utf8);
+                sfree(utf8);
+            }
+        }
 
         pds_initdialog_finish(pds);
+
+        /*
+         * 导航必须在 initdialog_finish 之后：在那之前
+         * config_box_navigate_to_path() 会因为 !pds->initialised
+         * 直接返回 false，页面不会切过去。定时器也要等导航之后
+         * 再挂，否则可能先截到第一页。
+         */
+        if (dialog_box_demo_screenshot_filename) {
+            if (demo_screenshot_panel)
+                config_box_navigate_to_path(pds->dp, demo_screenshot_panel);
+            SetTimer(hwnd, DEMO_SCREENSHOT_TIMER_ID, TICKSPERSEC, NULL);
+        }
         return 0;
 
       case WM_TIMER:
