@@ -2036,6 +2036,32 @@ char *cn_persist_default_settings(Conf *conf);
  */
 bool cn_take_xfer_request(void);
 /*
+ * cn: 会话页的「记录日志」按钮。一次性开关：返回要记录的日志类型
+ * （LGTYP_ASCII 等，0 表示没点过），并通过 path_out 交回自动生成的
+ * 日志文件完整路径（调用方负责 sfree；不需要路径时传 NULL）。
+ * 调用一次即清除意图，保证只影响本次连接、不写注册表。
+ */
+int cn_take_log_request(char **path_out);
+/*
+ * cn: 丢掉尚未消费的「记录日志」意图。do_config 入口调用，让每次进
+ * 配置框都是全新一轮开关状态。
+ */
+void cn_reset_log_request(void);
+/*
+ * cn: 把「记录日志」意图写进窗口自己那份 Conf（在 log_init 之前调用）。
+ * 不动用户的持久化配置，因此只影响本次连接。
+ */
+void cn_apply_log_request(Conf *conf);
+/*
+ * cn: 生成「一次性日志」的完整路径：桌面\主机名_年月日_时分秒.log。
+ *
+ * 声明在 putty.h 是因为两个调用方在不同模块：配置框里的「记录日志」
+ * 按钮（config.c）要在点击时就把路径定下来；会话运行中从「会话日志」
+ * 菜单开启时（windows/window.c）也要用同一套命名规则。返回串由调用方
+ * 负责 sfree。
+ */
+char *cn_log_path_for_runtime(Conf *conf);
+/*
  * cn: 传输窗口开关状态。声明在 putty.h 因为 config.c（两个二进制共用）
  * 也要调，而 sftpxfer.h 只有带 SSH 的 putty 才链接。
  */
@@ -2288,9 +2314,20 @@ bool cmdline_lp_verbose(LogPolicy *lp);
 LogContext *log_init(LogPolicy *lp, Conf *conf);
 void log_free(LogContext *logctx);
 void log_reconfig(LogContext *logctx, Conf *conf);
+/*
+ * cn: 只读查询当前日志类型（>0 表示正在记录）。会话窗口的「会话日志」
+ * 菜单按它置灰开始/停止两项。
+ */
+int log_get_logtype(LogContext *logctx);
 void logfopen(LogContext *logctx);
 void logfclose(LogContext *logctx);
 void logtraffic(LogContext *logctx, unsigned char c, int logmode);
+/*
+ * cn: log one already-decoded graphic character, so that characters
+ * outside ASCII (CJK in particular) survive into the log file instead of
+ * being dropped. Re-encodes the code point as UTF-8 before writing.
+ */
+void logtraffic_cp(LogContext *logctx, unsigned long c, int logmode);
 void logflush(LogContext *logctx);
 LogPolicy *log_get_policy(LogContext *logctx);
 void logevent(LogContext *logctx, const char *event);

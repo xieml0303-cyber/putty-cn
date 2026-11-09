@@ -3791,9 +3791,39 @@ static void term_display_graphic_char(Terminal *term, unsigned long c)
         incpos(cursplus);
         check_selection(term, term->curs, cursplus);
     }
-    if (((c & CSET_MASK) == CSET_ASCII ||
-         (c & CSET_MASK) == 0) && term->logctx)
-        logtraffic(term->logctx, (unsigned char) c, LGTYP_ASCII);
+    if (term->logctx) {
+        /*
+         * cn: log every printable graphic character, not just 7-bit ASCII.
+         *
+         * The original test here was
+         *
+         *   (c & CSET_MASK) == CSET_ASCII || (c & CSET_MASK) == 0
+         *
+         * which drops CJK outright: by this point the input has already
+         * been decoded, so a Chinese character is a code point like 0x4E2D
+         * whose masked value is neither CSET_ASCII nor zero. It therefore
+         * never reached the log file, and the log came out with blank
+         * lines where the terminal showed Chinese.
+         *
+         * Values in 0xD800-0xDFFF are not real code points here: the
+         * charset-translation layer packs single-byte characters into that
+         * surrogate range (see the CSET_* constants), leaving the original
+         * byte in the low 8 bits. Those go out byte-for-byte as before.
+         * Everything else is a genuine code point and is re-encoded as
+         * UTF-8 by logtraffic_cp(), so the file keeps the encoding the
+         * remote side actually sent.
+         *
+         * UCSERR is the placeholder for undecodable input and is skipped
+         * rather than logged as a stray character.
+         */
+        if (c != UCSERR) {
+            if ((c & 0xFFFFF800UL) == 0xD800UL)
+                logtraffic(term->logctx, (unsigned char)(c & 0xFF),
+                           LGTYP_ASCII);
+            else
+                logtraffic_cp(term->logctx, c, LGTYP_ASCII);
+        }
+    }
 
     check_trust_status(term, cline);
 

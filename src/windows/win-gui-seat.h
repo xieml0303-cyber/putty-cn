@@ -6,6 +6,12 @@
 
 typedef struct WinGuiSeat WinGuiSeat;
 
+/*
+ * cn: 轻提示条。WinGuiSeat 内嵌了一个 CnToast，这里直接带上定义，
+ * 免得每个包含本文件的源文件都要额外写一行（四个文件都用到）。
+ */
+#include "cn-toast.h"
+
 struct PopupMenu {
     HMENU menu;
 };
@@ -96,6 +102,8 @@ struct WinGuiSeat {
     HMENU menubar;
     HMENU menu_session;
     HMENU menu_func;
+    /* cn: 「会话日志」子菜单（开始/停止记录日志） */
+    HMENU menu_log;
 
     Conf *conf;
     LogContext *logctx;
@@ -139,6 +147,18 @@ struct WinGuiSeat {
      */
     char *title_hostname;       /* 在线标题用主机名（realhost） */
     int title_port;             /* 在线标题用端口（串口为 0） */
+    /*
+     * cn: 标题是否已经切到「（在线）」。首次登录提示（用户名/密码/
+     * 密钥口令）出现即切，见 win_seat_get_userpass_input 里的说明；
+     * 用来保证只切一次，且后续密码重试不会重复设置。
+     */
+    bool title_switched_online;
+    /*
+     * cn: 会话窗口的轻提示条。菜单里的「重启会话 / 开始记录日志 /
+     * 停止记录日志」执行后弹一条即时确认，与文件传输窗口共用
+     * cn-toast.c 那套实现。
+     */
+    CnToast toast;
 
     int alt_numberpad_accumulator;
     int compose_state;

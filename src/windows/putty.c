@@ -370,6 +370,7 @@ void gui_term_process_cmdline(Conf *conf, char *cmdline)
                 sftp_window_detached(conf);
                 cleanup_exit(0);
             }
+            cn_apply_log_request(conf);
         } else {
             /*
              * cn: 命令行/桌面快捷方式直接把主机名塞进 conf 时，同样可能
@@ -388,6 +389,7 @@ void gui_term_process_cmdline(Conf *conf, char *cmdline)
                     sftp_window_detached(conf);
                     cleanup_exit(0);
                 }
+                cn_apply_log_request(conf);
             }
         }
     }

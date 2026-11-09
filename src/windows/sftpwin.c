@@ -44,6 +44,7 @@
 #include "ssh/sftp.h"
 #include "win-gui-seat.h"
 #include "sftpxfer.h"
+#include "cn-toast.h"   /* 传输结果提示条，与会话窗口菜单反馈共用一套 */
 /* 图标资源 ID（IDI_SFTPXFER），与 putty.rc 共用同一份编号。 */
 #include "putty-rc.h"
 
@@ -186,16 +187,10 @@ typedef struct SftpWin {
      * 消失。只做「这一批干完了」的通知，不拦鼠标（HTTRANSPARENT），也不
      * 抢焦点（WS_EX_NOACTIVATE），免得挡住用户紧接着要点的按钮。
      *
-     * 复用一条窗口而不是每次新建：连续传几批时，上一条还没消失就被新
-     * 文案顶掉，比叠出两三个提示条干净得多。
+     * 实现已抽到 cn-toast.c，与会话窗口的菜单反馈共用同一套（圆角、配色、
+     * 节奏只有一份）。这里只留一个状态槽。
      */
-    struct {
-        HWND hwnd;              /* 提示条窗口，NULL 表示还没建过 */
-        HFONT font;             /* 绘制用字体，借用主窗口那一份，不拥有 */
-        wchar_t *text;          /* 当前文案，换一条就重设 */
-        int phase;              /* CN_TOAST_* */
-        int tick;               /* 当前阶段已过的帧数 */
-    } toast;
+    CnToast toast;
 } SftpWin;
 
 static SftpWin *the_sftpwin = NULL;
@@ -2429,386 +2424,6 @@ static void cn_tip_track(CnTipState *st, HWND hwnd, LPARAM lparam)
     TrackMouseEvent(&tme);
 }
 
-/* ====================================================================
- * cn: 传输结果提示条（toast）。
- *
- * 一批传输收尾后，在窗口底部浮出一条深色圆角提示：滑入 -> 停留 -> 淡出，
- * 约 1.5 秒后自己消失，不打断任何操作。
- *
- * 为什么不用状态栏那一行：状态栏贴着窗口最底、字又小，传完这一刻用户视线
- * 还在两个列表上，那一行改了也多半没看见。提示条浮在列表下沿附近，正好
- * 落在视线余光里。
- *
- * 几条刻意的取舍：
- *  - 不拦鼠标（HTTRANSPARENT）、不抢焦点（WS_EX_NOACTIVATE）：它压着窗口
- *    底部，用户紧接着可能就要点「终止」或拖下一批文件，被挡一下都烦。
- *  - 用一个窗口反复显示，换文案就地改尺寸重排：连续传几批时新提示顶掉
- *    旧的，不会在屏幕上叠出一摞。
- *  - 圆角靠 SetWindowRgn 裁，淡入淡出靠分层窗口的 alpha，全是 GDI 手段，
- *    不必为此引 Direct2D。
- */
-#define CN_TOAST_IN       0
-#define CN_TOAST_HOLD     1
-#define CN_TOAST_OUT      2
-
-#define CN_TOAST_TIMER        0x5F31  /* 定时器 ID，只挂在提示条自己的窗口上 */
-#define CN_TOAST_FRAME_MS     16      /* 约 60fps */
-#define CN_TOAST_IN_FRAMES    10      /* 滑入淡入 160ms */
-#define CN_TOAST_OUT_FRAMES   10      /* 淡出 160ms */
-#define CN_TOAST_HOLD_FRAMES  95      /* 停留 ≈ 1.5 秒 */
-
-/* 与冲突浮层同一套深色配色，界面里深浅两种浮层不必各调一种黑。 */
-#define CN_TOAST_BG    RGB(0x17, 0x1b, 0x23)
-#define CN_TOAST_FG    RGB(0xff, 0xff, 0xff)
-#define CN_TOAST_EDGE  RGB(0x3a, 0x42, 0x50)
-
-/* 提示条用的字体：跟主窗口列表同一套，只是要保证拿得到一份可用的。 */
-static HFONT cn_toast_font(SftpWin *sw)
-{
-    if (!sw->toast.font) {
-        /*
-         * 借主窗口那份：它在 cn_sftpwin_dispose 里统一释放，这里只借用不
-         * 拥有（font_owned 恒为 false），免得两个地方都去删同一个句柄。
-         */
-        if (sw->font)
-            sw->toast.font = sw->font;
-        else
-            sw->toast.font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-    }
-    return sw->toast.font;
-}
-
-/*
- * 按当前文案量出提示条客户区尺寸。
- *
- * DT_CALCRECT 用与绘制端完全相同的标志，量出来多少就是多大 —— 早先浮层
- * 那里曾用 GetTextExtentPoint32W 另算一遍，两套规则不一致导致文字被切，
- * 这里直接照浮层的正确做法来。
- */
-static bool cn_toast_measure(SftpWin *sw, int *out_w, int *out_h)
-{
-    RECT need = { 0, 0, 0, 0 };
-    HDC hdc;
-    HFONT old;
-    int padx = cn_dpi(22), pady = cn_dpi(13);
-
-    if (!sw->toast.text || !*sw->toast.text)
-        return false;
-
-    hdc = GetDC(NULL);
-    if (!hdc)
-        return false;
-    old = SelectObject(hdc, cn_toast_font(sw));
-    need.right = cn_dpi(4000);      /* 给够宽，只为量出单行文字宽度 */
-    DrawTextW(hdc, sw->toast.text, -1, &need,
-              DT_CALCRECT | DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE);
-    SelectObject(hdc, old);
-    ReleaseDC(NULL, hdc);
-
-    if (need.right <= 0 || need.bottom <= 0)
-        return false;
-
-    *out_w = need.right + padx * 2;
-    *out_h = need.bottom + pady * 2;
-    return true;
-}
-
-/* 把提示条画到给定 DC 上（WM_PAINT 与 WM_PRINTCLIENT 共用）。 */
-static void cn_toast_paint(HWND hwnd, HDC hdc, SftpWin *sw)
-{
-    RECT rc;
-    HFONT old;
-
-    if (!sw || !sw->toast.text)
-        return;
-
-    GetClientRect(hwnd, &rc);
-    {
-        HBRUSH br = CreateSolidBrush(CN_TOAST_BG);
-        HBRUSH edge = CreateSolidBrush(CN_TOAST_EDGE);
-        RECT e;
-
-        FillRect(hdc, &rc, br);
-        /* 一圈 1px 描边：深色卡片压在同为深色的终端或壁纸上时才有边界。 */
-        e = rc; e.bottom = e.top + 1;      FillRect(hdc, &e, edge);
-        e = rc; e.top = e.bottom - 1;      FillRect(hdc, &e, edge);
-        e = rc; e.right = e.left + 1;      FillRect(hdc, &e, edge);
-        e = rc; e.left = e.right - 1;      FillRect(hdc, &e, edge);
-        DeleteObject(br);
-        DeleteObject(edge);
-    }
-
-    old = SelectObject(hdc, cn_toast_font(sw));
-    SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, CN_TOAST_FG);
-    /* DT_SINGLELINE + 垂直居中：提示条是定高的一条，文案都是短句。 */
-    DrawTextW(hdc, sw->toast.text, -1, &rc,
-              DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    SelectObject(hdc, old);
-}
-
-/*
- * 摆位：水平居中于主窗口客户区，底边压在窗口底部上方一点。
- *
- * anchor 是提示条的**底边**，slide 是在滑入阶段额外下压的像素数 ——
- * 从下方几像素处往上滑到位，比原地淡入更有「刚发生了什么」的方向感。
- */
-static void cn_toast_place(SftpWin *sw, int slide)
-{
-    RECT cr, tr;
-    POINT pt;
-    int w, h, x, y;
-
-    if (!sw->toast.hwnd || !sw->hwnd)
-        return;
-    if (!GetClientRect(sw->hwnd, &cr) || !GetWindowRect(sw->toast.hwnd, &tr))
-        return;
-    w = tr.right - tr.left;
-    h = tr.bottom - tr.top;
-
-    pt.x = (cr.left + cr.right) / 2;
-    /*
-     * 停在状态栏之上：状态栏那一行是 20 多像素高，再给 20 像素缝隙，
-     * 提示条就不会把「完成：成功 3…」那行盖住 —— 两者说的是同一件事，
-     * 但一个是即时确认、一个是留存记录，不该互相遮挡。
-     */
-    pt.y = cr.bottom - cn_dpi(44);
-    ClientToScreen(sw->hwnd, &pt);
-
-    x = pt.x - w / 2;
-    y = pt.y - h + slide;
-
-    SetWindowPos(sw->toast.hwnd, HWND_TOPMOST, x, y, 0, 0,
-                 SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-}
-
-/* 圆角裁剪：成功后 region 归系统所有，不要在调用方删。 */
-static void cn_toast_round(HWND hwnd)
-{
-    RECT rc;
-    HRGN rgn;
-
-    if (!GetClientRect(hwnd, &rc))
-        return;
-    rgn = CreateRoundRectRgn(0, 0, rc.right + 1, rc.bottom + 1,
-                             cn_dpi(14), cn_dpi(14));
-    if (rgn)
-        SetWindowRgn(hwnd, rgn, TRUE);
-}
-
-/*
- * 每帧一次：推进阶段机，更新透明度与位置。
- *
- * 三个阶段各自只数自己的帧，切换时把 tick 归零，读起来比一个全局计数
- * 加减去判断偏移清楚。
- */
-static void cn_toast_tick(SftpWin *sw)
-{
-    int alpha, slide = 0, total, hold = CN_TOAST_HOLD_FRAMES;
-
-    /*
-     * 停留时长允许被 CN_TOAST_HOLD_MS 覆盖，只为截图/看图服务 —— 1.5 秒
-     * 的节奏下截屏很难对准。这是调试口子，不要写进任何用户配置。
-     */
-    {
-        static int hold_cached = -1;
-        if (hold_cached < 0) {
-            const char *e = getenv("CN_TOAST_HOLD_MS");
-            int ms = e ? atoi(e) : 0;
-            hold_cached = ms > 0 ? ms / CN_TOAST_FRAME_MS
-                                 : CN_TOAST_HOLD_FRAMES;
-        }
-        hold = hold_cached;
-    }
-
-    sw->toast.tick++;
-
-    switch (sw->toast.phase) {
-      case CN_TOAST_IN:
-        total = CN_TOAST_IN_FRAMES;
-        if (sw->toast.tick >= total) {
-            sw->toast.phase = CN_TOAST_HOLD;
-            sw->toast.tick = 0;
-        }
-        break;
-      case CN_TOAST_HOLD:
-        total = hold;
-        if (sw->toast.tick >= total) {
-            sw->toast.phase = CN_TOAST_OUT;
-            sw->toast.tick = 0;
-        }
-        break;
-      default:                    /* CN_TOAST_OUT */
-        total = CN_TOAST_OUT_FRAMES;
-        if (sw->toast.tick >= total) {
-            /* 淡出到头：收工。窗口留着，下次改文案再用。 */
-            KillTimer(sw->toast.hwnd, CN_TOAST_TIMER);
-            ShowWindow(sw->toast.hwnd, SW_HIDE);
-            sw->toast.phase = CN_TOAST_IN;
-            sw->toast.tick = 0;
-            return;
-        }
-        break;
-    }
-
-    if (sw->toast.phase == CN_TOAST_IN) {
-        alpha = 255 * sw->toast.tick / CN_TOAST_IN_FRAMES;
-        /* 滑入：起始下压 8 逻辑像素，随帧数线性收拢到 0。 */
-        slide = cn_dpi(8) * (CN_TOAST_IN_FRAMES - sw->toast.tick) /
-                CN_TOAST_IN_FRAMES;
-    } else if (sw->toast.phase == CN_TOAST_OUT) {
-        alpha = 255 * (CN_TOAST_OUT_FRAMES - sw->toast.tick) /
-                CN_TOAST_OUT_FRAMES;
-    } else {
-        alpha = 255;
-    }
-
-    if (alpha < 0) alpha = 0;
-    if (alpha > 255) alpha = 255;
-    SetLayeredWindowAttributes(sw->toast.hwnd, 0, (BYTE)alpha, LWA_ALPHA);
-    cn_toast_place(sw, slide);
-    InvalidateRect(sw->toast.hwnd, NULL, TRUE);
-}
-
-static LRESULT CALLBACK cn_toast_proc(HWND hwnd, UINT msg, WPARAM wparam,
-                                      LPARAM lparam)
-{
-    SftpWin *sw = (SftpWin *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-
-    switch (msg) {
-      case WM_PAINT:
-        if (sw && sw->toast.text) {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hwnd, &ps);
-            cn_toast_paint(hwnd, hdc, sw);
-            EndPaint(hwnd, &ps);
-        }
-        return 0;
-      /* 自检截图用：不接这条，WM_PRINTCLIENT 落到默认过程，位图全白。 */
-      case WM_PRINTCLIENT:
-        cn_toast_paint(hwnd, (HDC)wparam, sw);
-        return 0;
-      case WM_ERASEBKGND:
-        return 1;               /* WM_PAINT 里整片重画，不再擦一遍闪一下 */
-      case WM_NCHITTEST:
-        return HTTRANSPARENT;   /* 鼠标穿透：底下的按钮照常能点 */
-      case WM_TIMER:
-        if (wparam == CN_TOAST_TIMER && sw)
-            cn_toast_tick(sw);
-        return 0;
-    }
-    return DefWindowProcW(hwnd, msg, wparam, lparam);
-}
-
-/*
- * 建提示条窗口（首次调用时）。文本为空直接返回 false。
- *
- * owner 传主窗口：这样主窗口最小化 / 关闭时系统会一并处理掉提示条，
- * 不至于留一条黑卡片孤零零浮在桌面上。
- */
-static bool cn_toast_create(SftpWin *sw)
-{
-    static const wchar_t classname[] = L"PuTTYSftpToast";
-    HINSTANCE inst = GetModuleHandle(NULL);
-    WNDCLASSW wc;
-    int w, h;
-
-    if (!cn_toast_measure(sw, &w, &h))
-        return false;
-
-    if (!GetClassInfoW(inst, classname, &wc)) {
-        memset(&wc, 0, sizeof(wc));
-        wc.lpfnWndProc = cn_toast_proc;
-        wc.hInstance = inst;
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.lpszClassName = classname;
-        RegisterClassW(&wc);
-    }
-
-    sw->toast.hwnd = CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE |
-            WS_EX_LAYERED | WS_EX_TRANSPARENT,
-        classname, NULL, WS_POPUP, 0, 0, w, h, sw->hwnd, NULL, inst, NULL);
-    if (!sw->toast.hwnd)
-        return false;
-
-    SetWindowLongPtrW(sw->toast.hwnd, GWLP_USERDATA, (LONG_PTR)sw);
-    cn_toast_round(sw->toast.hwnd);
-    return true;
-}
-
-/*
- * 显示一条提示（几秒后自己消失）。
- *
- * 无窗口环境（自检里 SftpWin 全是假的）直接丢掉，不建窗 —— 那些用例只验
- * 传输结果，不需要也没有屏幕。
- */
-static void cn_toast_show(SftpWin *sw, const char *text)
-{
-    wchar_t *w;
-    int nw, nh;
-
-    if (!sw || !sw->hwnd || !text || !*text)
-        return;
-
-    w = dup_mb_to_wc(DEFAULT_CODEPAGE, text);
-    if (!w || !*w) {
-        sfree(w);
-        return;
-    }
-    sfree(sw->toast.text);
-    sw->toast.text = w;
-
-    if (!sw->toast.hwnd && !cn_toast_create(sw)) {
-        sfree(sw->toast.text);
-        sw->toast.text = NULL;
-        return;
-    }
-
-    /*
-     * 文案换长了就得重排尺寸，否则新字会被旧窗宽切掉。尺寸一样时这一步
-     * 也走，代码少一条分支，代价只是两次 SetWindowPos。
-     */
-    if (cn_toast_measure(sw, &nw, &nh)) {
-        RECT tr;
-        if (GetWindowRect(sw->toast.hwnd, &tr))
-            if (tr.right - tr.left != nw || tr.bottom - tr.top != nh)
-                SetWindowPos(sw->toast.hwnd, NULL, 0, 0, nw, nh,
-                             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-        cn_toast_round(sw->toast.hwnd);
-    }
-
-    /* 从滑入重新开始：连续两批之间不会出现「刚显示就淡出」的怪相。 */
-    sw->toast.phase = CN_TOAST_IN;
-    sw->toast.tick = 0;
-    SetLayeredWindowAttributes(sw->toast.hwnd, 0, 0, LWA_ALPHA);
-    cn_toast_place(sw, cn_dpi(8));
-    SetTimer(sw->toast.hwnd, CN_TOAST_TIMER, CN_TOAST_FRAME_MS, NULL);
-    InvalidateRect(sw->toast.hwnd, NULL, TRUE);
-}
-
-/*
- * 收掉提示条（窗口销毁 / 释放资源时调）。
- *
- * 先把 GWLP_USERDATA 清掉再销毁：DestroyWindow 会同步派发 WM_DESTROY 与
- * WM_NCDESTROY，清掉归属关系后窗口过程即便再被调用也拿不到即将失效的
- * SftpWin，不会被解引用到已释放内存。
- */
-static void cn_toast_destroy(SftpWin *sw)
-{
-    if (!sw)
-        return;
-    if (sw->toast.hwnd) {
-        KillTimer(sw->toast.hwnd, CN_TOAST_TIMER);
-        SetWindowLongPtrW(sw->toast.hwnd, GWLP_USERDATA, 0);
-        DestroyWindow(sw->toast.hwnd);
-        sw->toast.hwnd = NULL;
-    }
-    sfree(sw->toast.text);
-    sw->toast.text = NULL;
-    /* 字体是借用主窗口的，只清指针不删对象。 */
-    sw->toast.font = NULL;
-}
 
 /*
  * 生成一批传输收尾的提示文案。
@@ -5737,7 +5352,14 @@ static void cn_transfer_entries(SftpWin *sw, char **names, char **srcs,
         char *toast = cn_toast_xfer_text(to_remote, ok_count, skip_count,
                                         overwrite_chosen);
         if (toast) {
-            cn_toast_show(sw, toast);
+            /*
+             * 贴底、距客户区底边 44 逻辑像素：停在状态栏之上。状态栏那一行
+             * 是 20 多像素高，再给 20 像素缝隙，提示条就不会把「完成：成功
+             * 3…」那行盖住 —— 两者说的是同一件事，但一个是即时确认、一个
+             * 是留存记录，不该互相遮挡。
+             */
+            cn_toast_show(&sw->toast, sw->hwnd, sw->font,
+                          CN_TOAST_BOTTOM, 44, toast);
             sfree(toast);
         }
     }
@@ -9164,7 +8786,7 @@ static void cn_sftpwin_dispose(SftpWin *sw)
     if (the_sftpwin == sw)
         the_sftpwin = NULL;
     /* 提示条先收掉：它还拿着 sw 指针，晚于 sfree(sw) 就是悬空。 */
-    cn_toast_destroy(sw);
+    cn_toast_destroy(&sw->toast);
     if (sw->sx) {
         sftp_xfer_close(sw->sx);
         sw->sx = NULL;
@@ -9503,7 +9125,8 @@ void sftp_window_detached(Conf *conf)
         if (demo && *demo) {
             const char *text = strcmp(demo, "1")
                 ? demo : "已上传 3 项到远端";
-            cn_toast_show(the_sftpwin, text);
+            cn_toast_show(&the_sftpwin->toast, the_sftpwin->hwnd,
+                          the_sftpwin->font, CN_TOAST_BOTTOM, 44, text);
         }
     }
 

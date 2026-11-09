@@ -6,6 +6,13 @@
 #include <assert.h>
 #include <stdlib.h>
 
+#ifdef _WIN32
+#include <shlobj.h>
+#ifndef CSIDL_DESKTOPDIRECTORY
+#define CSIDL_DESKTOPDIRECTORY 0x0010
+#endif
+#endif
+
 #include "putty.h"
 #include "dialog.h"
 #include "storage.h"
@@ -351,6 +358,33 @@ void serial_fallback_reset(void)
     serial_user_picked = false;
 }
 
+/*
+ * cn: 把串口参数强制重置为默认值（2026-11-09，两次修订）。
+ *
+ * 背景：「连接/串口」页面已删除，界面上只留波特率一项，其余四项按现行
+ * 默认配置走（8 数据位、1 停止位、无校验、无流控）。但存量配置文件里
+ * 可能存着用户早年手改过的非默认值 —— 页面没了就再也改不回来，程序
+ * 却仍照着那些值去连，形成用户看不见也修不了的暗坑。所以每次打开配置
+ * 框时把这四项归位。
+ *
+ * 第二次修订（主人 2026-11-09 追加）：波特率也一并归到 9600。波特率
+ * 从此是「本次窗口的临时值」—— 打开配置框固定 9600，改了不进改动清单、
+ * 不点亮保存按钮、保存时不落盘（见 cn_persist_default_settings 与
+ * conf_data.c 的 cn_is_connection_target），关闭窗口即失效。
+ *
+ * 只动这几项，不碰 serline（串口名）。调用点必须在 baseline 快照之前，
+ * 否则归位动作会被当成「用户改动」标脏。
+ */
+void cn_serial_params_reset(Conf *conf)
+{
+    conf_set_int(conf, CONF_serdatabits, 8);
+    /* 停止位以半个位为单位，1 个停止位记作 2。 */
+    conf_set_int(conf, CONF_serstopbits, 2);
+    conf_set_int(conf, CONF_serparity, SER_PAR_NONE);
+    conf_set_int(conf, CONF_serflow, SER_FLOW_NONE);
+    conf_set_int(conf, CONF_serspeed, 9600);
+}
+
 static void fill_serial_port_list(dlgcontrol *ctrl, dlgparam *dlg,
                                   Conf *conf, const char *current)
 {
@@ -529,6 +563,17 @@ static void config_host_handler(dlgcontrol *ctrl, dlgparam *dlg,
     }
 }
 
+/*
+ * cn: 波特率下拉框的预设值（2026-11-09 主人定：只保留三个常用档 + 自定义）。
+ *
+ * 「连接/串口」页面已删除，四项参数（数据位/停止位/校验/流控）固定走
+ * 默认值，界面上只留波特率一项。这里只列网络设备控制台真正会遇到的
+ * 三个档位：9600（华为/华三/思科等绝大多数）、19200（工业设备）、
+ * 115200（MikroTik/Ubiquiti/服务器 BMC）。其余值靠「自定义」手填。
+ */
+static const int cn_serial_speed_presets[] = { 9600, 19200, 115200 };
+#define NCN_SERIAL_SPEED_PRESETS ((int)lenof(cn_serial_speed_presets))
+
 static void config_port_handler(dlgcontrol *ctrl, dlgparam *dlg,
                                 void *data, int event)
 {
@@ -539,6 +584,10 @@ static void config_port_handler(dlgcontrol *ctrl, dlgparam *dlg,
      * This function works similarly to the standard edit box handler,
      * only it has to choose the control's label and text from two
      * different places depending on the protocol.
+     *
+     * cn: 这个控件是 combo box（可输入的下拉框），两种协议共用：
+     *   - 网络模式：端口号，可手输（波特率列表清空、不显示箭头）；
+     *   - 串口模式：波特率，下拉给三个常用档，也可手填任意值。
      */
     if (event == EVENT_REFRESH) {
         if (conf_get_int(conf, CONF_protocol) == PROT_SERIAL) {
@@ -548,6 +597,21 @@ static void config_port_handler(dlgcontrol *ctrl, dlgparam *dlg,
              */
             dlg_label_change(ctrl, dlg, "波特率(P)");
             sprintf(buf, "%d", conf_get_int(conf, CONF_serspeed));
+
+            /*
+             * 灌入预设档位。与主机名框同一套做法：列表只在串口模式
+             * 下非空，网络模式必须清空 —— 残留的波特率条目会让端口框
+             * 冒出下拉箭头，点开还是波特率数字，看着像串口没退干净。
+             */
+            dlg_update_start(ctrl, dlg);
+            dlg_listbox_clear(ctrl, dlg);
+            for (int i = 0; i < NCN_SERIAL_SPEED_PRESETS; i++) {
+                char num[16];
+                sprintf(num, "%d", cn_serial_speed_presets[i]);
+                dlg_listbox_add(ctrl, dlg, num);
+            }
+            dlg_listbox_add(ctrl, dlg, "自定义");
+            dlg_update_done(ctrl, dlg);
         } else {
             dlg_label_change(ctrl, dlg, PORT_BOX_TITLE);
             if (conf_get_int(conf, CONF_port) != 0)
@@ -555,11 +619,33 @@ static void config_port_handler(dlgcontrol *ctrl, dlgparam *dlg,
             else
                 /* Display an (invalid) port of 0 as blank */
                 buf[0] = '\0';
+
+            dlg_update_start(ctrl, dlg);
+            dlg_listbox_clear(ctrl, dlg);
+            dlg_update_done(ctrl, dlg);
         }
         dlg_editbox_set(ctrl, dlg, buf);
     } else if (event == EVENT_VALCHANGE) {
         char *s = dlg_editbox_get(ctrl, dlg);
-        int i = atoi(s);
+        int i;
+
+        /*
+         * cn: 选中「自定义」不是要写入 0 —— 它只是让用户能接着手填。
+         * combo box 是 CBS_DROPDOWN，选中项的文字会被填进编辑区，
+         * 所以这里遇到非数字就当作「用户还要继续输入」，什么都不写，
+         * 也不回写框内容（回写会把刚清空的框又塞回旧值）。
+         */
+        if (!s || !*s || strcmp(s, "自定义") == 0) {
+            sfree(s);
+            return;
+        }
+        for (const char *q = s; *q; q++) {
+            if (*q < '0' || *q > '9') {
+                sfree(s);
+                return;
+            }
+        }
+        i = atoi(s);
         sfree(s);
 
         if (conf_get_int(conf, CONF_protocol) == PROT_SERIAL)
@@ -673,6 +759,10 @@ static void set_button_muted(dlgparam *dlg, dlgcontrol *ctrl, bool muted);
 static void refresh_session_buttons(struct sessionsaver_data *ssd,
                                     dlgparam *dlg, Conf *conf);
 
+/* cn: 未填齐时点按钮的统一提示。 */
+#define CN_INPUT_INCOMPLETE_MSG \
+    "请先输入主机名称（IP 地址）和端口号"
+
 /*
  * cn: 只刷新「用户名」框。
  *
@@ -713,6 +803,209 @@ bool cn_take_xfer_request(void)
     bool ret = cn_session_wants_xfer;
     cn_session_wants_xfer = false;
     return ret;
+}
+
+/*
+ * cn: 用户在会话页点了「记录日志」。
+ *
+ * 需求是「一次性生效」：只在本次连接记，绝不写注册表、也不让保存按钮
+ * 变脏。所以这里跟「文件传输」用同一套意图标志的办法 —— 点按钮时置位
+ * 并结束对话框，窗口启动流程在 log_init 之前把它注入到窗口自己那份
+ * Conf 副本里（log_init 内部还会再 conf_copy 一次，用户配置始终没被碰）。
+ *
+ * 值存的是要记的日志类型（LGTYP_ASCII 等），0 表示没这个意图。
+ */
+static int cn_session_logtype_request;
+static char *cn_session_logfile_request;
+
+int cn_take_log_request(char **path_out)
+{
+    int ret = cn_session_logtype_request;
+    if (path_out)
+        *path_out = cn_session_logfile_request;
+    else
+        sfree(cn_session_logfile_request);
+    cn_session_logtype_request = 0;
+    cn_session_logfile_request = NULL;
+    return ret;
+}
+
+/*
+ * cn: 把「记录日志」的意图落到 Conf 上。
+ *
+ * 调用点必须在窗口自己那份 Conf 副本上、且在 log_init 之前：log_init
+ * 会再 conf_copy 一次，logtype/logfilename 都从这份副本读，所以用户
+ * 的注册表配置始终没被碰过，下一次打开程序自然回到「不记录」。
+ *
+ * 覆盖策略固定为「追加」：文件名里已带秒级时间戳，正常情况下不会重名；
+ * 万一同一秒内重复点击，追加比静默覆盖安全 —— 不丢数据。
+ */
+void cn_apply_log_request(Conf *conf)
+{
+    char *path = NULL;
+    int logtype = cn_take_log_request(&path);
+
+    if (logtype) {
+        conf_set_int(conf, CONF_logtype, logtype);
+        conf_set_int(conf, CONF_logxfovr, LGXF_APN);
+        if (path) {
+            Filename *fn = filename_from_str(path);
+            conf_set_filename(conf, CONF_logfilename, fn);
+            filename_free(fn);
+        }
+    }
+    sfree(path);
+}
+
+/*
+ * cn: 丢掉尚未消费的「记录日志」意图。
+ *
+ * 开关按钮不再结束配置框，所以意图可能在配置框里被点开之后，用户又
+ * 点了「取消」/直接关窗 —— 那次连接根本没发生。若不清理，下一次打开
+ * 配置框时按钮显示「记录日志」，静态槽位里却还留着上一轮的路径，
+ * 两者对不上，用户点了连接就会莫名其妙开始记录。
+ *
+ * 在 do_config 入口调用：每次进配置框都是全新一轮，上一轮的开关状态
+ * 一律作废。已连接的会话不受影响 —— 那边的日志早已注入窗口自己的
+ * Conf 副本，与这个槽位无关。
+ */
+void cn_reset_log_request(void)
+{
+    sfree(cn_session_logfile_request);
+    cn_session_logfile_request = NULL;
+    cn_session_logtype_request = 0;
+}
+
+/*
+ * cn: 生成「一次性日志」的完整路径：程序目录\主机名_年月日_时分秒.log
+ *
+ * 文件名里不拼 &H 占位符而是直接写死主机名，是因为占位符由 logging.c
+ * 在打开文件那一刻才展开，而这里需要在点击时就把路径确定下来（按钮上
+ * 要显示、日志页也要能看见）。主机名可能含 IPv6 冒号等非法字符，用
+ * filename_char_sanitise 逐个消毒。
+ *
+ * 拿不到 exe 路径时退回相对路径，行为与上游默认值一致。
+ */
+char *cn_log_path_for_runtime(Conf *conf)
+{
+    char fname[512];
+    char stamp[64];
+    struct tm tm = ltime();
+    const char *dest = conf_dest(conf);
+    size_t n = 0;
+
+    if (!dest || !*dest)
+        dest = "session";
+    /* 主机名/串口名逐个消毒：IPv6 地址里的冒号在 Windows 文件名中非法。 */
+    for (const char *p = dest; *p && n < sizeof(fname) - 32; p++)
+        fname[n++] = filename_char_sanitise(*p);
+    fname[n++] = '_';
+
+    strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &tm);
+    for (const char *p = stamp; *p && n < sizeof(fname) - 8; p++)
+        fname[n++] = *p;
+    strcpy(fname + n, ".log");
+
+    /*
+     * 落到用户桌面（2026-11-09 主人指定）：日志是给人看的产物，桌面
+     * 最顺手，不用去程序目录翻。
+     *
+     * 取法照搬 storage.c 的既有套路：动态加载 shell32 的
+     * SHGetFolderPathA，走 CSIDL_DESKTOPDIRECTORY。动态加载而不是直接
+     * 链接，是因为仓库一直避免对 shell32 建静态依赖（老系统上未必有）。
+     *
+     * 拿不到桌面路径时退回程序目录 —— 不能退回 cwd：从快捷方式启动
+     * 时 cwd 可能是系统目录，日志会散落到用户找不到的地方。
+     */
+    {
+        static HMODULE shell32_module = NULL;
+        static HRESULT (WINAPI *p_SHGetFolderPathA)(
+            HWND, int, HANDLE, DWORD, LPSTR) = NULL;
+        static bool tried_desktop = false;
+
+        if (!tried_desktop) {
+            shell32_module = load_system32_dll("shell32.dll");
+            if (shell32_module) {
+                p_SHGetFolderPathA = (HRESULT (WINAPI *)(HWND, int, HANDLE,
+                                                         DWORD, LPSTR))
+                    GetProcAddress(shell32_module, "SHGetFolderPathA");
+            }
+            tried_desktop = true;
+        }
+        if (p_SHGetFolderPathA) {
+            char desk[MAX_PATH + 1];
+            if (SUCCEEDED(p_SHGetFolderPathA(NULL, CSIDL_DESKTOPDIRECTORY,
+                                             NULL, SHGFP_TYPE_CURRENT, desk))) {
+                char *out = dupprintf("%s\\%s", desk, fname);
+                return out;
+            }
+        }
+    }
+    {
+        wchar_t exedir[MAX_PATH];
+        if (GetModuleFileNameW(NULL, exedir, MAX_PATH) != 0) {
+            wchar_t *slash = wcsrchr(exedir, L'\\');
+            if (slash) {
+                char *dir, *out;
+                *slash = L'\0';
+                dir = dup_wc_to_mb(CP_UTF8, exedir, "?");
+                out = dupprintf("%s\\%s", dir, fname);
+                sfree(dir);
+                return out;
+            }
+        }
+    }
+    return dupstr(fname);
+}
+
+/*
+ * cn: 「记录日志」复选框的 handler（2026-11-09 由按钮改版）。
+ *
+ * 与 conf_checkbox_handler 的根本区别：勾选结果不进 Conf，只写进静态
+ * 意图槽位。Conf 一旦被写就会点亮「保存」按钮、并可能被落盘，而这条
+ * 开关的语义是「只对本次连接生效」，落盘就变成永久设置了。
+ *
+ * 两个事件：
+ *   - EVENT_VALCHANGE：用户勾/取消。勾选时校验目标是否填齐（日志文件名
+ *     要从主机名生成），不齐则弹提示并把勾去掉，回到未勾选态。
+ *   - EVENT_REFRESH：切页会销毁重建面板控件，新控件默认未勾选。这里按
+ *     意图槽位把勾选态重新施加一遍，否则开关看着是关的、实际还开着。
+ *
+ * 取消勾选不做目标校验：已经开着的开关必须能关掉，哪怕用户把主机名
+ * 清空了也得能关。
+ */
+static void cn_session_logcheckbox_handler(dlgcontrol *ctrl, dlgparam *dlg,
+                                           void *data, int event)
+{
+    Conf *conf = (Conf *)data;
+
+    if (event == EVENT_VALCHANGE) {
+        if (dlg_checkbox_get(ctrl, dlg)) {
+            if (!session_page_inputs_filled(conf)) {
+                dlg_info_msg(dlg, CN_INPUT_INCOMPLETE_MSG);
+                /* 退回未勾选：意图没建立起来，勾选态就不该留着。 */
+                dlg_checkbox_set(ctrl, dlg, false);
+                return;
+            }
+            sfree(cn_session_logfile_request);
+            cn_session_logfile_request = cn_log_path_for_runtime(conf);
+            cn_session_logtype_request = LGTYP_ASCII;
+        } else {
+            sfree(cn_session_logfile_request);
+            cn_session_logfile_request = NULL;
+            cn_session_logtype_request = 0;
+        }
+        /*
+         * 勾选态落定后把焦点交还给分类树。复选框带着焦点时，系统会在
+         * 文字周围画一圈虚线焦点框，看着像「文字被选中」；切页时上游
+         * 本来就把焦点给了树，虚线随之消失 —— 这里复用同一落点，让
+         * 勾选后的观感与切页一致，勾选状态本身不受影响。
+         */
+        if (dlg->focus_treeview)
+            dlg->focus_treeview(dlg);
+    } else if (event == EVENT_REFRESH) {
+        dlg_checkbox_set(ctrl, dlg, cn_session_logtype_request != 0);
+    }
 }
 
 /*
@@ -1210,6 +1503,7 @@ struct sessionsaver_data {
     dlgcontrol *listbox;
     dlgcontrol *savebutton, *delbutton;
     dlgcontrol *initbutton;     /* cn: 恢复到设置初始化快照 */
+    dlgcontrol *logbutton;      /* cn: 本次连接记录会话日志（复选框） */
     dlgcontrol *loadkeybutton;  /* cn: 凭据框右侧的「载入密钥」 */
     dlgcontrol *xferbutton;     /* cn: 「连接」左侧的「文件传输」 */
     dlgcontrol *okbutton, *cancelbutton;
@@ -1362,10 +1656,6 @@ static void set_button_muted(dlgparam *dlg, dlgcontrol *ctrl, bool muted)
     dlg_set_button_muted(dlg, id, muted);
 }
 
-/* cn: 未填齐时点按钮的统一提示。 */
-#define CN_INPUT_INCOMPLETE_MSG \
-    "请先输入主机名称（IP 地址）和端口号"
-
 /*
  * cn: 按当前 Conf 刷新会话页两个按钮的外观与显隐。
  *
@@ -1405,6 +1695,20 @@ static void refresh_session_buttons(struct sessionsaver_data *ssd,
         /* 按钮本身只要目标填了就可以点，与认证方式无关。 */
         set_button_muted(dlg, ssd->loadkeybutton, !filled);
     }
+
+    /*
+     * cn: 「记录日志」复选框的勾选态跟着意图走。
+     *
+     * 切页回来时控件是新建的，勾选态回到未勾选 —— 若此时意图还开着，
+     * 复选框就会显示成未开启，与实际状态对不上。所以每次刷新都按静态
+     * 槽位重新施加一遍。
+     *
+     * dlg_get_ctrl_base_id 的存活检查不能省：refresh_session_buttons 在
+     * 切到别的页之后仍会被调用，那时本页控件已经销毁，直接拿指针去
+     * dlg_findbyctrl 会命中 assert（曾导致点「密钥」必崩）。
+     */
+    if (ssd->logbutton && dlg_get_ctrl_base_id(dlg, ssd->logbutton) >= 0)
+        dlg_checkbox_set(ssd->logbutton, dlg, cn_session_logtype_request != 0);
 
     /*
      * cn: 「密钥」藏起来之后，它右边那 15% 的列宽就空着了，凭据框右
@@ -1568,14 +1872,41 @@ char *cn_persist_default_settings(Conf *conf)
         filename_copy(conf_get_filename(conf, CONF_detached_cert));
     int runtime_portnum = conf_get_int(conf, CONF_port);
     int runtime_proto = conf_get_int(conf, CONF_protocol);
+    /*
+     * cn: 波特率是「本次窗口的临时值」，不落盘（2026-11-09 主人定）。
+     * 保存时写成默认 9600，落盘后立刻还原运行值，这样「保存」不会把
+     * 当前窗口手填的波特率固化进全局默认，而紧接着点「打开」仍用用户
+     * 刚填的那个值。机制与 host/username 完全一致。
+     */
+    int runtime_serspeed = conf_get_int(conf, CONF_serspeed);
+    /*
+     * cn: 会话日志同样是「本次窗口的临时状态」，不落盘（2026-11-09）。
+     *
+     * 「日志」菜单里点「开始记录日志」会往窗口这份 Conf 写 logtype 与
+     * logfilename —— 那是运行态注入，用户的本意绝不是「以后每次启动都
+     * 记日志」。若不加处理，这里 save_settings 会把整份 Conf 原样写进
+     * 注册表，LogType 和那个带时间戳的文件名就被固化成全局默认，下一次
+     * 启动自动开始记录、还会往一个早就过时的文件名里追加。
+     *
+     * 处理办法与 host/username 完全一致：落盘时写成默认值，落盘后立刻
+     * 还原运行值。这样「保存」不影响正在进行的日志，注册表也不会被污染。
+     */
+    int runtime_logtype = conf_get_int(conf, CONF_logtype);
+    int runtime_logxfovr = conf_get_int(conf, CONF_logxfovr);
+    Filename *runtime_logfile =
+        filename_copy(conf_get_filename(conf, CONF_logfilename));
     conf_set_str(conf, CONF_host, "");
     conf_set_str(conf, CONF_username, "");
     Filename *cn_empty_fn = filename_from_str("");
     conf_set_filename(conf, CONF_keyfile, cn_empty_fn);
     conf_set_filename(conf, CONF_detached_cert, cn_empty_fn);
+    conf_set_filename(conf, CONF_logfilename, cn_empty_fn);
     filename_free(cn_empty_fn);
     conf_set_int(conf, CONF_port, 22);
     conf_set_int(conf, CONF_protocol, PROT_SSH);
+    conf_set_int(conf, CONF_serspeed, 9600);
+    conf_set_int(conf, CONF_logtype, LGTYP_NONE);
+    conf_set_int(conf, CONF_logxfovr, LGXF_ASK);
     char *errmsg = save_settings("", conf);
     conf_set_str(conf, CONF_host, runtime_host);
     conf_set_str(conf, CONF_username, runtime_username);
@@ -1583,6 +1914,11 @@ char *cn_persist_default_settings(Conf *conf)
     conf_set_filename(conf, CONF_detached_cert, runtime_cert);
     conf_set_int(conf, CONF_port, runtime_portnum);
     conf_set_int(conf, CONF_protocol, runtime_proto);
+    conf_set_int(conf, CONF_serspeed, runtime_serspeed);
+    conf_set_int(conf, CONF_logtype, runtime_logtype);
+    conf_set_int(conf, CONF_logxfovr, runtime_logxfovr);
+    conf_set_filename(conf, CONF_logfilename, runtime_logfile);
+    filename_free(runtime_logfile);
     sfree(runtime_host);
     sfree(runtime_username);
     filename_free(runtime_keyfile);
@@ -2589,257 +2925,6 @@ static void clipboard_control(struct controlset *s, const char *label,
 #endif
 }
 
-static void serial_parity_handler(dlgcontrol *ctrl, dlgparam *dlg,
-                                  void *data, int event)
-{
-    static const struct {
-        const char *name;
-        int val;
-    } parities[] = {
-        {"无", SER_PAR_NONE},
-        {"奇", SER_PAR_ODD},
-        {"偶", SER_PAR_EVEN},
-        {"始终为 1", SER_PAR_MARK},
-        {"始终为 0", SER_PAR_SPACE},
-    };
-    int mask = ctrl->context.i;
-    int i, j;
-    Conf *conf = (Conf *)data;
-
-    if (event == EVENT_REFRESH) {
-        /* Fetching this once at the start of the function ensures we
-         * remember what the right value is supposed to be when
-         * operations below cause reentrant calls to this function. */
-        int oldparity = conf_get_int(conf, CONF_serparity);
-
-        dlg_update_start(ctrl, dlg);
-        dlg_listbox_clear(ctrl, dlg);
-        for (i = 0; i < lenof(parities); i++)  {
-            if (mask & (1 << parities[i].val))
-                dlg_listbox_addwithid(ctrl, dlg, parities[i].name,
-                                      parities[i].val);
-        }
-        for (i = j = 0; i < lenof(parities); i++) {
-            if (mask & (1 << parities[i].val)) {
-                if (oldparity == parities[i].val) {
-                    dlg_listbox_select(ctrl, dlg, j);
-                    break;
-                }
-                j++;
-            }
-        }
-        if (i == lenof(parities)) {    /* an unsupported setting was chosen */
-            dlg_listbox_select(ctrl, dlg, 0);
-            oldparity = SER_PAR_NONE;
-        }
-        dlg_update_done(ctrl, dlg);
-        conf_set_int(conf, CONF_serparity, oldparity);    /* restore */
-    } else if (event == EVENT_SELCHANGE) {
-        int i = dlg_listbox_index(ctrl, dlg);
-        if (i < 0)
-            i = SER_PAR_NONE;
-        else
-            i = dlg_listbox_getid(ctrl, dlg, i);
-        conf_set_int(conf, CONF_serparity, i);
-    }
-}
-
-static void serial_flow_handler(dlgcontrol *ctrl, dlgparam *dlg,
-                                void *data, int event)
-{
-    static const struct {
-        const char *name;
-        int val;
-    } flows[] = {
-        {"无", SER_FLOW_NONE},
-        {"XON/XOFF", SER_FLOW_XONXOFF},
-        {"RTS/CTS", SER_FLOW_RTSCTS},
-        {"DSR/DTR", SER_FLOW_DSRDTR},
-    };
-    int mask = ctrl->context.i;
-    int i, j;
-    Conf *conf = (Conf *)data;
-
-    if (event == EVENT_REFRESH) {
-        /* Fetching this once at the start of the function ensures we
-         * remember what the right value is supposed to be when
-         * operations below cause reentrant calls to this function. */
-        int oldflow = conf_get_int(conf, CONF_serflow);
-
-        dlg_update_start(ctrl, dlg);
-        dlg_listbox_clear(ctrl, dlg);
-        for (i = 0; i < lenof(flows); i++)  {
-            if (mask & (1 << flows[i].val))
-                dlg_listbox_addwithid(ctrl, dlg, flows[i].name, flows[i].val);
-        }
-        for (i = j = 0; i < lenof(flows); i++) {
-            if (mask & (1 << flows[i].val)) {
-                if (oldflow == flows[i].val) {
-                    dlg_listbox_select(ctrl, dlg, j);
-                    break;
-                }
-                j++;
-            }
-        }
-        if (i == lenof(flows)) {       /* an unsupported setting was chosen */
-            dlg_listbox_select(ctrl, dlg, 0);
-            oldflow = SER_FLOW_NONE;
-        }
-        dlg_update_done(ctrl, dlg);
-        conf_set_int(conf, CONF_serflow, oldflow);/* restore */
-    } else if (event == EVENT_SELCHANGE) {
-        int i = dlg_listbox_index(ctrl, dlg);
-        if (i < 0)
-            i = SER_FLOW_NONE;
-        else
-            i = dlg_listbox_getid(ctrl, dlg, i);
-        conf_set_int(conf, CONF_serflow, i);
-    }
-}
-
-/*
- * 常见厂商的控制台串口参数。企业网络设备（华为、华三、思科、锐捷、
- * 中兴、Juniper、Aruba）基本清一色 9600-8-N-1 且无流控；MikroTik、
- * Ubiquiti 和服务器 BMC 走 115200-8-N-1；老式设备还有 7-E-1 的组合。
- * 选一个标准就把下面五项参数一次性填好，省得逐项手改。
- *
- * CONF_serstopbits 以半个位为单位，所以 1 个停止位记作 2。
- */
-struct serial_standard {
-    const char *name;
-    int speed, databits, stopbits, parity, flow;
-};
-
-static const struct serial_standard serial_standards[] = {
-    {"华为/华三",     9600, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
-    {"思科",          9600, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
-    {"锐捷",          9600, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
-    {"中兴",          9600, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
-    {"Juniper",       9600, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
-    {"Aruba/HPE",     9600, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
-    {"MikroTik",    115200, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
-    {"Ubiquiti",    115200, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
-    {"服务器BMC",   115200, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
-    {"工业设备",     19200, 8, 2, SER_PAR_NONE, SER_FLOW_NONE},
-    {"老式设备",      9600, 7, 2, SER_PAR_EVEN, SER_FLOW_NONE},
-};
-
-/* cn: lenof 返回无符号 sizeof 表达式，与 int 循环变量比较会触发
- * -Wsign-compare；这里收成 int，串口标准区块的循环全部受益。 */
-#define NSERIAL_STANDARDS ((int)lenof(serial_standards))
-
-/* 串口页上需要联动的控件，构建面板时填入。 */
-static struct {
-    dlgcontrol *standard, *speed, *databits, *stopbits, *parity, *flow;
-} serial_ui;
-
-/* 用户上一次选中的标准，用来区分参数完全相同的厂商条目。 */
-static int serial_standard_last = -1;
-
-static bool serial_standard_equals(int idx, Conf *conf)
-{
-    const struct serial_standard *std = &serial_standards[idx];
-
-    return std->speed == conf_get_int(conf, CONF_serspeed) &&
-        std->databits == conf_get_int(conf, CONF_serdatabits) &&
-        std->stopbits == conf_get_int(conf, CONF_serstopbits) &&
-        std->parity == conf_get_int(conf, CONF_serparity) &&
-        std->flow == conf_get_int(conf, CONF_serflow);
-}
-
-static int serial_standard_match(Conf *conf)
-{
-    int i;
-
-    for (i = 0; i < NSERIAL_STANDARDS; i++)
-        if (serial_standard_equals(i, conf))
-            return i;
-    return -1;
-}
-
-/* 参数被手工改动后，让标准下拉重新对上号（对不上就显示“自定义”）。 */
-static void serial_standard_sync(dlgparam *dlg)
-{
-    if (serial_ui.standard)
-        dlg_refresh(serial_ui.standard, dlg);
-}
-
-static void serial_standard_handler(dlgcontrol *ctrl, dlgparam *dlg,
-                                    void *data, int event)
-{
-    Conf *conf = (Conf *)data;
-    int i;
-
-    if (event == EVENT_REFRESH) {
-        int selected;
-
-        if (serial_standard_last >= 0 &&
-            serial_standard_last < NSERIAL_STANDARDS &&
-            serial_standard_equals(serial_standard_last, conf)) {
-            selected = serial_standard_last;
-        } else {
-            int match = serial_standard_match(conf);
-            selected = (match >= 0) ? match : NSERIAL_STANDARDS;
-        }
-
-        dlg_update_start(ctrl, dlg);
-        dlg_listbox_clear(ctrl, dlg);
-        for (i = 0; i < NSERIAL_STANDARDS; i++)
-            dlg_listbox_add(ctrl, dlg, serial_standards[i].name);
-        dlg_listbox_add(ctrl, dlg, "自定义");
-        dlg_listbox_select(ctrl, dlg, selected);
-        dlg_update_done(ctrl, dlg);
-    } else if (event == EVENT_SELCHANGE) {
-        int idx = dlg_listbox_index(ctrl, dlg);
-
-        if (idx < 0)
-            return;
-        if (idx >= NSERIAL_STANDARDS) {
-            serial_standard_last = NSERIAL_STANDARDS;
-            return;
-        }
-
-        const struct serial_standard *std = &serial_standards[idx];
-        conf_set_int(conf, CONF_serspeed, std->speed);
-        conf_set_int(conf, CONF_serdatabits, std->databits);
-        conf_set_int(conf, CONF_serstopbits, std->stopbits);
-        conf_set_int(conf, CONF_serparity, std->parity);
-        conf_set_int(conf, CONF_serflow, std->flow);
-        serial_standard_last = idx;
-
-        dlg_refresh(serial_ui.speed, dlg);
-        dlg_refresh(serial_ui.databits, dlg);
-        dlg_refresh(serial_ui.stopbits, dlg);
-        dlg_refresh(serial_ui.parity, dlg);
-        dlg_refresh(serial_ui.flow, dlg);
-    }
-}
-
-/* 包一层通用处理函数，手工改参数时把标准下拉同步过去。 */
-static void serial_editbox_handler(dlgcontrol *ctrl, dlgparam *dlg,
-                                   void *data, int event)
-{
-    conf_editbox_handler(ctrl, dlg, data, event);
-    if (event == EVENT_VALCHANGE)
-        serial_standard_sync(dlg);
-}
-
-static void serial_parity_std_handler(dlgcontrol *ctrl, dlgparam *dlg,
-                                      void *data, int event)
-{
-    serial_parity_handler(ctrl, dlg, data, event);
-    if (event == EVENT_SELCHANGE)
-        serial_standard_sync(dlg);
-}
-
-static void serial_flow_std_handler(dlgcontrol *ctrl, dlgparam *dlg,
-                                    void *data, int event)
-{
-    serial_flow_handler(ctrl, dlg, data, event);
-    if (event == EVENT_SELCHANGE)
-        serial_standard_sync(dlg);
-}
-
 void proxy_type_handler(dlgcontrol *ctrl, dlgparam *dlg,
                         void *data, int event)
 {
@@ -3004,9 +3089,9 @@ void setup_config_box(struct controlbox *b, bool midsession,
         c->column = 0;
         hp->host = c;
         ssd->hostbox = c;
-        c = ctrl_editbox(s, PORT_BOX_TITLE, 'p', 100,
-                         HELPCTX(session_hostname),
-                         config_port_handler, I(0), I(0));
+        c = ctrl_combobox(s, PORT_BOX_TITLE, 'p', 100,
+                          HELPCTX(session_hostname),
+                          config_port_handler, I(0), I(0));
         c->column = 1;
         hp->port = c;
         ssd->portbox = c;
@@ -3147,9 +3232,27 @@ void setup_config_box(struct controlbox *b, bool midsession,
                                           sessionsaver_handler, P(ssd));
         ssd->initbutton->column = 1;
         ssd->initbutton->button.cn_smallfont = true;
+        /*
+         * cn: 「记录日志」—— 一次性开关，只对本次连接生效。
+         *
+         * 2026-11-09 主人改版：由按钮改为复选框。原按钮靠文字变化
+         * （记录日志 ↔ 关闭记录）表达状态，切页回来焦点被上游
+         * SetFocus(treeview) 抢走，蓝框消失后光看文字容易忽略状态；
+         * 复选框自带勾选态，不依赖焦点也能一眼看出开没开。
+         *
+         * 位置在「删除」正下方、「初始化设置」上方（三者竖排在历史列表
+         * 右侧那一列，具体像素位置由 cn_style_snapshot_buttons 钉）。
+         * 勾选只改意图，不写 Conf、不点亮保存按钮 —— 这是「一次性」的
+         * 全部含义，因此用自有 handler 而非 conf_checkbox_handler。
+         */
+        ssd->logbutton = ctrl_checkbox(s, "记录日志", NO_SHORTCUT,
+                                       HELPCTX(logging_main),
+                                       cn_session_logcheckbox_handler, P(ssd));
+        ssd->logbutton->column = 1;
     } else {
         /* Disable the Delete button mid-session too, for UI consistency. */
         ssd->delbutton = NULL;
+        ssd->logbutton = NULL;
     }
     ctrl_columns(s, 1, 100);
     /*
@@ -3193,7 +3296,8 @@ void setup_config_box(struct controlbox *b, bool midsession,
                  HELPCTX(logging_filename),
                  conf_filesel_handler, I(CONF_logfilename));
     ctrl_text(s, "(日志文件名可以包含 &Y &M &D 表示年月日，"
-              "&T 表示时间，&H 表示主机名称)",
+              "&T 表示时间，&H 表示主机名称，"
+              "&P 表示端口号，&& 表示 & 字符)",
               HELPCTX(logging_filename));
     ctrl_radiobuttons(s, "要记录的日志文件已存在时(E)：", 'e', 1,
                       HELPCTX(logging_exists),
@@ -4466,53 +4570,20 @@ void setup_config_box(struct controlbox *b, bool midsession,
         }
     }
 
-    if (DISPLAY_RECONFIGURABLE_PROTOCOL(PROT_SERIAL)) {
-        const BackendVtable *ser_vt = backend_vt_from_proto(PROT_SERIAL);
-
-        /*
-         * The Connection/Serial panel.
-         */
-        ctrl_settitle(b, "连接/串口",
-                      "本地串口设置");
-
-        /*
-         * 串口页顶部：选一个厂商标准，下面的五项参数自动填好。
-         */
-        s = ctrl_getset(b, "连接/串口", "serstd", "选择串口标准");
-        serial_ui.standard =
-            ctrl_droplist(s, "厂商标准(A)", 'a', 40,
-                          HELPCTX(serial_line),
-                          serial_standard_handler, I(0));
-
-        s = ctrl_getset(b, "连接/串口", "sercfg", "配置串口");
-        serial_ui.speed = ctrl_editbox(s, "波特率(S)", 's', 40,
-                                       HELPCTX(serial_speed),
-                                       serial_editbox_handler,
-                                       I(CONF_serspeed), ED_INT);
-        serial_ui.databits = ctrl_editbox(s, "数据位(B)", 'b', 40,
-                                          HELPCTX(serial_databits),
-                                          serial_editbox_handler,
-                                          I(CONF_serdatabits), ED_INT);
-        /*
-         * Stop bits come in units of one half.
-         */
-        static const struct conf_editbox_handler_type conf_editbox_stopbits = {
-            .type = EDIT_FIXEDPOINT, .denominator = 2};
-
-        serial_ui.stopbits = ctrl_editbox(s, "停止位(T)", 't', 40,
-                                          HELPCTX(serial_stopbits),
-                                          serial_editbox_handler,
-                                          I(CONF_serstopbits),
-                                          CP(&conf_editbox_stopbits));
-        serial_ui.parity = ctrl_droplist(s, "奇偶校验位(P)", 'p', 40,
-                                         HELPCTX(serial_parity),
-                                         serial_parity_std_handler,
-                                         I(ser_vt->serial_parity_mask));
-        serial_ui.flow = ctrl_droplist(s, "流控制(F)", 'f', 40,
-                                       HELPCTX(serial_flow),
-                                       serial_flow_std_handler,
-                                       I(ser_vt->serial_flow_mask));
-    }
+    /*
+     * cn: 「连接/串口」页面已删除（2026-11-09 主人决定）。
+     *
+     * 串口参数只在会话页留一个「波特率(P)」下拉框（9600 / 19200 /
+     * 115200 / 自定义），其余四项（数据位、停止位、奇偶校验、流控）
+     * 固定走默认值 8-N-1 无流控 —— 详见 cn_serial_params_reset()，
+     * 它在每次打开配置框时把这四项归位，防止旧存档里的非默认值变成
+     * 用户看不见也改不了的暗坑。
+     *
+     * 原页面里的「厂商标准」预设表（serial_standards / serial_ui /
+     * serial_standard_handler 等）随页面一并删除：那些条目除了「老式
+     * 设备」的 7-E-1 之外全是 8-N-1，只有波特率不同，而波特率已经由
+     * 下拉框覆盖。主人明确表示不再保老式设备。
+     */
 
     if (DISPLAY_RECONFIGURABLE_PROTOCOL(PROT_TELNET)) {
         /*

@@ -52,6 +52,12 @@
 #define IDM_COPY      0x0190
 #define IDM_PASTE     0x01A0
 #define IDM_XFER      0x01B0
+/*
+ * cn: 会话窗口「会话日志」子菜单下的两项。原先日志只能靠启动前在配置框
+ * 里开，会话中途想开想停都没入口，这两个 ID 补上运行时的开关。
+ */
+#define IDM_LOGSTART  0x01C0
+#define IDM_LOGSTOP   0x01D0
 #define IDM_SPECIALSEP 0x0200
 
 #define IDM_SPECIAL_MIN 0x0400
@@ -244,6 +250,12 @@ static SeatPromptResult win_seat_get_userpass_input(Seat *seat, prompts_t *p);
 static void win_seat_notify_remote_exit(Seat *seat);
 static void win_seat_notify_session_started(Seat *seat);
 static void cn_set_offline_title(WinGuiSeat *wgs);
+/*
+ * cn: 主菜单栏两项运行态开关的置灰同步。定义在 close_session 之前，
+ * 但 start_backend 比它们更早调用，故先声明。
+ */
+static void cn_sync_restart_menu(WinGuiSeat *wgs);
+static void cn_sync_log_menu(WinGuiSeat *wgs);
 static void win_seat_connection_fatal(Seat *seat, const char *msg);
 static void win_seat_nonfatal(Seat *seat, const char *msg);
 static void win_seat_update_specials_menu(Seat *seat);
@@ -328,9 +340,15 @@ static void start_backend(WinGuiSeat *wgs)
      * Under the serial backend the port box holds a baud rate, not a
      * port number, and realhost is already the CONF host.
      */
+    sfree(wgs->title_hostname);   /* 重启会话会再进这里，避免泄漏 */
     wgs->title_hostname = dupstr(realhost);
     wgs->title_port = conf_get_int(wgs->conf, CONF_protocol) ==
                       PROT_SERIAL ? 0 : conf_get_int(wgs->conf, CONF_port);
+    /*
+     * cn: 新一次连接，登录提示的切换机会要重新给。重启会话会再走
+     * 一遍本函数，不复位的话第二次连接永远停在「正在连接...」。
+     */
+    wgs->title_switched_online = false;
 
     /*
      * cn: 标题栏三态。backend_init 只表示连接已发起，SSH 还在握手，
@@ -373,6 +391,14 @@ static void start_backend(WinGuiSeat *wgs)
     }
 
     wgs->session_closed = false;
+
+    /*
+     * cn: 连接建立后主菜单栏两项要切到在线态 —— 「重启会话」置灰
+     * （在线重启没意义），「开始记录日志」放开（有会话可记了）。
+     * 重启路径也走这里，所以离线期间置灰的那两项会被重新算一遍。
+     */
+    cn_sync_restart_menu(wgs);
+    cn_sync_log_menu(wgs);
 }
 
 /*
@@ -399,6 +425,67 @@ static void cn_set_offline_title(WinGuiSeat *wgs)
     win_set_icon_title(&wgs->termwin, newtitle, DEFAULT_CODEPAGE);
     win_set_title(&wgs->termwin, newtitle, DEFAULT_CODEPAGE);
     sfree(newtitle);
+}
+
+/*
+ * cn: 「会话」菜单里两项运行态开关的置灰同步（2026-11-09 主人要求）。
+ *
+ * 两个函数都是「按当前真实状态重算一遍」，调用点散落在菜单构建、
+ * 连接建立、会话关闭、日志开关之后，因此必须可重复调用、不依赖调用
+ * 顺序 —— 唯一的前提是 menu_session / menu_log 已经建好，没建就直接
+ * 返回（菜单构建过程中那两个函数会在建好之后才被调）。
+ *
+ * 「重启会话」看 backend 是否还在：在线时重启没有意义，置灰。
+ * 「会话日志」两项看 LogContext 里的 logtype：这是运行态，conf 里那个
+ * 可能是用户配置的旧值，与「此刻是否正在写文件」未必一致。
+ */
+static void cn_sync_restart_menu(WinGuiSeat *wgs)
+{
+    if (!wgs->menu_session)
+        return;
+    EnableMenuItem(wgs->menu_session, IDM_RESTART, MF_BYCOMMAND |
+                   (wgs->backend ? MF_GRAYED : MF_ENABLED));
+}
+
+static void cn_sync_log_menu(WinGuiSeat *wgs)
+{
+    bool active;
+
+    if (!wgs->menu_log)
+        return;
+
+    active = wgs->logctx && log_get_logtype(wgs->logctx) > 0;
+
+    /*
+     * 离线（backend 已销毁）时两个都不给点：没有会话可记，也没有
+     * 连接可以开始记。重新连上后由 start_backend 里的同步重新放开。
+     */
+    EnableMenuItem(wgs->menu_log, IDM_LOGSTART, MF_BYCOMMAND |
+                   (!active && wgs->backend ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(wgs->menu_log, IDM_LOGSTOP, MF_BYCOMMAND |
+                   (active ? MF_ENABLED : MF_GRAYED));
+}
+
+/*
+ * cn: 弹一条会话窗口轻提示。
+ *
+ * 菜单里的「重启会话 / 开始记录日志 / 停止记录日志」执行完，界面上的
+ * 变化并不显眼 —— 菜单项只是置灰 / 放开，日志开始写盘更是看不见。
+ * 给一句即时确认，用户才知道刚才那下真生效了。
+ *
+ * 贴客户区顶部而不是底部：终端铺满整个客户区，而用户的眼睛和光标都
+ * 在最底下那行提示符上，压底部正好糊住正在敲的命令。贴顶部只盖住已经
+ * 翻上去的旧输出，1.5 秒后自己散开。
+ *
+ * 没有窗口句柄（无界面环境 / 自检）时直接返回，cn_toast_show 内部也会
+ * 拦一道，这里提前退出只是为了少算几次字符串转换。
+ */
+static void cn_toast_notify(WinGuiSeat *wgs, const char *text)
+{
+    if (!wgs || !wgs->term_hwnd)
+        return;
+    cn_toast_show(&wgs->toast, wgs->term_hwnd, NULL,
+                  CN_TOAST_TOP, 12, text);
 }
 
 static void close_session(void *vctx)
@@ -435,6 +522,23 @@ static void close_session(void *vctx)
         InsertMenu(wgs->popup_menus[i].menu, IDM_DUPSESS,
                    MF_BYCOMMAND | MF_ENABLED, IDM_RESTART, "重启会话(&R)");
     }
+
+    /*
+     * cn: 主菜单栏那两项也要跟着切到离线态 —— 「重启会话」放开，
+     * 「开始记录日志」置灰（没连接可记）。
+     *
+     * 会话断了就把日志收尾：光 logfclose 不够，LogContext 里的 logtype
+     * 仍是原值，菜单会以为还在记（「停止」亮着、「开始」灰着），而且
+     * 一旦重启后继续有流量，logwrite 发现 state 是 L_CLOSED 会自动
+     * 重新 fopen —— 用户明明已经断开，日志却自己又开起来。所以走
+     * log_reconfig 把 conf 与 LogContext 一起归零，状态才真正一致。
+     */
+    if (wgs->logctx && log_get_logtype(wgs->logctx) > 0) {
+        conf_set_int(wgs->conf, CONF_logtype, LGTYP_NONE);
+        log_reconfig(wgs->logctx, wgs->conf);
+    }
+    cn_sync_restart_menu(wgs);
+    cn_sync_log_menu(wgs);
 }
 
 /*
@@ -839,11 +943,24 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         wgs->menubar = CreateMenu();
         wgs->menu_session = CreatePopupMenu();
         wgs->menu_func = CreatePopupMenu();
+        wgs->menu_log = CreatePopupMenu();
 
         AppendMenu(wgs->menu_session, MF_ENABLED, IDM_NEWSESS,
                    "新会话(&W)...");
         AppendMenu(wgs->menu_session, MF_ENABLED, IDM_RECONF,
                    "会话设置(&G)...");
+        /*
+         * cn: 「重启会话」（2026-11-09 主人要求）。语义与右键菜单里
+         * 那一项完全一致：只在离线（backend 已销毁）时可点，点了就
+         * 重新 start_backend。在线时置灰 —— 此时重启没有意义，真要
+         * 断开请用「会话设置」或直接关窗。
+         *
+         * 注意这一项与右键菜单里的 IDM_RESTART 共用同一个 ID，两处
+         * 的启用状态必须同步维护（见 cn_sync_session_menus）。
+         */
+        AppendMenu(wgs->menu_session,
+                   wgs->backend ? MF_GRAYED : MF_ENABLED,
+                   IDM_RESTART, "重启会话(&R)");
         /*
          * cn: 文件传输入口。只有 SSH 会话才有意义，其他协议置灰。
          * 另外一定要在连接建立之后才可用，否则拿不到可用的 conf
@@ -857,6 +974,21 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                        can_xfer ? MF_ENABLED : MF_GRAYED,
                        IDM_XFER, "文件传输(&F)...");
         }
+        /*
+         * cn: 「日志」顶级菜单（2026-11-09 主人要求，与「会话」平级）。
+         *
+         * 两个入口互补，按当前日志状态互斥置灰：
+         *   开始记录日志 —— 当前没在记才可点；
+         *   停止记录日志 —— 当前正在记才可点。
+         * 状态判定看 LogContext 里的 logtype（>0 表示在记），不看
+         * conf —— conf 里可能是用户配置的旧值，与运行态未必一致。
+         */
+        AppendMenu(wgs->menu_log, MF_ENABLED, IDM_LOGSTART,
+                   "开始记录日志(&S)");
+        AppendMenu(wgs->menu_log, MF_ENABLED, IDM_LOGSTOP,
+                   "停止记录日志(&T)");
+        cn_sync_log_menu(wgs);
+        cn_sync_restart_menu(wgs);
 
         AppendMenu(wgs->menu_func, MF_ENABLED, IDM_SHOWLOG,
                    "事件日志(&E)");
@@ -868,6 +1000,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
         AppendMenu(wgs->menubar, MF_POPUP | MF_ENABLED,
                    (UINT_PTR)wgs->menu_session, "会话(&S)");
+        AppendMenu(wgs->menubar, MF_POPUP | MF_ENABLED,
+                   (UINT_PTR)wgs->menu_log, "日志(&L)");
         AppendMenu(wgs->menubar, MF_POPUP | MF_ENABLED,
                    (UINT_PTR)wgs->menu_func, "功能(&F)");
         SetMenu(wgs->term_hwnd, wgs->menubar);
@@ -2326,10 +2460,17 @@ static void win_seat_notify_remote_exit(Seat *seat)
  * cn: SSH 握手（KEX + 认证）完成、主会话通道打开时被调用。
  * 标题从「正在连接...」切「（在线）」；自定义标题（CONF_wintitle
  * 非自动生成）仍由 term_setup_window_titles 优先采用，行为不变。
+ *
+ * 2026-11-10：正常登录流程下标题早在第一个登录提示出现时就已经
+ * 切好了（见 win_seat_get_userpass_input），这里仍保留一次重设，
+ * 覆盖免认证路径（CONF_ssh_no_userauth / 代理认证后直连 / 连接
+ * 共享复用）——那些情况不会走 get_userpass_input，只有这个通知
+ * 能触发切换。重复设置同一标题无副作用。
  */
 static void win_seat_notify_session_started(Seat *seat)
 {
     WinGuiSeat *wgs = container_of(seat, WinGuiSeat, seat);
+    wgs->title_switched_online = true;
     term_setup_window_titles(wgs->term, wgs->title_hostname,
                              wgs->title_port);
 }
@@ -2898,6 +3039,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
         if (wgs)
             save_window_size(wgs, hwnd);
         /*
+         * cn: 提示条先收掉。它的窗口过程通过 GWLP_USERDATA 反向持有
+         * wgs->toast 的地址，wgs 一旦释放再被 WM_TIMER 碰到就是悬空。
+         */
+        if (wgs)
+            cn_toast_destroy(&wgs->toast);
+        /*
          * 拖动过程中若走到这里（例如拖动时程序被要求退出），把临时
          * 打开的「拖动时显示窗口内容」恢复回去，别给用户留下被改过的
          * 系统设置。正常路径下 WM_EXITSIZEMOVE 已经恢复过，
@@ -3051,8 +3198,50 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                 lp_eventlog(&wgs->logpolicy, "----- 会话已重启 -----");
                 term_pwron(wgs->term, false);
                 start_backend(wgs);
+                cn_toast_notify(wgs, "正在重启会话");
             }
 
+            break;
+          case IDM_LOGSTART:
+            /*
+             * cn: 运行中开始记录日志（2026-11-09 主人要求）。
+             *
+             * 做法是往窗口自己那份 Conf 里写 logtype/logfilename，再让
+             * log_reconfig 把新值搬进 LogContext —— 这是运行时改日志的
+             * 唯一正确通路：直接 logfopen 用的是 LogContext 里缓存的
+             * logtype，不改 conf 它还是 0，一个字节都不会写。
+             *
+             * 文件名每次现生成（主机名_年月日_时分秒.log，落桌面），
+             * 这样中途开停不会覆盖上一次的产物。
+             */
+            if (wgs->backend && wgs->logctx &&
+                log_get_logtype(wgs->logctx) == 0) {
+                char *path = cn_log_path_for_runtime(wgs->conf);
+                Filename *fn = filename_from_str(path);
+                lp_eventlog(&wgs->logpolicy, "----- 开始记录会话日志 -----");
+                conf_set_int(wgs->conf, CONF_logtype, LGTYP_ASCII);
+                conf_set_int(wgs->conf, CONF_logxfovr, LGXF_APN);
+                conf_set_filename(wgs->conf, CONF_logfilename, fn);
+                filename_free(fn);
+                sfree(path);
+                log_reconfig(wgs->logctx, wgs->conf);
+                cn_sync_log_menu(wgs);
+                cn_toast_notify(wgs, "已开始记录会话日志");
+            }
+            break;
+          case IDM_LOGSTOP:
+            /*
+             * cn: 运行中停止记录日志。把 conf 里的 logtype 归零再走
+             * log_reconfig，它会先 logfclose 再按新值决定要不要重开；
+             * 归零后就不会重开，文件句柄随之释放，内容落盘。
+             */
+            if (wgs->logctx && log_get_logtype(wgs->logctx) > 0) {
+                lp_eventlog(&wgs->logpolicy, "----- 停止记录会话日志 -----");
+                conf_set_int(wgs->conf, CONF_logtype, LGTYP_NONE);
+                log_reconfig(wgs->logctx, wgs->conf);
+                cn_sync_log_menu(wgs);
+                cn_toast_notify(wgs, "已停止记录会话日志");
+            }
             break;
           case IDM_RECONF: {
             struct reconfig_apply_ctx rctx;
@@ -6524,6 +6713,34 @@ static SeatPromptResult win_seat_get_userpass_input(Seat *seat, prompts_t *p)
 {
     WinGuiSeat *wgs = container_of(seat, WinGuiSeat, seat);
     SeatPromptResult spr;
+
+    /*
+     * cn: 标题栏「正在连接...」→「（在线）」的切换点（2026-11-10）。
+     *
+     * 原先只在 win_seat_notify_session_started 里切，而那个通知由
+     * mainchan_open_confirmation 在服务端确认主会话通道时才发出 ——
+     * 认证早就过了、pty 与 shell 请求都发出去了。结果就是密码提示
+     * 已经打在屏幕上，标题还写着「正在连接...」，看着像卡住了。
+     *
+     * 主人要求：只要能输入就算连上了。登录凭据提示（用户名 / 密码 /
+     * 密钥口令 / 键盘交互）正是「握手完成、只等用户敲字」的时刻，
+     * 所以在这里切。这是所有登录提示的唯一出口，-pw 与 Pageant
+     * 免交互路径也会经过（cmdline_get_passwd_input 直接给出答案）。
+     *
+     * 判据 title_hostname：它在 start_backend 里 backend_init 返回
+     * 之后才赋值。SSH 跳板代理自己的认证提示发生在 backend_init
+     * 内部（proxy_connect 阶段），此时它还是 NULL —— 靠这一条把
+     * 代理认证排除在外，不会把「跳板还没连上」误显示成在线。
+     *
+     * title_switched_online 保证只切一次：密码输错重试、多轮键盘
+     * 交互都会反复进这个函数，重复设标题没有意义。
+     */
+    if (wgs->term && wgs->title_hostname && !wgs->title_switched_online) {
+        wgs->title_switched_online = true;
+        term_setup_window_titles(wgs->term, wgs->title_hostname,
+                                 wgs->title_port);
+    }
+
     spr = cmdline_get_passwd_input(p, &wgs->cmdline_get_passwd_state, true);
     if (spr.kind == SPRK_INCOMPLETE)
         spr = term_get_userpass_input(wgs->term, p);

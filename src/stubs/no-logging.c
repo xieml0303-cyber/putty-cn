@@ -6,6 +6,7 @@
 #include "putty.h"
 
 void logtraffic(LogContext *ctx, unsigned char c, int logmode) {}
+void logtraffic_cp(LogContext *ctx, unsigned long c, int logmode) {}
 void logflush(LogContext *ctx) {}
 void logevent(LogContext *ctx, const char *event) {}
 void log_free(LogContext *ctx) {}

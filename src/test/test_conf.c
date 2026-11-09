@@ -1189,6 +1189,12 @@ static void cl_composekey(Conf *c)
 { conf_set_bool(c, CONF_compose_key, true); }
 static void cl_ctrlalt(Conf *c)
 { conf_set_bool(c, CONF_ctrlaltkeys, false); }
+/*
+ * cn: 串口波特率。默认 9600，这里改成 115200 模拟用户手填 —— 该改动
+ * 必须被清单与变脏判定双双忽略（见 test_changelist 末尾的断言）。
+ */
+static void cl_serspeed(Conf *c)
+{ conf_set_int(c, CONF_serspeed, 115200); }
 
 void test_changelist(void)
 {
@@ -1351,6 +1357,27 @@ void test_changelist(void)
     check_struct_matches_text("proxy_type", cl_proxyhttp);
     check_struct_matches_text("resize_action", cl_resize);
     check_struct_matches_text("title", cl_title);
+    /*
+     * cn: 串口波特率是「本次窗口的临时值」（2026-11-09 主人定）。
+     * 打开配置框固定回到 9600，改了不进改动清单、不点亮保存按钮、
+     * 保存时不落盘。所以单独改波特率必须既不产生清单行，也不让
+     * conf_equal 判定为不等 —— 否则动一下波特率就会凭空冒出一条
+     * 「SerialSpeed 115200 → 9600」的改动记录。
+     */
+    check_changelist("serspeed 不进清单", cl_serspeed, "(无可见改动)");
+    {
+        Conf *base = conf_new();
+        Conf *cur = conf_new();
+        do_defaults(NULL, base);
+        conf_copy_into(cur, base);
+        cl_serspeed(cur);
+        if (!conf_equal(base, cur)) {
+            fprintf(stderr, "fail: 改波特率不该让配置变脏\n");
+            nfails++;
+        }
+        conf_free(base);
+        conf_free(cur);
+    }
 }
 
 /*

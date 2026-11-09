@@ -750,6 +750,14 @@ bool dlg_confirm_changes(dlgparam *dp, const char *title,
 /* Reset the serial-port auto-fallback bookkeeping at config-dialog
  * entry (defined in config.c; see the H3 note there). */
 void serial_fallback_reset(void);
+/* cn: force the four non-baud serial parameters (data bits, stop bits,
+ * parity, flow control) back to their defaults at config-dialog entry.
+ * The Connection/Serial panel was removed, so those four are no longer
+ * editable; a stale non-default value left in an old saved session
+ * would otherwise be both invisible and unfixable. Defined in config.c.
+ * Must be called before the change-tracking baseline is taken, or the
+ * reset itself would be reported as a user edit. */
+void cn_serial_params_reset(Conf *conf);
 /*
  * This function signals to the front end that the dialog's
  * processing is completed, and passes an integer value (typically

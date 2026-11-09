@@ -22,6 +22,8 @@ build*/
 installer/output/
 dist/deploy-result.txt
 dist/*.exe
+# 崩溃取证工具运行时写到 exe 同目录的日志，属运行时产物
+cn-trace.log
 
 # 本地安全扫描器会话状态
 **/.mimosa/

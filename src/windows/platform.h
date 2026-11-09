@@ -543,6 +543,15 @@ struct dlgparam {
      * 处理器请求「跳到某一页」。非树形对话框（如 puttygen）为 NULL。
      */
     bool (*navigate_to_path)(struct dlgparam *dp, const char *pathname);
+    /*
+     * cn: 把焦点交还给左侧分类树。
+     *
+     * 复选框勾选后系统会给自己画一圈虚线焦点框，看着像「选中了文字」
+     * 而不是「勾上了」。切页时上游本来就执行 SetFocus(treeview)，虚线
+     * 随之消失 —— 这里复用同一个落点，让勾选后的观感与切页一致。
+     * 非树形对话框（如 puttygen）为 NULL。
+     */
+    void (*focus_treeview)(struct dlgparam *dp);
 };
 
 /*

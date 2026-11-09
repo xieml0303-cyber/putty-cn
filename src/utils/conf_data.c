@@ -60,12 +60,19 @@ const ConfKeyInfo conf_key_info[] = {
  * certificate) and the startup box resets them. They therefore do not
  * count as "unsaved changes": neither the dirty gate nor the change
  * list takes them into account.
+ *
+ * cn: 串口波特率（CONF_serspeed）同属这一类。2026-11-09 主人定：波特率
+ * 只是「这一次窗口」的临时值 —— 打开配置框固定回到 9600，改了不进改动
+ * 清单、不点亮保存按钮，保存时也不会被写进注册表（见
+ * cn_persist_default_settings）。所以它必须和连接目标一样被排除在
+ * 变脏判定与清单之外，否则动一下波特率就会凭空冒出一条改动记录。
  */
 static bool cn_is_connection_target(size_t key)
 {
     return key == CONF_host || key == CONF_port ||
         key == CONF_protocol || key == CONF_username ||
-        key == CONF_keyfile || key == CONF_detached_cert;
+        key == CONF_keyfile || key == CONF_detached_cert ||
+        key == CONF_serspeed;
 }
 
 /*

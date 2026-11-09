@@ -82,6 +82,19 @@ void logflush(LogContext *ctx)
             fflush(ctx->lgfp);
 }
 
+/*
+ * cn: 查询当前日志是否处于「记录中」。
+ *
+ * 会话窗口的「会话日志」菜单需要按运行态置灰开始/停止两项，而 logtype
+ * 是 LogContext 的内部字段（conf 里那个可能是用户配置的旧值，与运行态
+ * 未必一致，不能拿来判断）。这里只暴露一个只读查询，不提供 setter ——
+ * 改日志类型仍然走 log_reconfig。
+ */
+int log_get_logtype(LogContext *ctx)
+{
+    return ctx ? ctx->logtype : 0;
+}
+
 LogPolicy *log_get_policy(LogContext *ctx)
 {
     return ctx->lp;
@@ -211,6 +224,52 @@ void logtraffic(LogContext *ctx, unsigned char c, int logmode)
         if (ctx->logtype == logmode)
             logwrite(ctx, make_ptrlen(&c, 1));
     }
+}
+
+/*
+ * Log one graphic character, given as a Unicode code point.
+ *
+ * The original logtraffic() above takes a single byte, which is fine for
+ * pure-ASCII traffic but silently drops anything else: by the time a
+ * character reaches term_display_graphic_char() it has already been
+ * decoded, so a CJK character arrives as a code point like 0x4E2D rather
+ * than as the individual UTF-8 bytes that came off the wire. Writing that
+ * code point as one byte would truncate it; the pre-existing charset test
+ * in terminal.c avoided the corruption by refusing to log non-ASCII at
+ * all, which is why Chinese text used to vanish from the log file.
+ *
+ * Re-encode the code point as UTF-8 and log those bytes, so the file stays
+ * in the same encoding the remote side actually sent.
+ */
+void logtraffic_cp(LogContext *ctx, unsigned long c, int logmode)
+{
+    unsigned char buf[4];
+    size_t len;
+
+    if (ctx->logtype <= 0 || ctx->logtype != logmode)
+        return;
+
+    if (c < 0x80) {
+        buf[0] = (unsigned char)c;
+        len = 1;
+    } else if (c < 0x800) {
+        buf[0] = (unsigned char)(0xC0 | (c >> 6));
+        buf[1] = (unsigned char)(0x80 | (c & 0x3F));
+        len = 2;
+    } else if (c < 0x10000) {
+        buf[0] = (unsigned char)(0xE0 | (c >> 12));
+        buf[1] = (unsigned char)(0x80 | ((c >> 6) & 0x3F));
+        buf[2] = (unsigned char)(0x80 | (c & 0x3F));
+        len = 3;
+    } else {
+        buf[0] = (unsigned char)(0xF0 | (c >> 18));
+        buf[1] = (unsigned char)(0x80 | ((c >> 12) & 0x3F));
+        buf[2] = (unsigned char)(0x80 | ((c >> 6) & 0x3F));
+        buf[3] = (unsigned char)(0x80 | (c & 0x3F));
+        len = 4;
+    }
+
+    logwrite(ctx, make_ptrlen(buf, len));
 }
 
 static void logevent_internal(LogContext *ctx, const char *event)

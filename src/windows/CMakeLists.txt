@@ -88,6 +88,7 @@ add_executable(putty
   sftpxfer.c
   sftpwin.c
   cn-crash-trace.c
+  cn-toast.c
   ${CMAKE_SOURCE_DIR}/ssh/sftp.c
   ${CMAKE_SOURCE_DIR}/ssh/sftpcommon.c
   ${CMAKE_SOURCE_DIR}/stubs/no-console.c
@@ -111,6 +112,7 @@ if(HAVE_CONPTY)
     pterm.c
     help.c
     conpty.c
+    cn-toast.c
     ${CMAKE_SOURCE_DIR}/stubs/no-gss.c
     ${CMAKE_SOURCE_DIR}/stubs/no-ca-config.c
     ${CMAKE_SOURCE_DIR}/stubs/no-console.c

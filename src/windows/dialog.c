@@ -30,6 +30,7 @@
 /* cn: 当前打开的配置框（模态、单实例），供设置页跳转回调定位。 */
 static struct PortableDialogStuff *active_config_box;
 static bool config_box_navigate_to_path(dlgparam *dp, const char *pathname);
+static void config_box_focus_treeview(dlgparam *dp);
 
 typedef struct PortableDialogStuff {
     /*
@@ -114,11 +115,8 @@ static void pds_free(PortableDialogStuff *pds)
  */
 static void cn_style_snapshot_buttons(HWND hwnd)
 {
-    HWND hdel = NULL, hinit = NULL, hlist = NULL;
+    HWND hdel = NULL, hinit = NULL, hlist = NULL, hlog = NULL;
     HWND h = 0;
-    /* cn: 按钮尺寸调整（宽+5/高-2）只在首次执行时做一次——本函数会被
-     * repin 定时器重复调用，反复做会越缩越小。 */
-    bool cn_resize = !GetProp(hwnd, "cn_btn_styled");
     while (true) {
         h = FindWindowEx(hwnd, h, "Button", NULL);
         if (!h)
@@ -129,6 +127,8 @@ static void cn_style_snapshot_buttons(HWND hwnd)
             hdel = h;
         else if (strncmp(text, "初始化设置", 15) == 0)
             hinit = h;
+        else if (strncmp(text, "记录日志", 12) == 0)
+            hlog = h;
     }
     if (!hdel || !hinit)
         return;
@@ -147,14 +147,26 @@ static void cn_style_snapshot_buttons(HWND hwnd)
 
     /* Balanced button size: a touch wider than the layout default so
      * 初始化设置 fits on one line (68 px), a touch shorter than the
-     * standard height, and safely inside the group frame. */
-    if (cn_resize) {
-        SetProp(hwnd, "cn_btn_styled", (HANDLE)1);
+     * standard height, and safely inside the group frame.
+     *
+     * cn: 「只做一次」的标记必须挂在按钮自身，不能挂对话框——切页会
+     * 销毁并重建面板控件，但对话框 hwnd 不变，标记留在对话框上就会
+     * 让重建出来的新按钮跳过这一步，宽度退回布局默认值（68→63），
+     * 于是「初始化设置」五个字被截断。挂在按钮上，新按钮没有标记，
+     * 自然会重新调整一次；同一按钮被 repin 定时器重复调用时标记已
+     * 存在，仍然幂等，不会越缩越小。
+     *
+     * cn: 复选框（hlog）不参与这套微调——它自带勾选方块，靠 +5/-2 的
+     * 按钮式缩放只会把文字挤歪。它按布局给的原尺寸铺满该列即可。 */
+    {
         HWND btns[2] = { hdel, hinit };
         for (int i = 0; i < 2; i++) {
             RECT r;
             if (!btns[i])
                 continue;
+            if (GetProp(btns[i], "cn_btn_styled"))
+                continue;
+            SetProp(btns[i], "cn_btn_styled", (HANDLE)1);
             GetWindowRect(btns[i], &r);
             POINT tl = { r.left, r.top }, br = { r.right, r.bottom };
             ScreenToClient(hwnd, &tl);
@@ -186,6 +198,29 @@ static void cn_style_snapshot_buttons(HWND hwnd)
         int dy_bottom = rl.bottom - (ri.bottom - ri.top) - ri.top;
         SetWindowPos(hinit, NULL, p2.x, p2.y + dy_bottom, 0, 0,
                      SWP_NOSIZE | SWP_NOZORDER);
+        /*
+         * cn: 「记录日志」夹在两者正中间。删除已贴列表顶、初始化设置
+         * 贴列表底，取两者中间的空档放中点即可。高度都用各自 rect 的
+         * 原始尺寸算（SetWindowPos 不改高度，所以屏幕坐标差就等于客户
+         * 区高度差）。
+         */
+        if (hlog) {
+            RECT rlog;
+            POINT pl = { 0, 0 };
+            int del_bottom = p1.y + dy_top + (rd.bottom - rd.top);
+            int init_top = p2.y + dy_bottom;
+            int gap, h;
+
+            GetWindowRect(hlog, &rlog);
+            pl.x = rlog.left;
+            ScreenToClient(hwnd, &pl);
+            h = rlog.bottom - rlog.top;
+            gap = (init_top - del_bottom) - h;
+            if (gap < 0)
+                gap = 0;
+            SetWindowPos(hlog, NULL, pl.x, del_bottom + gap / 2, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER);
+        }
 
         /*
          * cn: 组框底边收紧到「列表底 + 5px」——布局 ypos 给组框留的
@@ -657,6 +692,7 @@ static void pds_initdialog_finish(PortableDialogStuff *pds)
      */
     active_config_box = pds;
     pds->dp->navigate_to_path = config_box_navigate_to_path;
+    pds->dp->focus_treeview = config_box_focus_treeview;
 
     ShowWindow(pds->dp->hwnd, SW_SHOWNORMAL);
 
@@ -1029,6 +1065,27 @@ static bool config_box_navigate_to_path(dlgparam *dp, const char *pathname)
     return true;
 }
 
+/*
+ * cn: 把焦点交还给左侧分类树。
+ *
+ * 用途：复选框勾选后，系统会在按钮文字周围画一圈虚线焦点框，观感上
+ * 像「文字被选中」而不是「选项被勾上」。切页时上游本来就执行
+ * SetFocus(treeview)（见 TVN_SELCHANGED 分支），虚线随之消失；这里
+ * 复用同一个落点，让勾选后的观感与切页一致，且不改变任何既有行为。
+ */
+static void config_box_focus_treeview(dlgparam *dp)
+{
+    PortableDialogStuff *pds = active_config_box;
+    HWND treeview;
+
+    if (!pds || pds->dp != dp || !dp->hwnd)
+        return;
+
+    treeview = GetDlgItem(dp->hwnd, IDCX_TREEVIEW);
+    if (treeview)
+        SetFocus(treeview);
+}
+
 /* ctrltrees indices for the main dialog box */
 enum {
     TREE_PANEL, /* things we swap out every time treeview selects a new pane */
@@ -1393,6 +1450,18 @@ bool do_config(Conf *conf)
     PortableDialogStuff *pds = pds_new(2);
 
     serial_fallback_reset();
+    /*
+     * cn: 「连接/串口」页面已删除，数据位/停止位/校验/流控四项固定走
+     * 默认值。存量配置里若留有旧的非默认值，在这里归位 —— 必须在
+     * baseline 快照之前，否则这次归位会被记成用户的改动。
+     */
+    cn_serial_params_reset(conf);
+    /*
+     * cn: 上一轮配置框里点开的「记录日志」开关一律作废。开关不再直接
+     * 发起连接，用户点了取消/关窗后意图会残留，不清理会让下一次的
+     * 按钮显示与实际意图对不上。
+     */
+    cn_reset_log_request();
     /* cn: enable unsaved-changes tracking for the startup config box,
      * so the save button is dirty-gated and closing prompts with the
      * change list. */
