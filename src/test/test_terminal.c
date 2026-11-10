@@ -507,6 +507,18 @@ static void test_nonwrap(Mock *mk)
 
 static void test_wintitle(Mock *mk)
 {
+    /*
+     * cn: 本汉化分支把 CONF_no_remote_wintitle 的默认值改成了 true
+     * —— 标题栏恒为「主机名/IP：端口号（在线/已离线）」，不让远端
+     * 的 user@host:~ 覆盖。但本用例测的是 OSC 0/2 的解析本身，与
+     * 默认策略无关，所以这里临时允许远端改标题，测完还原，避免
+     * 影响同一次运行里的其他用例。
+     */
+    bool saved_no_remote_wintitle =
+        conf_get_bool(mk->conf, CONF_no_remote_wintitle);
+    conf_set_bool(mk->conf, CONF_no_remote_wintitle, false);
+    term_reconfig(mk->term, mk->conf);
+
     reset(mk);
     term_datapl(mk->term, PTRLEN_LITERAL("\033]0;foo\033\\"));
     term_update(mk->term);
@@ -522,6 +534,10 @@ static void test_wintitle(Mock *mk)
     term_datapl(mk->term, PTRLEN_LITERAL("\033Pzz\033\\"));
     term_update(mk->term);
     SEQUAL(mk->title->s, "bar");
+
+    conf_set_bool(mk->conf, CONF_no_remote_wintitle,
+                  saved_no_remote_wintitle);
+    term_reconfig(mk->term, mk->conf);
 }
 
 /*
