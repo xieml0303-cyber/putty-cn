@@ -41,6 +41,7 @@
 | `terminal/terminal.c` | 终端体验改造：窗口尺寸记忆与拖动实时重排（reflow）、内容贴屏边、串口 DEL(0x7F) 退格可跨软换行、窗口标题含端口/串口号 |
 | `windows/serial.c` | 串口 realhost 返回串口名供标题显示；串口错误提示翻译修正 |
 | `windows/putty.c`、`windows/window.c`、`windows/console.c`、`windows/dialog.c`、`windows/network.c`、`windows/pageant.c`、`ssh/common.c`、`ssh/ca-config.c` | 界面与协议提示的翻译修正：术语统一、标点规范、语义反转与错别字修复 |
+| `windows/dialog.c` | 修复串口模式「端口号／波特率」下拉框初始不显示箭头：新增 `cn_hostbox_sync_arrow()`，拦截 `CB_ADDSTRING`／`CB_DELETESTRING`／`CB_RESETCONTENT`，列表由空变非空时主动重绘按钮区（原先箭头被背景色盖掉后无还原路径） |
 | `cmake/platforms/windows.cmake` | 链接 `comctl32`，供组合框与列表控件使用 |
 
 ## 安装包（推荐）
@@ -64,7 +65,7 @@
 
 | 文件 | 用途 | 大小（字节） | SHA256 |
 |------|------|-------------|--------|
-| `putty.exe` | 图形界面终端（SSH / Telnet / 串口 / SFTP 双栏） | 3,005,080 | `cf3c960eedd8c483a0a81c9104cd10b67d0916fe0beb1f656607b65cf6546f60` |
+| `putty.exe` | 图形界面终端（SSH / Telnet / 串口 / SFTP 双栏） | 3,005,080 | `e7cdf3a75a3ad27fff44d8ea8a18d996285a3e1549955ed39e0c6d20540dce59` |
 
 - 仅依赖系统 DLL（ADVAPI32、COMCTL32、GDI32、IMM32、KERNEL32、SHELL32、USER32、comdlg32、msvcrt、ole32），无需 MinGW 运行库。
 - `putty.exe` 启动后窗口标题为「PuTTY 配置」（英文版为 "PuTTY Configuration"）。
