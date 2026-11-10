@@ -554,6 +554,28 @@ static void cn_hostbox_cover_arrow(HWND hcmb)
     ReleaseDC(hcmb, hdc);
 }
 
+/*
+ * cn: 按「列表是否为空」重新同步箭头像素。
+ *
+ * 盖绘是破坏性的 FillRect，一旦盖上就没有自动还原的路径 —— 列表
+ * 由空变非空时（串口模式灌入波特率档位）必须主动让系统重画按钮区，
+ * 否则箭头会一直缺到鼠标划过、主题重画为止。波特率下拉框「初始
+ * 不显示箭头、鼠标移过才出现」就是这个原因。
+ */
+static void cn_hostbox_sync_arrow(HWND hcmb)
+{
+    if (cn_hostbox_dropdown_dead(hcmb)) {
+        cn_hostbox_cover_arrow(hcmb);
+    } else {
+        COMBOBOXINFO cbi;
+
+        memset(&cbi, 0, sizeof(cbi));
+        cbi.cbSize = sizeof(cbi);
+        if (GetComboBoxInfo(hcmb, &cbi))
+            InvalidateRect(hcmb, &cbi.rcButton, true);
+    }
+}
+
 static LRESULT CALLBACK cn_hostbox_subproc(HWND hwnd, UINT msg,
                                            WPARAM wp, LPARAM lp,
                                            UINT_PTR id, DWORD_PTR ref)
@@ -601,6 +623,22 @@ static LRESULT CALLBACK cn_hostbox_subproc(HWND hwnd, UINT msg,
     }
 
     LRESULT r = DefSubclassProc(hwnd, msg, wp, lp);
+
+    /*
+     * cn: 列表内容变化后立刻按新的空/非空状态同步箭头。
+     *
+     * 这两条消息来自 dlg_listbox_add / dlg_listbox_clear。串口模式的
+     * 波特率档位是在控件创建、子类装好之后才灌进去的，而
+     * dlg_update_done 只对 CTRL_LISTBOX 调 InvalidateRect，对 combo
+     * box 不管，所以这里不补一下，被盖掉的箭头就没有还原的机会。
+     */
+    switch (msg) {
+      case CB_ADDSTRING:
+      case CB_DELETESTRING:
+      case CB_RESETCONTENT:
+        cn_hostbox_sync_arrow(hwnd);
+        return r;
+    }
 
     /*
      * 默认绘制完成后再盖一次箭头：主题会在悬停/焦点变化时重画
