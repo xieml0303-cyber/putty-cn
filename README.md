@@ -64,7 +64,7 @@
 
 | 文件 | 用途 | 大小（字节） | SHA256 |
 |------|------|-------------|--------|
-| `putty.exe` | 图形界面终端（SSH / Telnet / 串口 / SFTP 双栏） | 3,005,080 | `a8ecb512fd4d82ccf8bab71863b0a1cd0d55720d945e2788c930ef380bceab8e` |
+| `putty.exe` | 图形界面终端（SSH / Telnet / 串口 / SFTP 双栏） | 3,005,080 | `cf3c960eedd8c483a0a81c9104cd10b67d0916fe0beb1f656607b65cf6546f60` |
 
 - 仅依赖系统 DLL（ADVAPI32、COMCTL32、GDI32、IMM32、KERNEL32、SHELL32、USER32、comdlg32、msvcrt、ole32），无需 MinGW 运行库。
 - `putty.exe` 启动后窗口标题为「PuTTY 配置」（英文版为 "PuTTY Configuration"）。
@@ -130,6 +130,15 @@ PuTTY 不会自动保存设置。改完参数后需要点窗口右下角的「�
 | T5 | ~~Pageant 加载 ed25519 PPK + plink 无密码公钥认证~~ | 不适用（相关程序已移除构建） |
 
 界面汉化与串口改造未影响协议层行为。测试记录见 `workspace/docs/2026-10-17-PuTTY功能测试.md`，串口改造见 `workspace/docs/2026-10-18-串口默认值自动匹配.md`。
+
+### 单元测试与 CI
+
+本仓库自带 GitHub Actions CI（`.github/workflows/ci.yml`），在 `windows-latest` 上用 MSYS2 + MinGW-w64 编译并运行 `ctest`。当前状态：
+
+- `ctest` **9/9 全部通过**；
+- 文件传输窗口自检 207 项全通过、0 失败。
+
+此前 `test_cert_expr` 与 `test_terminal` 长期红灯，原因分别是「断言写死了英文报错、而本分支已汉化」与「用例假设远端可改标题、而本分支默认禁用」。两处均已修正，改动只涉及测试代码，不影响 `putty.exe` 行为。
 
 ## 已知限制
 
