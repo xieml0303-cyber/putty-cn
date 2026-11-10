@@ -391,7 +391,7 @@ static ExprNode *parse_atom(ParserState *ps)
             return NULL;
 
         if (ps->tok != TOK_RPAR) {
-            error(ps, dupstr("expected ')' after parenthesised subexpression"),
+            error(ps, dupstr("带括号的子表达式后应为右括号 ')'"),
                   subexpr->text);
             exprnode_free(subexpr);
             return NULL;
@@ -754,8 +754,8 @@ static const struct ParseTest {
     T("a ||", "ERR:4:4:此处应为谓词或带括号的子表达式"),
     T("a b c d", "ERR:2:7:表达式末尾有多余文本"),
     T("(", "ERR:1:1:此处应为谓词或带括号的子表达式"),
-    T("(a", "ERR:1:2:expected ')' after parenthesised subexpression"),
-    T("(a b", "ERR:1:2:expected ')' after parenthesised subexpression"),
+    T("(a", "ERR:1:2:带括号的子表达式后应为右括号 ')'"),
+    T("(a b", "ERR:1:2:带括号的子表达式后应为右括号 ')'"),
     T("a&&b&&c||d||e", "ERR:6:7:请在表达式两侧的 && 与 || 附近加括号以消除歧义"),
     T("a||b||c&&d&&e", "ERR:6:7:请在表达式两侧的 && 与 || 附近加括号以消除歧义"),
     T("!", "ERR:1:1:此处应为谓词或带括号的子表达式"),
