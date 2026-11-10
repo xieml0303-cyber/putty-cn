@@ -1,9 +1,9 @@
 ﻿; PuTTY 中文版安装包脚本
 ; 编译：ISCC.exe installer\putty-cn.iss
-; 产物：installer\output\putty-cn-0.85-cn4-setup.exe
+; 产物：installer\output\putty-cn-0.85-cn5-setup.exe
 
 #define MyAppName "PuTTY 中文版"
-#define MyAppVersion "0.85-cn4"
+#define MyAppVersion "0.85-cn5"
 #define MyAppPublisher "putty-cn 项目"
 #define MyAppURL "https://github.com/xieml0303-cyber/putty-cn"
 #define MyAppExeName "putty.exe"
@@ -34,10 +34,10 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 SetupLogging=yes
-VersionInfoVersion=0.85.0.2
+VersionInfoVersion=0.85.0.5
 VersionInfoDescription={#MyAppName} 安装程序
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion=0.85.0.2
+VersionInfoProductVersion=0.85.0.5
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"

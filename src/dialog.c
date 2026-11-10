@@ -340,6 +340,7 @@ dlgcontrol *ctrl_pushbutton(struct controlset *s, const char *label,
     c->button.isdefault = false;
     c->button.iscancel = false;
     c->button.cn_smallfont = false;
+    c->button.cn_editheight = false;
     return c;
 }
 

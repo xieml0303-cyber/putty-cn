@@ -2602,6 +2602,16 @@ typedef struct ConfirmSaveBox {
      * 同样是三按钮，两边的危险项恰恰在相反两侧。
      */
     HWND b_danger;
+    /*
+     * cn: 危险按钮当前是否处于鼠标悬停态（2026-11-10 新增）。
+     *
+     * BS_OWNERDRAW 按钮不参与系统的热追踪（hot tracking）—— 系统只负责
+     * 普通 PUSHBUTTON 的悬停高亮，自绘的得自己盯着。所以由弹窗的
+     * WM_MOUSEMOVE 做命中检测，状态存这儿，再让按钮重绘一次。
+     * 不做这一条，「全部覆盖」悬停时一动不动，主人一眼就看出来
+     * 三个按钮里只有它是死的。
+     */
+    bool danger_hot;
     HFONT font;                          /* 自建则需释放，stock 不释放 */
     HFONT font_value;                    /* 新值粗体（自建，需释放） */
     bool font_owned;
@@ -3396,6 +3406,61 @@ static void cn_confirm_save_paint(HWND hwnd, ConfirmSaveBox *cb, HDC hdc)
     }
 }
 
+/*
+ * cn: 危险按钮的悬停子类（2026-11-10 新增）。
+ *
+ * 为什么必须子类化：鼠标停在按钮上时，WM_MOUSEMOVE 发给的是按钮本身，
+ * 不是父窗口。父窗口的 WM_MOUSEMOVE 只在鼠标处于弹窗空白区时才有，
+ * 靠它做命中检测等于永远等不到消息。而 BS_OWNERDRAW 按钮又不享受
+ * 系统的热追踪（那是普通 PUSHBUTTON 的待遇），所以只能自己挂子类。
+ *
+ * 状态写回 ConfirmSaveBox::danger_hot，再 InvalidateRect 触发 WM_DRAWITEM。
+ * 用 WM_NCDESTROY 摘掉子类，避免按钮销毁后回调仍挂着。
+ */
+static LRESULT CALLBACK cn_danger_btn_subclass(HWND hwnd, UINT msg,
+                                               WPARAM wparam, LPARAM lparam,
+                                               UINT_PTR id, DWORD_PTR ref)
+{
+    ConfirmSaveBox *cb = (ConfirmSaveBox *)ref;
+
+    switch (msg) {
+      case WM_MOUSEMOVE: {
+        /*
+         * 只在状态真的变化时重绘 —— WM_MOUSEMOVE 一秒钟能来几百条，
+         * 每条都 Invalidate 会让按钮持续闪烁。
+         */
+        if (cb && !cb->danger_hot) {
+            cb->danger_hot = true;
+            InvalidateRect(hwnd, NULL, FALSE);
+        }
+        /*
+         * 订阅 WM_MOUSELEAVE：鼠标直接移出按钮边界时不会再收到
+         * WM_MOUSEMOVE，没有这条通知悬停态会一直赖着不消失。
+         * 每次移入都要重新订阅，系统是一次性的。
+         */
+        {
+            TRACKMOUSEEVENT tme;
+            memset(&tme, 0, sizeof(tme));
+            tme.cbSize = sizeof(tme);
+            tme.dwFlags = TME_LEAVE;
+            tme.hwndTrack = hwnd;
+            TrackMouseEvent(&tme);
+        }
+        break;
+      }
+      case WM_MOUSELEAVE:
+        if (cb && cb->danger_hot) {
+            cb->danger_hot = false;
+            InvalidateRect(hwnd, NULL, FALSE);
+        }
+        break;
+      case WM_NCDESTROY:
+        RemoveWindowSubclass(hwnd, cn_danger_btn_subclass, id);
+        break;
+    }
+    return DefSubclassProc(hwnd, msg, wparam, lparam);
+}
+
 static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
                                              WPARAM wParam, LPARAM lParam)
 {
@@ -3539,7 +3604,7 @@ static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
         COLORREF red = RGB(0xC0, 0x1E, 0x1E);
         HPEN pen;
         HPEN oldpen;
-        bool selected;
+        bool selected, bg_owned;
         HBRUSH bg;
         RECT rc;
         wchar_t text[64];
@@ -3547,8 +3612,30 @@ static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
         if (!cb->b_danger || dis->hwndItem != cb->b_danger)
             break;
         selected = (dis->itemState & ODS_SELECTED) != 0;
-        bg = selected ? CreateSolidBrush(RGB(0xF5, 0xD0, 0xD0))
-                      : GetSysColorBrush(COLOR_BTNFACE);
+        /*
+         * cn: 三态背景（2026-11-10）—— 普通 / 悬停 / 按下。
+         *
+         * 悬停态由 cn_danger_btn_subclass 维护（自绘按钮没有系统热追踪，
+         * 见那边的说明）。主人反馈「全部覆盖悬停时没有高光」，指的就是
+         * 这里以前只判 ODS_SELECTED、悬停完全没有视觉反馈。
+         *
+         * 按下（ODS_SELECTED）取更深的粉，与悬停区分开，否则按住不放
+         * 和只是移上去看起来一样，手感是死的。
+         *
+         * ⚠️ 只有普通态用的是系统画刷（不许删），另外两态都是
+         *    CreateSolidBrush 出来的，必须删 —— 所以用 bg_owned 记账，
+         *    别再拿 selected 当删除条件（悬停态会漏删，一次弹窗漏一个 GDI 对象）。
+         */
+        if (selected) {
+            bg = CreateSolidBrush(RGB(0xF5, 0xD0, 0xD0));
+            bg_owned = true;
+        } else if (cb->danger_hot) {
+            bg = CreateSolidBrush(RGB(0xFB, 0xE4, 0xE4));
+            bg_owned = true;
+        } else {
+            bg = GetSysColorBrush(COLOR_BTNFACE);
+            bg_owned = false;
+        }
         rc = dis->rcItem;
         FillRect(dis->hDC, &rc, bg);
         pen = CreatePen(PS_SOLID, 2, red);
@@ -3567,7 +3654,7 @@ static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
         GetWindowTextW(dis->hwndItem, text, lenof(text));
         DrawTextW(dis->hDC, text, -1, &rc,
                   DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        if (selected)
+        if (bg_owned)
             DeleteObject(bg);
         return TRUE;
       }
@@ -4595,11 +4682,70 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
         }
         cb->tip.parent = cb->dlg;
         cb->tip.font = font;
-        /* 命中区从自绘清单的左上角起，与绘制位置一致（问号已删）。 */
+        /*
+         * cn: 命中区 = 白色卡片内整块清单，而不是「只有文字那一条」
+         * （主人 2026-11-10 指定，附红框截图）。
+         *
+         * 横向：从卡片左内边距到卡片右内边距，整行铺满。
+         *   ⚠️ 早先写成 hot.right = hot.left + listw_text，即右边界只到
+         *      「文字宽度」处。但文字真正的绘制起点是
+         *      rowx + icon_sz + 8（见 paint 里的 rowx 与 cn_draw_change_row），
+         *      命中区却没把行首图标与那 8px 间距算进去 —— 于是清单右侧
+         *      约 30px 的文字落在命中区外，鼠标停在那儿不出浮层。
+         *      现在直接以卡片内边距为准，不再依赖 listw_text 估算。
+         *
+         * 纵向：从卡片上内边距到清单实际画完的位置（含省略行），
+         *   不取 card_bottom —— 卡片下沿到清单底之间那段留白不该响应。
+         *   这里用 build 阶段算定的 draw_n / draw_dots 推实际内容高，
+         *   与绘制端同一份数据，避免两边判据打架。
+         */
         cb->tip.hot.left = cb->card_left + cn_dpi(14);
-        cb->tip.hot.top = cb->card_top;
-        cb->tip.hot.right = cb->tip.hot.left + listw_text;
-        cb->tip.hot.bottom = cb->card_bottom;
+        cb->tip.hot.right = cb->card_right - cn_dpi(14);
+        {
+            /*
+             * 内容高：折行项按实际行数累加。字体刚建好、可直接量；
+             * 量不出来时退回「一行高」，宁可少盖一点也不出假命中区。
+             */
+            int content = 0;
+            HDC hdc2 = GetDC(NULL);
+            if (hdc2) {
+                HFONT old2 = SelectObject(hdc2, font);
+                int avail2 = cb->tip.hot.right -
+                    (cb->tip.hot.left + icon_sz + cn_dpi(8));
+                HFONT mf2 = NULL;
+                LOGFONTW lf2;
+                if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,
+                                          sizeof(ncm), &ncm, 0)) {
+                    lf2 = ncm.lfMessageFont;
+                    lf2.lfWeight = FW_BOLD;
+                    cn_scale_logfont(&lf2);
+                    mf2 = CreateFontIndirectW(&lf2);
+                }
+                for (size_t k = 0; k < cb->draw_n; k++) {
+                    int l = cn_change_row_lines(hdc2, &cb->changes->items[k],
+                                                avail2, font, mf2);
+                    content += (l < 1) ? 1 : l;
+                }
+                if (mf2)
+                    DeleteObject(mf2);
+                SelectObject(hdc2, old2);
+                ReleaseDC(NULL, hdc2);
+            }
+            if (cb->draw_dots)
+                content++;
+            if (content < 1)
+                content = 1;
+            /*
+             * 上边取卡片内边距起点，下边 = 上边 + 内容高，再各放宽
+             * cn_dpi(6)：与绘制端「清单整块在卡片内垂直居中」的 6px
+             * 余量同源，避免最上/最下一行因居中偏移而落在命中区外。
+             */
+            cb->tip.hot.top = cb->card_top + cn_dpi(6);
+            cb->tip.hot.bottom = cb->tip.hot.top + content * cb->row_h
+                + cn_dpi(6) * 2;
+            if (cb->tip.hot.bottom > cb->card_bottom)
+                cb->tip.hot.bottom = cb->card_bottom;
+        }
         cb->tip.mode = CN_TIP_RIGHT;
         cb->tip.trigger_top = cb->card_top;
         cb->tip.tip = cn_tip_create(&cb->tip);
@@ -4757,6 +4903,19 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
                  * third_danger 时危险动作在最右，否则是最左。
                  */
                 cb->b_danger = third_danger ? cb->b_third : cb->b_ok;
+
+                /*
+                 * cn: 给危险按钮挂悬停子类（2026-11-10）。
+                 *
+                 * 必须挂在按钮自己身上，不能靠弹窗的 WM_MOUSEMOVE ——
+                 * 鼠标在按钮上方时消息发给按钮，父窗口收不到。细节见
+                 * cn_danger_btn_subclass 的说明。
+                 *
+                 * ref 传 cb 指针：子类回调要靠它读写 danger_hot。
+                 */
+                if (cb->b_danger)
+                    SetWindowSubclass(cb->b_danger, cn_danger_btn_subclass,
+                                      1, (DWORD_PTR)cb);
             }
         }
         for (int i = 0; i < bw_n; i++)
@@ -10807,6 +10966,26 @@ void sftp_selftest_window(Conf *conf)
              */
             SW_CHECK(cb.b_danger == cb.b_third,
                      "红框（危险动作）挂在最右的「全部覆盖」上");
+
+            /*
+             * cn: 危险按钮的悬停态（2026-11-10 新增）。
+             *
+             * 主人反馈「全部覆盖悬停时没有高光」。根因是 BS_OWNERDRAW
+             * 按钮不享受系统热追踪，而弹窗的 WM_MOUSEMOVE 在鼠标位于
+             * 按钮上方时收不到消息 —— 必须给按钮挂子类自己维护状态。
+             *
+             * 这里直接往按钮发一条 WM_MOUSEMOVE 模拟鼠标进入，验
+             * danger_hot 被置起；再发 WM_MOUSELEAVE 验它复位。
+             * 注意不能用真实的鼠标位置去测：自检跑在无人值守环境，
+             * 光标在哪完全不可控。
+             */
+            if (cb.b_danger) {
+                SW_CHECK(!cb.danger_hot, "初始不是悬停态");
+                SendMessageW(cb.b_danger, WM_MOUSEMOVE, 0, 0);
+                SW_CHECK(cb.danger_hot, "悬停后置起高光标志");
+                SendMessageW(cb.b_danger, WM_MOUSELEAVE, 0, 0);
+                SW_CHECK(!cb.danger_hot, "移出后高光标志复位");
+            }
 
             /* 标题栏图标必须是警告图标，不是红色问号。 */
             {

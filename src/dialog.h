@@ -291,6 +291,12 @@ struct dlgcontrol {
              * font so long labels fit without truncation.
              */
             bool cn_smallfont;
+            /*
+             * cn: make this button use the same height as an edit box
+             * instead of the taller standard push-button height, so it
+             * lines up with an edit box sitting on the same row.
+             */
+            bool cn_editheight;
         } button;
         struct { /* for CTRL_LISTBOX */
             char shortcut;                 /* keyboard shortcut */

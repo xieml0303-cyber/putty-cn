@@ -3156,6 +3156,13 @@ void setup_config_box(struct controlbox *b, bool midsession,
                                              HELPCTX(ssh_auth_privkey),
                                              sessionsaver_handler, P(ssd));
         ssd->loadkeybutton->column = 2;
+        /*
+         * cn: 按钮默认按 PUSHBTNHEIGHT（14 个对话框单位）画，比同排的
+         * 输入框 EDITHEIGHT（12）高出 2 个单位 —— 当前 DPI 下就是 6px，
+         * 顶边对齐、底边却探出输入框一截，看着像没对齐。这里让它改用
+         * 输入框的高度，两个控件顶底都齐。
+         */
+        ssd->loadkeybutton->button.cn_editheight = true;
 
         ctrl_columns(s, 1, 100);
         c = ctrl_text(s, "连接类型：", HELPCTX(session_hostname));

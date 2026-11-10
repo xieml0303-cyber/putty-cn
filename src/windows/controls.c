@@ -736,14 +736,15 @@ void staticbtn(struct ctlpos *cp, const char *stext, int sid,
 /*
  * A simple push button.
  */
-void button(struct ctlpos *cp, const char *btext, int bid, bool defbtn)
+void button(struct ctlpos *cp, const char *btext, int bid, bool defbtn,
+            int height)
 {
     RECT r;
 
     r.left = GAPBETWEEN;
     r.top = cp->ypos;
     r.right = cp->width;
-    r.bottom = PUSHBTNHEIGHT;
+    r.bottom = height;
 
     /* Q67655: the _dialog box_ must know which button is default
      * as well as the button itself knowing */
@@ -755,7 +756,7 @@ void button(struct ctlpos *cp, const char *btext, int bid, bool defbtn)
           (defbtn ? BS_DEFPUSHBUTTON : 0) | BS_PUSHBUTTON,
           0, btext, bid);
 
-    cp->ypos += PUSHBTNHEIGHT + GAPBETWEEN;
+    cp->ypos += height + GAPBETWEEN;
 }
 
 /*
@@ -2020,7 +2021,8 @@ void winctrl_layout(struct dlgparam *dp, struct winctrls *wc,
             if (ctrl->button.iscancel)
                 actual_base_id = IDCANCEL;
             num_ids = 1;
-            button(&pos, escaped, actual_base_id, ctrl->button.isdefault);
+            button(&pos, escaped, actual_base_id, ctrl->button.isdefault,
+                   ctrl->button.cn_editheight ? EDITHEIGHT : PUSHBTNHEIGHT);
             if (ctrl->button.cn_smallfont && pos.hwnd) {
                 /* cn: one pixel smaller so the label fits unclipped */
                 HWND cn_btn = GetDlgItem(pos.hwnd, actual_base_id);
@@ -2104,7 +2106,7 @@ void winctrl_layout(struct dlgparam *dp, struct winctrls *wc,
                 editbutton(&pos, escaped, base_id, base_id+1,
                            "浏览...", base_id+2);
             } else {
-                button(&pos, escaped, base_id+2, false);
+                button(&pos, escaped, base_id+2, false, PUSHBTNHEIGHT);
             }
             sfree(escaped);
             break;
