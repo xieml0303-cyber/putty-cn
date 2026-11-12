@@ -1,4 +1,4 @@
-# PuTTY 0.85-cn5 中文版（Windows 64 位）
+# PuTTY 0.85-cn6 中文版（Windows 64 位）
 
 基于 [larryli/PuTTY](https://github.com/larryli/PuTTY)（原 Google Code `puttycn` 项目）的中文翻译源码，使用 MSYS2 + MinGW-w64 + CMake 在本地编译生成 `putty.exe`。
 
@@ -31,7 +31,7 @@
 | `storage.h`、`dialog.h`、`windows/platform.h` | 新增串口枚举、信息弹窗、只读编辑框等接口声明 |
 | `unix/storage.c`、`unix/dialog.c` | 对应接口的非 Windows 实现 |
 | `conf.h`、`be_list.c` | 默认连接方式 SSH（主机名留空、端口 22），「保存」不携带连接目标；串口参数按华为、华三网络设备 Console 口的标准预置（9600、8 数据位、1 停止位、无校验、无流控）；串口线默认留空，由界面按本机端口自动匹配 |
-| `version.h`、`LATEST.VER` | 版本号递增为 0.85-cn5（`TEXTVER`、`SSHVER`、`BINARY_VERSION` 同步） |
+| `version.h`、`LATEST.VER` | 版本号递增为 0.85-cn6（`TEXTVER`、`SSHVER`、`BINARY_VERSION` 同步） |
 | `windows/sftpwin.c` | 文件传输窗口整体改造：远端面板移至左侧、列头居中与内容右对齐（header 子类自绘）、列宽按内容实测、文件操作迁入右键菜单、传输按钮随选中启用、目录递归传输、拖放上传、同名覆盖三按钮提示、危险按钮悬停高光 |
 | `windows/cn-toast.c`、`windows/cn-toast.h` | 抽取的公共 Toast 轻提示模块（分层窗口 + 自绘圆角 + 滑入/停留/淡出），供会话窗口与文件传输窗口共用 |
 | `windows/window.c`、`windows/win-gui-seat.h` | 「会话」菜单新增「重启会话」（离线可点，用于重连）；新增顶级「日志」菜单，含「开始记录日志」「停止记录日志」，操作后弹 Toast 反馈 |
@@ -46,7 +46,7 @@
 
 ## 安装包（推荐）
 
-从 [Releases](https://github.com/xieml0303-cyber/putty-cn/releases/latest) 下载 `putty-cn-0.85-cn5-setup.exe`，双击运行、按中文向导安装即可：
+从 [Releases](https://github.com/xieml0303-cyber/putty-cn/releases/latest) 下载 `putty-cn-0.85-cn6-setup.exe`，双击运行、按中文向导安装即可：
 
 - 装到当前用户目录 `%LOCALAPPDATA%\Programs\PuTTY-cn`，不需要管理员权限；
 - 自动创建开始菜单项与桌面快捷方式，安装完可直接启动；
@@ -58,14 +58,14 @@
 
 ## 免安装版
 
-`putty.exe` 为 0.85-cn5 构建、64 位、免安装。安装包仅含该程序；如需单文件版本，可按
+`putty.exe` 为 0.85-cn6 构建、64 位、免安装。安装包仅含该程序；如需单文件版本，可按
 [构建说明](#自行构建)自行编译，或用解压工具从安装包中取出。
 
-下表为 0.85-cn5 构建产物的基准值，可用于核对自行构建或从安装包提取的文件：
+下表为 0.85-cn6 构建产物的基准值，可用于核对自行构建或从安装包提取的文件：
 
 | 文件 | 用途 | 大小（字节） | SHA256 |
 |------|------|-------------|--------|
-| `putty.exe` | 图形界面终端（SSH / Telnet / 串口 / SFTP 双栏） | 3,018,147 | `e7aa6b167471dd02c49d5839cc2ef4417a7d0dbd3462b49486d241ffb14537b1` |
+| `putty.exe` | 图形界面终端（SSH / Telnet / 串口 / SFTP 双栏） | 3,018,147 | `8339fca6191f65940cd0a9987f5f8f0175e0ee0e3a89fd47f60d76414946102f` |
 
 - 仅依赖系统 DLL（ADVAPI32、COMCTL32、GDI32、IMM32、KERNEL32、SHELL32、USER32、comdlg32、msvcrt、ole32），无需 MinGW 运行库。
 - `putty.exe` 启动后窗口标题为「PuTTY 配置」（英文版为 "PuTTY Configuration"）。
