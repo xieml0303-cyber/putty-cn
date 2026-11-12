@@ -1913,11 +1913,15 @@ static void refresh_history(struct sessionsaver_data *ssd, dlgparam *dlg,
 
     if (ssd->cur_folder[0]) {
         /*
-         * 目录内视图：「..」打头，下面只有本目录的会话。右列带上目录
-         * 名 —— 列表上方的标题是固定的，不给个名字用户不知道自己进
-         * 了哪一层。
+         * 目录内视图：首行是返回行，左列「..」（跟资源管理器一致），
+         * 右列写「返回」。
+         *
+         * 右列原本显示当前目录名，但那一列是给端口号用的窄列，用户
+         * 自己的目录名（「新目录」这类三个字）塞进去会被压成一条缝，
+         * 字挤在一起完全看不清。这行本来就只需要表达「点我回去」，
+         * 不需要重复目录名 —— 用户刚双击进来，心里清楚在哪一层。
          */
-        text = dupprintf("..\t%s", ssd->cur_folder);
+        text = dupstr("..\t返回");
         dlg_listbox_addwithid(ssd->listbox, dlg, text, CN_PARENT_ID);
         if (keep == CN_PARENT_ID && sel_row < 0)
             sel_row = row;
