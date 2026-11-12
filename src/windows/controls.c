@@ -1044,6 +1044,62 @@ static int hostport_colwidth(HDC hdc)
 }
 
 /*
+ * 左列文字区的左边界（listbox 客户坐标）。
+ *
+ * 与 cn_listbox_text_right 配对：行内改名编辑框要跟列表自绘的文字落在
+ * 同一条竖线上，靠的就是这个缩进。算法留在本文件，dialog.c 不要另抄
+ * 一份 HOSTPORT_GAP。
+ *
+ * 取不到就返回 -1。
+ */
+int cn_listbox_text_left(HWND listbox)
+{
+    RECT cr;
+
+    if (!listbox || !GetClientRect(listbox, &cr))
+        return -1;
+
+    return cr.left + HOSTPORT_GAP;
+}
+
+/*
+ * 左列文字区的右边界（listbox 客户坐标）。
+ *
+ * 会话页的行内改名编辑框要浮在这一行上，右边界必须停在端口列的分割线
+ * 之前：再往右就压住端口号那一列了，看着像要把端口一起改掉。这里把
+ * 「分割线在哪」的算法收在一处，免得 dialog.c 自己另抄一份，日后改
+ * 端口列宽度两边不同步。
+ *
+ * 取不到就返回 -1，调用者自行回退到整行宽度。
+ */
+int cn_listbox_text_right(HWND listbox)
+{
+    RECT cr;
+    HDC hdc;
+    HFONT font, oldfont = NULL;
+    int x;
+
+    if (!listbox || !GetClientRect(listbox, &cr))
+        return -1;
+
+    hdc = GetDC(listbox);
+    if (!hdc)
+        return -1;
+
+    font = (HFONT)SendMessage(listbox, WM_GETFONT, 0, 0);
+    if (font)
+        oldfont = SelectObject(hdc, font);
+
+    x = cr.right - hostport_colwidth(hdc) - HOSTPORT_GAP;
+
+    if (oldfont)
+        SelectObject(hdc, oldfont);
+    ReleaseDC(listbox, hdc);
+
+    return x;
+}
+
+/*
  * 竖线由每行自己在 WM_DRAWITEM 里画自己那一段。
  *
  * 早先的写法是在 WM_PAINT 里补画一条贯穿客户区全高的竖线，有两个

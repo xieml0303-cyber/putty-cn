@@ -2068,6 +2068,40 @@ char *cn_log_path_for_runtime(Conf *conf);
 /* 返回 NULL 表示成功，否则为调用方须 sfree 的错误文案；内部不弹模态框。 */
 char *sftp_window_open(Conf *conf, HWND parent);
 bool sftp_window_is_open(void);
+/*
+ * cn: 会话目录（把历史会话按 IP 归类）的右键菜单与单行输入框。
+ *
+ * 声明在 putty.h 是因为 config.c 是跨平台文件、而实现只存在于
+ * windows/dialog.c —— 与上面 sftp_window_open 同一个理由。
+ *
+ * cn_session_list_menu 返回被点中的命令号（下面的 CN_SESS_MENU_*），
+ * 取消返回 CN_SESS_MENU_CANCEL。is_folder 为 true 时菜单只给目录自己
+ * 的操作（重命名／删除）；否则给会话条目的操作（移入某目录／移出）。
+ */
+#define CN_SESS_MENU_CANCEL     0
+#define CN_SESS_MENU_MOVE_OUT   1
+#define CN_SESS_MENU_RENAME     2
+#define CN_SESS_MENU_DELETE     3
+#define CN_SESS_MENU_OPEN       4     /* 进入目录（双击目录行的等价菜单项） */
+#define CN_SESS_MENU_MOVE_BASE  100   /* 100 + i = 移入第 i 个目录 */
+int cn_session_list_menu(HWND parent, int screen_x, int screen_y,
+                         bool is_folder, bool in_folder,
+                         char **folders, int nfolders);
+/*
+ * 在 listbox 的第 row 行上就地浮一个编辑框（不弹窗），初值取 buf。
+ * 回车/失焦提交，ESC 取消。接受则把结果写回 buf 并返回 true。
+ */
+bool cn_inline_edit(HWND listbox, int row, char *buf, int cap);
+/*
+ * 会话列表左列文字区的右边界（listbox 客户坐标），即端口列分割线左侧。
+ * 取不到返回 -1。行内编辑框靠它把右边界收在端口列之前。
+ */
+int cn_listbox_text_right(HWND listbox);
+/*
+ * 会话列表左列文字区的左边界（listbox 客户坐标），即列表自绘文字的缩进。
+ * 取不到返回 -1。行内编辑框靠它让字跟上下行落在同一条竖线上。
+ */
+int cn_listbox_text_left(HWND listbox);
 /* cn: 「确认保存」自绘弹窗（照「确认覆盖」的画法）。返回 IDOK/IDCANCEL。 */
 int cn_confirm_save_dialog(HWND parent, const char *changes);
 /*

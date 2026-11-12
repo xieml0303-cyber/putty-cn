@@ -113,23 +113,42 @@ static void pds_free(PortableDialogStuff *pds)
  * buttons, and the pair pinned to the bottom edge of the history
  * list box.
  */
+/*
+ * cn: 按控件属性找按钮，文字匹配只作兜底。
+ *
+ * 控件是 ANSI 创建的，GetWindowText 拿回来的是系统代码页字节，与源码
+ * 里的 UTF-8 字面量并不总能对上；而配置框切页会重建控件，靠文字找一
+ * 旦对不上，整个定位函数就静默返回、什么都不做。属性挂在控件自身，
+ * 随控件生死，不依赖任何编码假设。
+ */
+static HWND cn_find_button(HWND hwnd, const char *prop, const char *label)
+{
+    HWND h = NULL;
+
+    while ((h = FindWindowEx(hwnd, h, "Button", NULL)) != NULL)
+        if (prop && GetProp(h, prop))
+            return h;
+    if (label && *label) {
+        h = NULL;
+        while ((h = FindWindowEx(hwnd, h, "Button", NULL)) != NULL) {
+            char text[64];
+            GetWindowText(h, text, sizeof(text));
+            if (!strncmp(text, label, strlen(label)))
+                return h;
+        }
+    }
+    return NULL;
+}
+
 static void cn_style_snapshot_buttons(HWND hwnd)
 {
-    HWND hdel = NULL, hinit = NULL, hlist = NULL, hlog = NULL;
+    HWND hdel, hinit, hlist = NULL, hlog, hnew;
     HWND h = 0;
-    while (true) {
-        h = FindWindowEx(hwnd, h, "Button", NULL);
-        if (!h)
-            break;
-        char text[64];
-        GetWindowText(h, text, sizeof(text));
-        if (strncmp(text, "删除", 6) == 0)
-            hdel = h;
-        else if (strncmp(text, "初始化设置", 15) == 0)
-            hinit = h;
-        else if (strncmp(text, "记录日志", 12) == 0)
-            hlog = h;
-    }
+
+    hdel = cn_find_button(hwnd, "cn_btn_delete", "删除");
+    hinit = cn_find_button(hwnd, "cn_btn_init", "初始化设置");
+    hlog = cn_find_button(hwnd, "cn_btn_log", "记录日志");
+    hnew = cn_find_button(hwnd, "cn_btn_newfolder", "新目录");
     if (!hdel || !hinit)
         return;
 
@@ -159,8 +178,8 @@ static void cn_style_snapshot_buttons(HWND hwnd)
      * cn: 复选框（hlog）不参与这套微调——它自带勾选方块，靠 +5/-2 的
      * 按钮式缩放只会把文字挤歪。它按布局给的原尺寸铺满该列即可。 */
     {
-        HWND btns[2] = { hdel, hinit };
-        for (int i = 0; i < 2; i++) {
+        HWND btns[3] = { hnew, hdel, hinit };
+        for (int i = 0; i < 3; i++) {
             RECT r;
             if (!btns[i])
                 continue;
@@ -193,29 +212,47 @@ static void cn_style_snapshot_buttons(HWND hwnd)
         ScreenToClient(hwnd, &p1);
         ScreenToClient(hwnd, &p2);
         int dy_top = rl.top - rd.top;
-        SetWindowPos(hdel, NULL, p1.x, p1.y + dy_top, 0, 0,
-                     SWP_NOSIZE | SWP_NOZORDER);
+        int del_bottom;
         int dy_bottom = rl.bottom - (ri.bottom - ri.top) - ri.top;
+
+        if (hnew) {
+            /*
+             * cn: 「新目录」压在列表顶、「删除」退到它正下方 —— 主人
+             * 指定新目录在删除上方。两者同列同宽，间距 4px 贴合这一列
+             * 原本的视觉密度。
+             */
+            RECT rn;
+            GetWindowRect(hnew, &rn);
+            SetWindowPos(hnew, NULL, p1.x, p1.y + dy_top, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER);
+            del_bottom = p1.y + dy_top + (rn.bottom - rn.top) + 4;
+            SetWindowPos(hdel, NULL, p1.x, del_bottom, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER);
+            del_bottom += rd.bottom - rd.top;
+        } else {
+            SetWindowPos(hdel, NULL, p1.x, p1.y + dy_top, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER);
+            del_bottom = p1.y + dy_top + (rd.bottom - rd.top);
+        }
         SetWindowPos(hinit, NULL, p2.x, p2.y + dy_bottom, 0, 0,
                      SWP_NOSIZE | SWP_NOZORDER);
         /*
-         * cn: 「记录日志」夹在两者正中间。删除已贴列表顶、初始化设置
-         * 贴列表底，取两者中间的空档放中点即可。高度都用各自 rect 的
-         * 原始尺寸算（SetWindowPos 不改高度，所以屏幕坐标差就等于客户
-         * 区高度差）。
+         * cn: 「记录日志」夹在两者正中间。删除已贴列表顶（有「新目录」
+         * 时它下面再压一个按钮）、初始化设置贴列表底，取两者中间的空档
+         * 放中点即可。高度都用各自 rect 的原始尺寸算（SetWindowPos 不
+         * 改高度，所以屏幕坐标差就等于客户区高度差）。
          */
         if (hlog) {
             RECT rlog;
             POINT pl = { 0, 0 };
-            int del_bottom = p1.y + dy_top + (rd.bottom - rd.top);
             int init_top = p2.y + dy_bottom;
-            int gap, h;
+            int gap, hh;
 
             GetWindowRect(hlog, &rlog);
             pl.x = rlog.left;
             ScreenToClient(hwnd, &pl);
-            h = rlog.bottom - rlog.top;
-            gap = (init_top - del_bottom) - h;
+            hh = rlog.bottom - rlog.top;
+            gap = (init_top - del_bottom) - hh;
             if (gap < 0)
                 gap = 0;
             SetWindowPos(hlog, NULL, pl.x, del_bottom + gap / 2, 0, 0,
@@ -2159,4 +2196,313 @@ void show_ca_config_box(dlgparam *dp)
                    dp ? dp->hwnd : NULL, CAConfigProc, pds);
 
     pds_free(pds);
+}
+
+/* ----------------------------------------------------------------------
+ * cn: 会话目录 —— 右键菜单与单行输入框。
+ *
+ * 两个都放在这里（配置框的 Windows 平台层）：config.c 是跨平台文件，
+ * 只负责目录数据与列表重组，Win32 交互全部落在这一层。
+ */
+
+int cn_session_list_menu(HWND parent, int screen_x, int screen_y,
+                         bool is_folder, bool in_folder,
+                         char **folders, int nfolders)
+{
+    HMENU menu = CreatePopupMenu();
+    int cmd, i;
+
+    if (!menu)
+        return CN_SESS_MENU_CANCEL;
+
+    if (is_folder) {
+        /*
+         * 「进入目录」排第一：双击目录行是同一个动作，但光靠双击没有
+         * 任何提示，右键菜单里得有个看得见的入口。
+         */
+        AppendMenuW(menu, MF_STRING, CN_SESS_MENU_OPEN, L"进入目录(&O)");
+        AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+        AppendMenuW(menu, MF_STRING, CN_SESS_MENU_RENAME,
+                    L"重命名目录(&R)");
+        AppendMenuW(menu, MF_STRING, CN_SESS_MENU_DELETE,
+                    L"删除目录(&D)");
+    } else {
+        /*
+         * 会话行的「重命名」只改列表里显示的名字，连接目标不动 —— 见
+         * set_recent_conn_label 的说明。放在最上面，因为它是单行操作，
+         * 比归类更常用。
+         */
+        AppendMenuW(menu, MF_STRING, CN_SESS_MENU_RENAME,
+                    L"重命名(&R)");
+        AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+        /*
+         * 「移入目录」做成子菜单，而不是再弹一层选择窗：一级目录最多
+         * 二十个，平铺在子菜单里一眼看全，比二次弹窗快得多。
+         */
+        HMENU sub = CreatePopupMenu();
+        if (sub && nfolders > 0) {
+            for (i = 0; i < nfolders; i++) {
+                wchar_t *wname =
+                    dup_mb_to_wc(CP_UTF8, folders[i] ? folders[i] : "");
+                AppendMenuW(sub, MF_STRING, CN_SESS_MENU_MOVE_BASE + i,
+                            wname);
+                sfree(wname);
+            }
+            AppendMenuW(menu, MF_POPUP, (UINT_PTR)sub, L"移入目录(&M)");
+        } else {
+            if (sub)
+                DestroyMenu(sub);
+            AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"移入目录(&M)");
+        }
+        if (in_folder)
+            AppendMenuW(menu, MF_STRING, CN_SESS_MENU_MOVE_OUT,
+                        L"移出目录(&O)");
+    }
+
+    cmd = (int)TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD |
+                              TPM_NONOTIFY, screen_x, screen_y, 0, parent,
+                              NULL);
+    /*
+     * 菜单连同子菜单一起销毁：MF_POPUP 挂进去的子菜单归父菜单所有，
+     * 这里不能再单独 DestroyMenu 它，否则是二次释放。
+     */
+    DestroyMenu(menu);
+    return cmd;
+}
+
+/*
+ * cn: 列表行内就地编辑（改名不弹窗）。
+ *
+ * 目录名、会话显示名都在列表那一行上直接改 —— 跟资源管理器按 F2 一个
+ * 观感，省掉「弹窗-输入-确定」那趟往返。
+ *
+ * ⚠️ 父窗是配置框，是真对话框：它的消息泵会先拿 IsDialogMessage 过一遍，
+ * 回车会被解释成「按了默认按钮」，而配置框的默认按钮是「打开」—— 不改
+ * 的话，改完名字敲回车就直接连出去了。所以编辑框必须回
+ * DLGC_WANTALLKEYS，把回车/ESC/Tab 全抢下来自己处理。
+ */
+
+/* 控件 ID：随便挑个远离对话框模板 ID 区间的值，不会跟已有控件撞。 */
+#define CN_INLINE_EDIT_ID 0x7F31
+
+typedef struct CnInlineEdit {
+    HWND edit;
+    char *result;
+    int resultcap;
+    bool accepted;
+    bool done;
+    WNDPROC oldproc;
+} CnInlineEdit;
+
+static void cn_inline_finish(CnInlineEdit *ie, bool accept)
+{
+    if (ie->done)
+        return;
+    ie->done = true;
+    ie->accepted = accept;
+
+    if (accept) {
+        int len = GetWindowTextLengthW(ie->edit);
+        wchar_t *wbuf = snewn(len + 1, wchar_t);
+        char *mb;
+
+        GetWindowTextW(ie->edit, wbuf, len + 1);
+        mb = dup_wc_to_mb(CP_UTF8, wbuf, "");
+        snprintf(ie->result, ie->resultcap, "%s", mb);
+        sfree(mb);
+        sfree(wbuf);
+    }
+
+    /* 唤醒下面本地模态循环里阻塞着的 GetMessage。 */
+    PostMessageW(ie->edit, WM_NULL, 0, 0);
+}
+
+static LRESULT CALLBACK cn_inline_wndproc(HWND hwnd, UINT msg,
+                                          WPARAM wparam, LPARAM lparam)
+{
+    CnInlineEdit *ie = (CnInlineEdit *)GetProp(hwnd, "cn_inline");
+
+    switch (msg) {
+      case WM_GETDLGCODE:
+        /* 见上：不让对话框过程把回车当成默认按钮。 */
+        return DLGC_WANTALLKEYS;
+
+      case WM_KEYDOWN:
+        if (ie) {
+            if (wparam == VK_RETURN) {
+                cn_inline_finish(ie, true);
+                return 0;
+            }
+            if (wparam == VK_ESCAPE) {
+                cn_inline_finish(ie, false);
+                return 0;
+            }
+        }
+        break;
+
+      case WM_CHAR:
+        /* 单行 EDIT 收到 \r 会蜂鸣，回车已经在 WM_KEYDOWN 里吃掉了。 */
+        if (wparam == '\r' || wparam == '\n' || wparam == VK_ESCAPE)
+            return 0;
+        break;
+
+      case WM_KILLFOCUS:
+        /* 点到别处 = 提交，跟资源管理器一致。 */
+        if (ie)
+            cn_inline_finish(ie, true);
+        break;
+    }
+
+    if (ie && ie->oldproc)
+        return CallWindowProc(ie->oldproc, hwnd, msg, wparam, lparam);
+    return DefWindowProcW(hwnd, msg, wparam, lparam);
+}
+
+bool cn_inline_edit(HWND listbox, int row, char *buf, int cap)
+{
+    HINSTANCE inst = GetModuleHandle(NULL);
+    CnInlineEdit ie;
+    HWND parent, edit;
+    RECT ir, cr;
+    POINT tl;
+    HFONT font;
+    MSG msg;
+    int width, height, leftmargin;
+    wchar_t *winit;
+
+    if (!listbox || !buf || cap <= 0 || row < 0)
+        return false;
+
+    /*
+     * LB_GETITEMRECT 只对可见行有效，拿不到矩形就没法定位。先把它选上
+     * —— listbox 会顺手滚到这一行。
+     */
+    SendMessageW(listbox, LB_SETCURSEL, row, 0);
+    if (SendMessageW(listbox, LB_GETITEMRECT, row, (LPARAM)&ir) == LB_ERR)
+        return false;
+
+    parent = GetParent(listbox);
+    if (!parent)
+        return false;
+
+    /*
+     * 行矩形是 listbox 的客户坐标，得先换到屏幕再换到父窗客户坐标 ——
+     * 少转一道就会因为边框宽度差几个像素而错位。
+     */
+    tl.x = ir.left;
+    tl.y = ir.top;
+    ClientToScreen(listbox, &tl);
+    ScreenToClient(parent, &tl);
+
+    GetClientRect(listbox, &cr);
+    width = cr.right - ir.left;
+
+    /*
+     * 右边界止于端口列的分割线。整行拉满会把端口号那一列也框进来，
+     * 改名时看着像连端口一起改，所以按左列文字区的右边界收窄。
+     */
+    {
+        int textright = cn_listbox_text_right(listbox);
+        if (textright > ir.left)
+            width = textright - ir.left;
+    }
+
+    /*
+     * 左内缩取列表自绘文字的缩进，让编辑框里的字跟上下行的字落在同
+     * 一条竖线上。差几像素的话，一眼就能看出这行是另贴上去的。
+     */
+    {
+        int textleft = cn_listbox_text_left(listbox);
+        leftmargin = textleft > ir.left ? textleft - ir.left : 2;
+    }
+
+    if (width < 60)
+        width = 60;
+
+    /*
+     * 高度让出一像素。列表的行分隔线画在行矩形的最后一行像素上
+     * （controls.c 的 WM_DRAWITEM：MoveToEx(r.left, r.bottom - 1)），
+     * 编辑框若正好占满行高，就会把这条线整条盖掉 —— 这一行和下一行
+     * 看着就粘在一起，像贴了张白纸。
+     */
+    height = ir.bottom - ir.top - 1;
+    if (height < 10)
+        height = ir.bottom - ir.top;
+
+    /*
+     * 取消列表的选中：行退回普通的白底黑字，编辑框无边框浮在同一位置、
+     * 同一个字体，看上去就是这行文字自己在改。留着选中反而更糟 —— 行
+     * 是蓝底白字，编辑框是白底黑字，一块白纸贴在蓝条上。
+     */
+    SendMessageW(listbox, LB_SETCURSEL, (WPARAM)-1, 0);
+
+    memset(&ie, 0, sizeof(ie));
+    ie.result = buf;
+    ie.resultcap = cap;
+
+    winit = dup_mb_to_wc(CP_UTF8, buf);
+    edit = CreateWindowExW(0, L"EDIT", winit,
+                           WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+                           tl.x, tl.y, width, height, parent,
+                           (HMENU)CN_INLINE_EDIT_ID, inst, NULL);
+    sfree(winit);
+    if (!edit)
+        return false;
+    ie.edit = edit;
+
+    /* 字体跟列表一致，否则编辑框里的字会跟旁边的行对不齐。 */
+    font = (HFONT)SendMessageW(listbox, WM_GETFONT, 0, 0);
+    if (font)
+        SendMessageW(edit, WM_SETFONT, (WPARAM)font, TRUE);
+
+    /*
+     * 无边框之后控件自己没有内缩，文字会顶在行首，得手动补上左边距
+     * （值取自上面 cn_listbox_text_left 那一段）。
+     */
+    SendMessageW(edit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                 MAKELONG(leftmargin, leftmargin));
+
+    SetProp(edit, "cn_inline", (HANDLE)&ie);
+    ie.oldproc = (WNDPROC)SetWindowLongPtrW(edit, GWLP_WNDPROC,
+                                            (LONG_PTR)cn_inline_wndproc);
+
+    /* 全选：改名时一个字符都不用先删。 */
+    SendMessageW(edit, EM_SETSEL, 0, -1);
+    SetFocus(edit);
+
+    /*
+     * 本地模态循环。
+     *
+     * ⚠️ 别换成 IsDialogMessageW：本循环跑在配置框的消息泵之外，而配置
+     * 框是对话框，IsDialogMessageW 会拿它去解释回车/方向键，实测会把
+     * 主窗最小化（同一个坑记在 sftpwin.c 的 cn_input_box 里）。回车与
+     * ESC 已由 cn_inline_wndproc 接住，这里只负责把消息派发下去。
+     *
+     * 点到编辑框以外的地方：先提交再退出，并且把这一下点击吃掉 —— 放
+     * 它过去的话，落点可能是「打开」按钮，改个名字就把连接发出去了。
+     */
+    while (!ie.done && IsWindow(edit) && GetMessageW(&msg, NULL, 0, 0)) {
+        if (msg.hwnd != edit &&
+            (msg.message == WM_LBUTTONDOWN || msg.message == WM_RBUTTONDOWN ||
+             msg.message == WM_LBUTTONDBLCLK ||
+             msg.message == WM_NCLBUTTONDOWN)) {
+            cn_inline_finish(&ie, true);
+            break;
+        }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    RemoveProp(edit, "cn_inline");
+    if (IsWindow(edit))
+        DestroyWindow(edit);
+
+    /*
+     * 把选中还给这一行。提交时调用方多半会重建列表（选中由它定），
+     * 但按 ESC 取消时列表不重建 —— 不还回来就等于白白丢了选中。
+     */
+    if ((int)SendMessageW(listbox, LB_GETCOUNT, 0, 0) > row)
+        SendMessageW(listbox, LB_SETCURSEL, row, 0);
+
+    return ie.accepted;
 }

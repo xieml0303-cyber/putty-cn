@@ -815,9 +815,11 @@ struct recent_conn *get_recent_conns(int *count)
 
     while (n < MAX_RECENT_HOSTS) {
         char valname[16], portname[24], username[256], value[1024];
+        char foldername[24], folder[256];
+        char labelname[24], label[256];
         DWORD size = sizeof(value), type;
         DWORD portval = 0, portsize = sizeof(portval), porttype;
-        DWORD usersize;
+        DWORD usersize, foldersize, labelsize;
         int port = 0;
 
         snprintf(valname, sizeof(valname), "%d", n);
@@ -853,10 +855,42 @@ struct recent_conn *get_recent_conns(int *count)
             username[0] = '\0';
         }
 
+        /*
+         * cn: 所属目录。旧条目没有 N.folder，读回来按空串处理 ——
+         * 未归类，直接挂在列表根部。
+         */
+        folder[0] = '\0';
+        foldersize = sizeof(folder);
+        snprintf(foldername, sizeof(foldername), "%d.folder", n);
+        if (RegQueryValueEx(key, foldername, NULL, &type,
+                            (BYTE *)folder, &foldersize) == ERROR_SUCCESS &&
+            type == REG_SZ) {
+            folder[sizeof(folder)-1] = '\0';
+        } else {
+            folder[0] = '\0';
+        }
+
+        /*
+         * cn: 用户起的显示名。旧条目没有 N.label，读回来按空串处理 ——
+         * 显示真实主机名。
+         */
+        label[0] = '\0';
+        labelsize = sizeof(label);
+        snprintf(labelname, sizeof(labelname), "%d.label", n);
+        if (RegQueryValueEx(key, labelname, NULL, &type,
+                            (BYTE *)label, &labelsize) == ERROR_SUCCESS &&
+            type == REG_SZ) {
+            label[sizeof(label)-1] = '\0';
+        } else {
+            label[0] = '\0';
+        }
+
         list = sresize(list, n+1, struct recent_conn);
         list[n].host = dupstr(value);
         list[n].port = port;
         list[n].username = dupstr(username);
+        list[n].folder = dupstr(folder);
+        list[n].label = dupstr(label);
         n++;
     }
     RegCloseKey(key);
@@ -874,7 +908,8 @@ static void put_recent_conns(struct recent_conn *list, int n)
                        KEY_ALL_ACCESS, NULL, &key, NULL) != ERROR_SUCCESS)
         return;
     for (i = 0; i < n; i++) {
-        char valname[16], portname[24], username_key[24];
+        char valname[16], portname[24], username_key[24], folder_key[24];
+        char label_key[24];
         snprintf(valname, sizeof(valname), "%d", i);
         RegSetValueEx(key, valname, 0, REG_SZ,
                       (const BYTE *)list[i].host,
@@ -892,6 +927,20 @@ static void put_recent_conns(struct recent_conn *list, int n)
                           (const BYTE *)list[i].username,
                           strlen(list[i].username) + 1);
         }
+        /* cn: 同理，未归类的条目不写 N.folder。 */
+        if (list[i].folder && list[i].folder[0]) {
+            snprintf(folder_key, sizeof(folder_key), "%d.folder", i);
+            RegSetValueEx(key, folder_key, 0, REG_SZ,
+                          (const BYTE *)list[i].folder,
+                          strlen(list[i].folder) + 1);
+        }
+        /* cn: 没改过名的条目不写 N.label。 */
+        if (list[i].label && list[i].label[0]) {
+            snprintf(label_key, sizeof(label_key), "%d.label", i);
+            RegSetValueEx(key, label_key, 0, REG_SZ,
+                          (const BYTE *)list[i].label,
+                          strlen(list[i].label) + 1);
+        }
     }
     RegCloseKey(key);
 }
@@ -901,15 +950,30 @@ void add_recent_conn(const char *host, int port, const char *username)
     int n, i, j;
     struct recent_conn *old, *newlist;
     const char *user = (username ? username : "");
+    const char *inherited = "";
+    const char *inherited_label = "";
 
     if (!host || !*host)
         return;
     old = get_recent_conns(&n);
+    /*
+     * cn: 同一会话再次连接时保留它原有的目录归属 —— 重连一次就被踢
+     * 回未归类，用户得重新归类一遍，属于纯粹的意外。显示名同理。
+     */
+    for (i = 0; i < n; i++)
+        if (!strcmp(old[i].host, host) && old[i].port == port &&
+            !strcmp(old[i].username, user)) {
+            inherited = old[i].folder;
+            inherited_label = old[i].label;
+            break;
+        }
     newlist = snewn(n+1, struct recent_conn);
     j = 0;
     newlist[j].host = dupstr(host);
     newlist[j].port = port;
     newlist[j].username = dupstr(user);
+    newlist[j].folder = dupstr(inherited);
+    newlist[j].label = dupstr(inherited_label);
     j++;
     for (i = 0; i < n && j < MAX_RECENT_HOSTS; i++) {
         /* Same host on a different port is a separate entry: the two
@@ -920,6 +984,8 @@ void add_recent_conn(const char *host, int port, const char *username)
         newlist[j].host = dupstr(old[i].host);
         newlist[j].port = old[i].port;
         newlist[j].username = dupstr(old[i].username);
+        newlist[j].folder = dupstr(old[i].folder);
+        newlist[j].label = dupstr(old[i].label);
         j++;
     }
     put_recent_conns(newlist, j);
@@ -942,6 +1008,8 @@ void del_recent_conn(const char *host, int port, const char *username)
         newlist[j].host = dupstr(old[i].host);
         newlist[j].port = old[i].port;
         newlist[j].username = dupstr(old[i].username);
+        newlist[j].folder = dupstr(old[i].folder);
+        newlist[j].label = dupstr(old[i].label);
         j++;
     }
     put_recent_conns(newlist, j);
@@ -955,8 +1023,286 @@ void free_recent_conns(struct recent_conn *list, int count)
     for (i = 0; i < count; i++) {
         sfree(list[i].host);
         sfree(list[i].username);
+        sfree(list[i].folder);
+        sfree(list[i].label);
     }
     sfree(list);
+}
+
+/* ----------------------------------------------------------------------
+ * cn: 会话目录。
+ *
+ * 单独一个注册表键（RecentFolders），每个目录一行 REG_SZ：值名是序号、
+ * 数据是目录名，顺序即显示顺序。不能塞进 RecentHosts —— 历史列表的
+ * 写入是「整键删除再重建」，目录跟着进去会被连带抹掉。
+ */
+
+static const char *const recent_folders_key = PUTTY_REG_POS "\\RecentFolders";
+#define MAX_RECENT_FOLDERS 20
+#define MAX_FOLDER_NAME 64
+
+/*
+ * 目录名比较：ASCII 大小写不敏感，非 ASCII 字节按原样比。
+ *
+ * 用户不会觉得「Work」和「work」是两个目录，重名检查必须按同一个名字
+ * 算；中文名是 UTF-8 多字节，逐字节比较即可，不需要也不应该做区域
+ * 相关的字符折叠。
+ */
+static bool folder_names_equal(const char *a, const char *b)
+{
+    while (*a && *b) {
+        unsigned char ca = (unsigned char)*a, cb = (unsigned char)*b;
+        if (ca >= 'A' && ca <= 'Z')
+            ca = (unsigned char)(ca - 'A' + 'a');
+        if (cb >= 'A' && cb <= 'Z')
+            cb = (unsigned char)(cb - 'A' + 'a');
+        if (ca != cb)
+            return false;
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+/* 目录名合法性：非空、不超长、不含制表符与换行（列表靠 \t 分列）。 */
+static bool folder_name_ok(const char *name)
+{
+    if (!name || !*name)
+        return false;
+    if (strlen(name) >= MAX_FOLDER_NAME)
+        return false;
+    return !strpbrk(name, "\t\r\n");
+}
+
+char **get_recent_folders(int *count)
+{
+    HKEY key;
+    char **list = NULL;
+    int n = 0;
+
+    *count = 0;
+    if (RegOpenKeyEx(HKEY_CURRENT_USER, recent_folders_key, 0,
+                     KEY_READ, &key) != ERROR_SUCCESS)
+        return NULL;
+
+    while (n < MAX_RECENT_FOLDERS) {
+        char valname[16], value[MAX_FOLDER_NAME * 4];
+        DWORD size = sizeof(value), type;
+
+        snprintf(valname, sizeof(valname), "%d", n);
+        if (RegQueryValueEx(key, valname, NULL, &type,
+                            (BYTE *)value, &size) != ERROR_SUCCESS ||
+            type != REG_SZ)
+            break;
+        value[sizeof(value) - 1] = '\0';
+        if (!value[0])
+            break;
+        list = sresize(list, n + 1, char *);
+        list[n] = dupstr(value);
+        n++;
+    }
+    RegCloseKey(key);
+    *count = n;
+    return list;
+}
+
+void free_recent_folders(char **list, int count)
+{
+    int i;
+    for (i = 0; i < count; i++)
+        sfree(list[i]);
+    sfree(list);
+}
+
+static void put_recent_folders(char **list, int n)
+{
+    HKEY key;
+    int i;
+
+    RegDeleteKey(HKEY_CURRENT_USER, recent_folders_key);
+    if (n <= 0)
+        return;
+    if (RegCreateKeyEx(HKEY_CURRENT_USER, recent_folders_key, 0, NULL, 0,
+                       KEY_ALL_ACCESS, NULL, &key, NULL) != ERROR_SUCCESS)
+        return;
+    for (i = 0; i < n; i++) {
+        char valname[16];
+        snprintf(valname, sizeof(valname), "%d", i);
+        RegSetValueEx(key, valname, 0, REG_SZ,
+                      (const BYTE *)list[i], strlen(list[i]) + 1);
+    }
+    RegCloseKey(key);
+}
+
+bool add_recent_folder(const char *name)
+{
+    int nf, i;
+    char **folders;
+
+    if (!folder_name_ok(name))
+        return false;
+    folders = get_recent_folders(&nf);
+    for (i = 0; i < nf; i++)
+        if (folder_names_equal(folders[i], name)) {
+            free_recent_folders(folders, nf);
+            return false;
+        }
+    if (nf >= MAX_RECENT_FOLDERS) {
+        free_recent_folders(folders, nf);
+        return false;
+    }
+    folders = sresize(folders, nf + 1, char *);
+    folders[nf] = dupstr(name);
+    put_recent_folders(folders, nf + 1);
+    free_recent_folders(folders, nf + 1);
+    return true;
+}
+
+bool rename_recent_folder(const char *oldname, const char *newname)
+{
+    int nf, n, i;
+    char **folders;
+    struct recent_conn *conns;
+    bool found = false;
+
+    if (!folder_name_ok(oldname) || !folder_name_ok(newname))
+        return false;
+
+    folders = get_recent_folders(&nf);
+    for (i = 0; i < nf; i++) {
+        if (!strcmp(folders[i], oldname)) {
+            found = true;
+        } else if (folder_names_equal(folders[i], newname)) {
+            /* 与别的目录重名。一级目录没有消歧手段，只能拒绝。 */
+            free_recent_folders(folders, nf);
+            return false;
+        }
+    }
+    if (!found) {
+        free_recent_folders(folders, nf);
+        return false;
+    }
+    /* 只改大小写也算改名成功，但目录表与归属都不必重写。 */
+    if (!strcmp(oldname, newname)) {
+        free_recent_folders(folders, nf);
+        return true;
+    }
+
+    for (i = 0; i < nf; i++)
+        if (!strcmp(folders[i], oldname)) {
+            char *dup = dupstr(newname);
+            sfree(folders[i]);
+            folders[i] = dup;
+        }
+    put_recent_folders(folders, nf);
+    free_recent_folders(folders, nf);
+
+    /* 会话里存的是目录名，改名后要同步改写，否则整批条目失去归属。 */
+    conns = get_recent_conns(&n);
+    for (i = 0; i < n; i++)
+        if (conns[i].folder && !strcmp(conns[i].folder, oldname)) {
+            char *dup = dupstr(newname);
+            sfree(conns[i].folder);
+            conns[i].folder = dup;
+        }
+    if (n > 0)
+        put_recent_conns(conns, n);
+    free_recent_conns(conns, n);
+    return true;
+}
+
+void del_recent_folder(const char *name)
+{
+    int nf, n, i, j = 0;
+    char **folders;
+    struct recent_conn *conns;
+
+    if (!name || !*name)
+        return;
+
+    folders = get_recent_folders(&nf);
+    for (i = 0; i < nf; i++) {
+        if (!strcmp(folders[i], name))
+            sfree(folders[i]);          /* 目录本身丢掉 */
+        else
+            folders[j++] = folders[i];  /* 原地压缩，前 j 个有效 */
+    }
+    put_recent_folders(folders, j);
+    free_recent_folders(folders, j);
+
+    /*
+     * 目录下的会话不删，改回未归类：用户删的是「归类」，不是会话
+     * 本身。真要删会话，列表下方有单独的删除按钮。
+     */
+    conns = get_recent_conns(&n);
+    for (i = 0; i < n; i++)
+        if (conns[i].folder && !strcmp(conns[i].folder, name)) {
+            sfree(conns[i].folder);
+            conns[i].folder = dupstr("");
+        }
+    if (n > 0)
+        put_recent_conns(conns, n);
+    free_recent_conns(conns, n);
+}
+
+void set_recent_conn_folder(const char *host, int port,
+                            const char *username, const char *folder)
+{
+    int n, i;
+    struct recent_conn *conns;
+    const char *user = (username ? username : "");
+    const char *dest = (folder ? folder : "");
+    bool changed = false;
+
+    if (!host || !*host)
+        return;
+
+    conns = get_recent_conns(&n);
+    for (i = 0; i < n; i++) {
+        if (!strcmp(conns[i].host, host) && conns[i].port == port &&
+            !strcmp(conns[i].username, user)) {
+            char *dup = dupstr(dest);
+            sfree(conns[i].folder);
+            conns[i].folder = dup;
+            changed = true;
+            break;
+        }
+    }
+    if (changed)
+        put_recent_conns(conns, n);
+    free_recent_conns(conns, n);
+}
+
+/*
+ * cn: 改一条会话的显示名。只动 label，host / port / username 原样保留，
+ * 因此列表里换了名字之后，双击回填、实际连接的目标都不会变。
+ */
+void set_recent_conn_label(const char *host, int port,
+                           const char *username, const char *label)
+{
+    int n, i;
+    struct recent_conn *conns;
+    const char *user = (username ? username : "");
+    const char *shown = (label ? label : "");
+    bool changed = false;
+
+    if (!host || !*host)
+        return;
+
+    conns = get_recent_conns(&n);
+    for (i = 0; i < n; i++) {
+        if (!strcmp(conns[i].host, host) && conns[i].port == port &&
+            !strcmp(conns[i].username, user)) {
+            char *dup = dupstr(shown);
+            sfree(conns[i].label);
+            conns[i].label = dup;
+            changed = true;
+            break;
+        }
+    }
+    if (changed)
+        put_recent_conns(conns, n);
+    free_recent_conns(conns, n);
 }
 
 /* ----------------------------------------------------------------------

@@ -84,6 +84,20 @@ struct recent_conn {
     char *host;
     int port;      /* 0 if the entry predates port tracking */
     char *username; /* 空串 = 未记录（旧条目或不适用），回填时留空 */
+    /*
+     * cn: 所属目录名，空串 = 未归类（直接挂在列表根部）。
+     *
+     * 存名字而不是目录序号：目录被删除或改名时不必回写每一个条目的
+     * 索引，改名由 rename_recent_folder 一次性改写归属。
+     */
+    char *folder;
+    /*
+     * cn: 用户自己起的显示名，空串 = 照旧显示 host。
+     *
+     * 只影响列表里怎么画这一行，host / port / username 三个真实字段
+     * 一律不动 —— 双击回填、连接目标、去重比较都还按真实值走。
+     */
+    char *label;
 };
 
 /* caller frees via free_recent_conns */
@@ -91,6 +105,31 @@ struct recent_conn *get_recent_conns(int *count);
 void add_recent_conn(const char *host, int port, const char *username);
 void del_recent_conn(const char *host, int port, const char *username);
 void free_recent_conns(struct recent_conn *list, int count);
+
+/*
+ * cn: 会话目录 —— 把历史会话按 IP 归类用，只做一级（目录里不能再放
+ * 目录）。
+ *
+ * 目录单独存一个注册表键，不能塞进 RecentHosts 下：历史列表的写入是
+ * 「整键删除再重建」（见 put_recent_conns），目录跟着进去会被连带抹掉。
+ */
+char **get_recent_folders(int *count);
+void free_recent_folders(char **list, int count);
+/* 空名 / 重名 / 数量超限 → false */
+bool add_recent_folder(const char *name);
+/* 目录不存在或与别的目录重名 → false；同时改写其下会话的归属 */
+bool rename_recent_folder(const char *oldname, const char *newname);
+/* 只删目录，其下会话改回未归类（不删会话本身） */
+void del_recent_folder(const char *name);
+/* 把一条会话移进某个目录；folder 为空串表示移出到未归类 */
+void set_recent_conn_folder(const char *host, int port,
+                            const char *username, const char *folder);
+/*
+ * cn: 给一条会话改显示名；label 为空串表示恢复显示真实主机名。
+ * 只改列表显示，不改 host/port/username，也不影响连接行为。
+ */
+void set_recent_conn_label(const char *host, int port,
+                           const char *username, const char *label);
 
 /* ----------------------------------------------------------------------
  * Serial ports: the serial ports actually present on this machine,

@@ -1495,6 +1495,12 @@ static void sshbug_handler_manual_only(dlgcontrol *ctrl, dlgparam *dlg,
     }
 }
 
+/*
+ * cn: 目录名上限。目录只做一级，名字只出现在列表行里，64 字节够用；
+ * 放在这里是因为 struct sessionsaver_data 拿它当定长字段（见 cur_folder）。
+ */
+#define CN_FOLDER_NAME_MAX  64
+
 struct sessionsaver_data {
     dlgcontrol *hostbox;        /* 上方「主机名称(或IP地址)」输入框 */
     dlgcontrol *portbox;        /* 旁边「端口」输入框，随历史条目一起回填 */
@@ -1519,6 +1525,21 @@ struct sessionsaver_data {
     int passbox_max_right;
     struct recent_conn *history; /* recent connections, newest first */
     int nhistory;
+    /*
+     * cn: 会话目录（只做一级）。folders 与 history 一起在 refresh_history
+     * 里重读，nfolders 是它的长度；目录行在列表里的 id 由下标编码而来。
+     */
+    char **folders;
+    int nfolders;
+    /*
+     * cn: 当前「进入」了哪个目录，空串表示停在根层。
+     *
+     * 这是导航状态而不是持久化状态：关掉配置框就回根层，跟资源管理器
+     * 重新打开时回到某个固定起点一样，不需要记住上次进了哪。
+     * 按名字存而不是按下标：目录删掉或改名后下标会移位。
+     */
+    char cur_folder[CN_FOLDER_NAME_MAX];
+    dlgcontrol *newfolderbutton; /* cn: 「新目录」，位于「删除」正上方 */
     bool midsession;
 };
 
@@ -1529,6 +1550,7 @@ static void sessionsaver_data_free(void *ssdv)
     if (cn_session_ssd == ssd)
         cn_session_ssd = NULL;
     free_recent_conns(ssd->history, ssd->nhistory);
+    free_recent_folders(ssd->folders, ssd->nfolders);
     sfree(ssd);
 }
 
@@ -1557,9 +1579,15 @@ static void cn_refresh_userbox(dlgparam *dlg)
  */
 static char *recent_entry_text(const struct recent_conn *rc)
 {
+    /*
+     * cn: 用户改过显示名就画显示名，否则画真实主机名。右列永远是端口 ——
+     * 改名不改连接目标，端口也就没有理由跟着变。
+     */
+    const char *shown = (rc->label && rc->label[0]) ? rc->label : rc->host;
+
     if (rc->port > 0)
-        return dupprintf("%s\t%d", rc->host, rc->port);
-    return dupprintf("%s\t", rc->host);
+        return dupprintf("%s\t%d", shown, rc->port);
+    return dupprintf("%s\t", shown);
 }
 
 /*
@@ -1756,24 +1784,544 @@ static void refresh_session_buttons(struct sessionsaver_data *ssd,
 }
 
 /*
+ * cn: 目录行在列表里的 id。
+ *
+ * 会话行的 id 仍然是它在 history 数组里的下标（0..nhistory-1）；目录行
+ * 用一段负数。会话页里所有「取 id 当下标」的地方都带着 id >= 0 的守卫，
+ * 负数 id 天然被当成空气，那些分支一行都不用改。
+ */
+#define CN_FOLDER_ID_BASE   (-1000)
+#define CN_FOLDER_ID(f)     (CN_FOLDER_ID_BASE - (f))
+#define CN_IS_FOLDER_ID(id) ((id) <= CN_FOLDER_ID_BASE)
+#define CN_FOLDER_OF_ID(id) (CN_FOLDER_ID_BASE - (id))
+/*
+ * 「..」返回行的 id。刻意挑一个既不 >= 0（会话行）也不 <= -1000（目录行）
+ * 的值：列表里每一处分类判断都只认这两段，-1 会落到所有分支之外，只有
+ * 专门认它的双击和删除逻辑会处理它。
+ */
+#define CN_PARENT_ID        (-1)
+#define CN_NO_SELECT        (0x7fffffff) /* 「别恢复选中」的哨兵 */
+
+/*
+ * cn: listbox 是 ANSI 控件，但本程序的 manifest 声明了
+ * <activeCodePage>UTF-8</activeCodePage>（见 windows/putty.mft），
+ * 进程内 GetACP() 就是 65001，ANSI 控件收发和 GDI 绘制都按 UTF-8
+ * 解释。所以仓库内部的 UTF-8 char * 可以直接塞进控件，不用转码。
+ */
+
+/*
+ * 目录行的显示文本：名字前一个 ▸ 表示「可以进去」，制表符保住两列分栏。
+ *
+ * 有内容时在后面带上条目数：根层视图不显示目录里的会话，会话被移进去
+ * 就从列表上消失了，不给个数字用户会以为移丢了。
+ */
+static char *recent_folder_row_text(struct sessionsaver_data *ssd, int f)
+{
+    int i, n = 0;
+
+    for (i = 0; i < ssd->nhistory; i++)
+        if (ssd->history[i].folder &&
+            !strcmp(ssd->history[i].folder, ssd->folders[f]))
+            n++;
+
+    if (n > 0)
+        return dupprintf("▸ %s (%d)\t", ssd->folders[f], n);
+    return dupprintf("▸ %s\t", ssd->folders[f]);
+}
+
+/* 目录名在 ssd->folders 里的下标，找不到返回 -1。 */
+static int cn_folder_index(struct sessionsaver_data *ssd, const char *name)
+{
+    int f;
+
+    if (!name || !*name)
+        return -1;
+    for (f = 0; f < ssd->nfolders; f++)
+        if (!strcmp(ssd->folders[f], name))
+            return f;
+    return -1;
+}
+
+/*
+ * cn: 把刚记进历史的那条连接归到当前所在的目录。
+ *
+ * 必须在 add_recent_conn 返回之后调用，不能指望它自己认路：它会把同
+ * host/port/user 的旧条目整个继承过来（folder 一起继承），所以在目录
+ * 里重连一条原本未归类的会话，它照样留在根层，自动归类就成了空话。
+ *
+ * 串口不记历史（端口框里是波特率而不是端口号），这里一并跳过。
+ */
+static void cn_adopt_current_folder(struct sessionsaver_data *ssd, Conf *conf)
+{
+    if (!ssd->cur_folder[0])
+        return;
+    if (conf_get_int(conf, CONF_protocol) == PROT_SERIAL)
+        return;
+    set_recent_conn_folder(conf_get_str(conf, CONF_host),
+                           conf_get_int(conf, CONF_port),
+                           conf_get_str_ambi(conf, CONF_username, NULL),
+                           ssd->cur_folder);
+}
+
+/*
  * Refill the list box from the persistent history of recently used
  * connections.
+ *
+ * cn: 列表有两种视图，由 ssd->cur_folder 决定 ——
+ *
+ *   根层（cur_folder 为空）：先列目录行，再列未归类的会话。归了类的
+ *   会话不在这里出现，跟资源管理器不在根目录铺开所有文件同理。
+ *
+ *   目录内（cur_folder 非空）：首行是「..」返回行，其下只有该目录里的
+ *   会话。
+ *
+ * want_id 指定重建后要选中哪一行的 id，传 CN_NO_SELECT 则尽量保持当前
+ * 选中不变。
  */
-static void refresh_history(struct sessionsaver_data *ssd, dlgparam *dlg)
+static void refresh_history(struct sessionsaver_data *ssd, dlgparam *dlg,
+                            int want_id)
 {
-    int i;
+    int i, f, row = 0, sel_row = -1;
+    int keep = want_id;
+    char *text;
+
+    /*
+     * 重建会清空选中态。默认把重建前选中的那一行选回去 —— 归类操作
+     * 必然触发整表重建，选中态跟着消失的话，用户移完一条就找不到刚
+     * 才那条了。
+     */
+    if (keep == CN_NO_SELECT) {
+        int cur = dlg_listbox_index(ssd->listbox, dlg);
+        if (cur >= 0)
+            keep = dlg_listbox_getid(ssd->listbox, dlg, cur);
+    }
 
     free_recent_conns(ssd->history, ssd->nhistory);
     ssd->history = get_recent_conns(&ssd->nhistory);
+    free_recent_folders(ssd->folders, ssd->nfolders);
+    ssd->folders = get_recent_folders(&ssd->nfolders);
+
+    /*
+     * 当前目录可能刚被删掉或改了名（右键菜单、别处手改注册表），这时
+     * 待在里头只会看见一个空列表。退回根层。
+     */
+    if (ssd->cur_folder[0] && cn_folder_index(ssd, ssd->cur_folder) < 0)
+        ssd->cur_folder[0] = '\0';
 
     dlg_update_start(ssd->listbox, dlg);
     dlg_listbox_clear(ssd->listbox, dlg);
-    for (i = 0; i < ssd->nhistory; i++) {
-        char *text = recent_entry_text(&ssd->history[i]);
-        dlg_listbox_addwithid(ssd->listbox, dlg, text, i);
+
+    if (ssd->cur_folder[0]) {
+        /*
+         * 目录内视图：「..」打头，下面只有本目录的会话。右列带上目录
+         * 名 —— 列表上方的标题是固定的，不给个名字用户不知道自己进
+         * 了哪一层。
+         */
+        text = dupprintf("..\t%s", ssd->cur_folder);
+        dlg_listbox_addwithid(ssd->listbox, dlg, text, CN_PARENT_ID);
+        if (keep == CN_PARENT_ID && sel_row < 0)
+            sel_row = row;
+        row++;
         sfree(text);
+
+        for (i = 0; i < ssd->nhistory; i++) {
+            if (!ssd->history[i].folder ||
+                strcmp(ssd->history[i].folder, ssd->cur_folder))
+                continue;
+            text = recent_entry_text(&ssd->history[i]);
+            dlg_listbox_addwithid(ssd->listbox, dlg, text, i);
+            if (i == keep && sel_row < 0)
+                sel_row = row;
+            row++;
+            sfree(text);
+        }
+    } else {
+        /* 根层视图：目录行在前，未归类会话在后。 */
+        for (f = 0; f < ssd->nfolders; f++) {
+            text = recent_folder_row_text(ssd, f);
+            dlg_listbox_addwithid(ssd->listbox, dlg, text, CN_FOLDER_ID(f));
+            if (CN_FOLDER_ID(f) == keep && sel_row < 0)
+                sel_row = row;
+            row++;
+            sfree(text);
+        }
+
+        /*
+         * 未归类的会话挂在最后。归属指向一个已不存在的目录时也落到这里
+         * —— 注册表被手改过、或旧版本留下的悬空归属，不能让条目彻底消失。
+         */
+        for (i = 0; i < ssd->nhistory; i++) {
+            if (cn_folder_index(ssd, ssd->history[i].folder) >= 0)
+                continue;
+            text = recent_entry_text(&ssd->history[i]);
+            dlg_listbox_addwithid(ssd->listbox, dlg, text, i);
+            if (i == keep && sel_row < 0)
+                sel_row = row;
+            row++;
+            sfree(text);
+        }
     }
+
     dlg_update_done(ssd->listbox, dlg);
+
+    if (sel_row >= 0)
+        dlg_listbox_select(ssd->listbox, dlg, sel_row);
+}
+
+/*
+ * cn: 给会话页那几个按钮挂属性标记，供 dialog.c 的定位函数按属性找。
+ *
+ * 用属性而不是按文字找：控件是 ANSI 创建的，GetWindowText 回来的是系统
+ * 代码页字节，与源码里的 UTF-8 字面量未必对得上，按文字匹配会静默失效。
+ */
+static void cn_tag_session_buttons(struct sessionsaver_data *ssd,
+                                   dlgparam *dlg)
+{
+    static const struct { int which; const char *prop; } tags[] = {
+        { 0, "cn_btn_newfolder" },
+        { 1, "cn_btn_delete" },
+        { 2, "cn_btn_init" },
+        { 3, "cn_btn_log" },
+        /*
+         * cn: 「连接 / 应用」按钮也打标记。自动化测试要能可靠地点到它
+         * ——它是 isdefault，按文本找又会撞上 ANSI 控件取文本的老问题。
+         */
+        { 4, "cn_btn_ok" },
+    };
+    HWND dlgwnd = (HWND)dlg_get_platform_window(dlg);
+    size_t k;
+
+    if (!dlgwnd)
+        return;
+    for (k = 0; k < lenof(tags); k++) {
+        dlgcontrol *ctrl = NULL;
+        HWND h;
+        int base;
+
+        switch (tags[k].which) {
+          case 0: ctrl = ssd->newfolderbutton; break;
+          case 1: ctrl = ssd->delbutton; break;
+          case 2: ctrl = ssd->initbutton; break;
+          case 3: ctrl = ssd->logbutton; break;
+          case 4: ctrl = ssd->okbutton; break;
+        }
+        if (!ctrl)
+            continue;
+        base = dlg_get_ctrl_base_id(dlg, ctrl);
+        if (base <= 0)
+            continue;
+        h = GetDlgItem(dlgwnd, base);
+        if (h)
+            SetProp(h, tags[k].prop, (HANDLE)1);
+    }
+}
+
+/*
+ * cn: 取历史列表控件本身的 HWND。
+ *
+ * 列表控件的窗口 ID 是 base_id + 1：base_id 那个位置是控件自带的
+ * STATIC 标题（见 controls.c 的 listbox()，它按 sid / lid 两个 ID 分别
+ * 建标题和列表）。用 base_id 去 GetDlgItem 拿到的是标题，不是列表。
+ */
+static HWND cn_list_hwnd(struct sessionsaver_data *ssd, dlgparam *dlg)
+{
+    HWND dlgwnd = (HWND)dlg_get_platform_window(dlg);
+    int base;
+
+    if (!dlgwnd || !ssd->listbox)
+        return NULL;
+    base = dlg_get_ctrl_base_id(dlg, ssd->listbox);
+    if (base <= 0)
+        return NULL;
+    return GetDlgItem(dlgwnd, base + 1);
+}
+
+/*
+ * cn: 按列表项 id 找行号（找不到返回 -1）。
+ *
+ * 目录行的 id 是 CN_FOLDER_ID(下标)、会话行的 id 是 history 下标，两者
+ * 都是「按 id 认行」而不是「按行号认行」—— 行号会随视图切换而变。
+ */
+static int cn_row_of_id(struct sessionsaver_data *ssd, dlgparam *dlg, int id)
+{
+    HWND lb = cn_list_hwnd(ssd, dlg);
+    int n, i;
+
+    if (!lb)
+        return -1;
+    n = (int)SendMessage(lb, LB_GETCOUNT, 0, 0);
+    for (i = 0; i < n; i++) {
+        if ((int)SendMessage(lb, LB_GETITEMDATA, i, 0) == id)
+            return i;
+    }
+    return -1;
+}
+
+/* 新建一个目录并立刻进入改名。取消则保留默认名（需求：不改就用默认名）。 */
+static void cn_new_folder(struct sessionsaver_data *ssd, dlgparam *dlg)
+{
+    char name[CN_FOLDER_NAME_MAX];
+    char edited[CN_FOLDER_NAME_MAX];
+    int n = 1, f, row;
+
+    /* 默认名「新目录」，重名就往上加序号。 */
+    for (;;) {
+        if (n == 1)
+            snprintf(name, sizeof(name), "新目录");
+        else
+            snprintf(name, sizeof(name), "新目录 %d", n);
+        if (cn_folder_index(ssd, name) < 0)
+            break;
+        if (++n > 999)
+            return;
+    }
+
+    if (!add_recent_folder(name)) {
+        dlg_error_msg(dlg, "目录数量已达上限（20 个），请先删除不用的目录。");
+        return;
+    }
+
+    /*
+     * 目录只做一级，新目录总是落在根层。正待在别的目录里时先退出去，
+     * 否则建完了却在列表上看不见它，只剩一个「按钮没反应」的观感。
+     */
+    ssd->cur_folder[0] = '\0';
+    refresh_history(ssd, dlg, CN_NO_SELECT);
+
+    /*
+     * 下标要等重建之后才算得准：refresh 之前 ssd->folders 还是旧列表，
+     * 里面根本没有刚建的这个目录。就地编辑框得落在它那一行上。
+     */
+    f = cn_folder_index(ssd, name);
+    row = (f >= 0) ? cn_row_of_id(ssd, dlg, CN_FOLDER_ID(f)) : -1;
+    if (row >= 0)
+        dlg_listbox_select(ssd->listbox, dlg, row);
+
+    snprintf(edited, sizeof(edited), "%s", name);
+    /*
+     * 就地改名：编辑框直接浮在刚建好的那一行上，改完回车即生效，ESC
+     * 保留默认名。清空名字再回车 = 不要这个目录。
+     */
+    if (cn_inline_edit(cn_list_hwnd(ssd, dlg), row,
+                       edited, sizeof(edited))) {
+        if (!edited[0])
+            del_recent_folder(name);      /* 清空名字 = 不要这个目录 */
+        else if (strcmp(edited, name))
+            rename_recent_folder(name, edited);
+        refresh_history(ssd, dlg, CN_NO_SELECT);
+    }
+}
+
+/*
+ * cn: 会话列表的右键菜单。
+ *
+ * listbox 的默认过程会把 WM_RBUTTONUP 转成发给父窗的 WM_CONTEXTMENU，
+ * 父窗（配置框）不认这条消息，转过去只会多一声系统蜂鸣；所以在这里
+ * 自己弹菜单并把消息吃掉。
+ *
+ * 目录只做一级，所以「移入」的子菜单里不会出现目录下的目录；删除目录
+ * 只清会话的归属、不删会话本身，因此不弹二次确认。
+ */
+static void cn_show_list_menu(struct sessionsaver_data *ssd, dlgparam *dlg,
+                              HWND hwnd, int sx, int sy, int row)
+{
+    int id, fidx, cmd;
+
+    if (row < 0)
+        return;                     /* 空白处右键：没有作用对象 */
+
+    id = (int)SendMessage(hwnd, LB_GETITEMDATA, row, 0);
+
+    if (CN_IS_FOLDER_ID(id)) {
+        fidx = CN_FOLDER_OF_ID(id);
+        if (fidx < 0 || fidx >= ssd->nfolders)
+            return;
+        cmd = cn_session_list_menu(hwnd, sx, sy, true, false, NULL, 0);
+        if (cmd == CN_SESS_MENU_OPEN) {
+            snprintf(ssd->cur_folder, sizeof(ssd->cur_folder), "%s",
+                     ssd->folders[fidx]);
+            refresh_history(ssd, dlg, CN_PARENT_ID);
+        } else if (cmd == CN_SESS_MENU_RENAME) {
+            char name[CN_FOLDER_NAME_MAX];
+            snprintf(name, sizeof(name), "%s", ssd->folders[fidx]);
+            if (cn_inline_edit(cn_list_hwnd(ssd, dlg), row,
+                               name, sizeof(name))) {
+                if (!name[0]) {
+                    del_recent_folder(ssd->folders[fidx]);
+                } else if (strcmp(name, ssd->folders[fidx]) &&
+                           rename_recent_folder(ssd->folders[fidx], name)) {
+                    /*
+                     * 正待在这个目录里改名时，cur_folder 里存的还是旧名，
+                     * 重建会把它当成「目录已不存在」踢回根层。同步跟上。
+                     */
+                    if (!strcmp(ssd->cur_folder, ssd->folders[fidx]))
+                        snprintf(ssd->cur_folder,
+                                 sizeof(ssd->cur_folder), "%s", name);
+                }
+            }
+            refresh_history(ssd, dlg, CN_NO_SELECT);
+        } else if (cmd == CN_SESS_MENU_DELETE) {
+            del_recent_folder(ssd->folders[fidx]);
+            refresh_history(ssd, dlg, CN_NO_SELECT);
+        }
+        return;
+    }
+
+    if (id < 0 || id >= ssd->nhistory)
+        return;
+
+    cmd = cn_session_list_menu(hwnd, sx, sy, false,
+                               ssd->history[id].folder &&
+                               ssd->history[id].folder[0],
+                               ssd->folders, ssd->nfolders);
+    if (cmd == CN_SESS_MENU_RENAME) {
+        /*
+         * 改的只是显示名：host / port / username 一个都不动，双击回填
+         * 和真正连过去的地址保持原样。留空即恢复显示真实主机名。
+         */
+        char name[CN_FOLDER_NAME_MAX];
+        const char *cur = ssd->history[id].label;
+        snprintf(name, sizeof(name), "%s",
+                 (cur && cur[0]) ? cur : ssd->history[id].host);
+        if (cn_inline_edit(cn_list_hwnd(ssd, dlg), row,
+                           name, sizeof(name))) {
+            /* 含分列符的名字会把列表画乱，宁可整条忽略。 */
+            if (!strpbrk(name, "\t\r\n"))
+                set_recent_conn_label(ssd->history[id].host,
+                                      ssd->history[id].port,
+                                      ssd->history[id].username, name);
+        }
+        refresh_history(ssd, dlg, id);
+    } else if (cmd == CN_SESS_MENU_MOVE_OUT) {
+        set_recent_conn_folder(ssd->history[id].host,
+                               ssd->history[id].port,
+                               ssd->history[id].username, "");
+        refresh_history(ssd, dlg, id);
+    } else if (cmd >= CN_SESS_MENU_MOVE_BASE &&
+               cmd - CN_SESS_MENU_MOVE_BASE < ssd->nfolders) {
+        int f = cmd - CN_SESS_MENU_MOVE_BASE;
+        set_recent_conn_folder(ssd->history[id].host,
+                               ssd->history[id].port,
+                               ssd->history[id].username,
+                               ssd->folders[f]);
+        /*
+         * 移进去之后这条会话就离开当前视图了：根层不显示归类过的，
+         * 目录内不显示别的目录的。选中落到目标目录行上，顺手让用户
+         * 看见它的条目数涨了一个，否则会以为移丢了。
+         */
+        refresh_history(ssd, dlg,
+                        ssd->cur_folder[0] ? CN_NO_SELECT : CN_FOLDER_ID(f));
+    }
+}
+
+static LRESULT CALLBACK cn_list_wndproc(HWND hwnd, UINT msg,
+                                        WPARAM wparam, LPARAM lparam)
+{
+    struct sessionsaver_data *ssd =
+        (struct sessionsaver_data *)GetProp(hwnd, "cn_ssd");
+    dlgparam *dlg = (dlgparam *)GetProp(hwnd, "cn_dlg");
+    WNDPROC oldproc = (WNDPROC)GetProp(hwnd, "cn_oldproc");
+
+    if (ssd && dlg && msg == WM_RBUTTONUP) {
+        POINT pt, cp;
+        LRESULT hit;
+        int row;
+
+        GetCursorPos(&pt);
+        cp = pt;
+        ScreenToClient(hwnd, &cp);
+        hit = SendMessage(hwnd, LB_ITEMFROMPOINT, 0,
+                          MAKELPARAM(cp.x, cp.y));
+        row = HIWORD(hit) ? -1 : (int)LOWORD(hit);
+        if (row >= 0) {
+            /* 右键点到哪一行就作用于哪一行，先把它选上。 */
+            SendMessage(hwnd, LB_SETCURSEL, row, 0);
+            cn_show_list_menu(ssd, dlg, hwnd, pt.x, pt.y, row);
+            return 0;
+        }
+    }
+
+    /*
+     * cn: 双击目录行 = 进入目录，双击「..」行 = 退回根层。
+     *
+     * 这条消息必须自己接住：listbox 的默认过程会把它变成 LBN_DBLCLK
+     * 通知发给父窗，而配置框不认这条通知，双击就只剩「选了两次」的
+     * 效果 —— 看起来就是怎么点都进不去目录。会话行不拦，双击仍然
+     * 落回默认的选中/回填行为。
+     */
+    if (ssd && dlg && msg == WM_LBUTTONDBLCLK) {
+        POINT cp;
+        LRESULT hit;
+        int row, id, f;
+
+        cp.x = (short)LOWORD(lparam);
+        cp.y = (short)HIWORD(lparam);
+        hit = SendMessage(hwnd, LB_ITEMFROMPOINT, 0,
+                          MAKELPARAM(cp.x, cp.y));
+        row = HIWORD(hit) ? -1 : (int)LOWORD(hit);
+        if (row >= 0) {
+            id = (int)SendMessage(hwnd, LB_GETITEMDATA, row, 0);
+            if (CN_IS_FOLDER_ID(id)) {
+                f = CN_FOLDER_OF_ID(id);
+                if (f >= 0 && f < ssd->nfolders) {
+                    snprintf(ssd->cur_folder, sizeof(ssd->cur_folder),
+                             "%s", ssd->folders[f]);
+                    /*
+                     * 进去之后选中「..」那一行：别顺手把目录里第一条
+                     * 会话选上，否则上方的回填框会莫名多出一个主机名。
+                     */
+                    refresh_history(ssd, dlg, CN_PARENT_ID);
+                    return 0;
+                }
+            } else if (id == CN_PARENT_ID) {
+                /* 退回根层，并把刚离开的那个目录选上，一眼看得出从哪回来。 */
+                char back[CN_FOLDER_NAME_MAX];
+                snprintf(back, sizeof(back), "%s", ssd->cur_folder);
+                ssd->cur_folder[0] = '\0';
+                f = cn_folder_index(ssd, back);
+                refresh_history(ssd, dlg,
+                                f >= 0 ? CN_FOLDER_ID(f) : CN_NO_SELECT);
+                return 0;
+            }
+        }
+    }
+
+    if (oldproc)
+        return CallWindowProc(oldproc, hwnd, msg, wparam, lparam);
+    return DefWindowProcW(hwnd, msg, wparam, lparam);
+}
+
+/* 把右键子类挂到历史列表上（幂等，重复调用不会叠罗汉）。 */
+static void cn_hook_list_menu(struct sessionsaver_data *ssd, dlgparam *dlg)
+{
+    HWND dlgwnd = (HWND)dlg_get_platform_window(dlg);
+    int base;
+    HWND hwnd;
+    LONG_PTR old;
+
+    if (!dlgwnd || !ssd->listbox)
+        return;
+    base = dlg_get_ctrl_base_id(dlg, ssd->listbox);
+    if (base <= 0)
+        return;
+    /*
+     * 列表控件的窗口 ID 是 base_id + 1：base_id 那个位置是控件自带
+     * 的 STATIC 标题（见 controls.c 的 listbox()，它按 sid / lid 两个
+     * ID 分别建标题和列表）。用 base_id 去 GetDlgItem 拿到的是标题，
+     * 拿不到列表本身。
+     */
+    hwnd = GetDlgItem(dlgwnd, base + 1);
+    if (!hwnd || GetProp(hwnd, "cn_ssd"))
+        return;                     /* 没控件，或已经挂过 */
+
+    /*
+     * ssd 与 dlg 存属性而不是 GWLP_USERDATA：listbox 会被 comctl32 内部
+     * 用过 GWLP_USERDATA，写进去可能被覆盖。属性名归我们自己，不会撞。
+     */
+    SetProp(hwnd, "cn_ssd", (HANDLE)ssd);
+    SetProp(hwnd, "cn_dlg", (HANDLE)dlg);
+    old = SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)cn_list_wndproc);
+    SetProp(hwnd, "cn_oldproc", (HANDLE)old);
 }
 
 /*
@@ -1939,12 +2487,18 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
 
     if (event == EVENT_REFRESH) {
         if (ctrl == ssd->listbox)
-            refresh_history(ssd, dlg);
+            refresh_history(ssd, dlg, CN_NO_SELECT);
         /*
          * 按钮外观 / 显隐依赖协议与主机端口，任何一次面板刷新都重算
          * 一遍（切页回来时控件是新建的，状态必须重新施加）。
          */
         refresh_session_buttons(ssd, dlg, conf);
+        /*
+         * cn: 切页会销毁重建面板控件，所以按钮标记与列表右键子类也在
+         * 这里补一次（两个函数都是幂等的，重复调用无副作用）。
+         */
+        cn_tag_session_buttons(ssd, dlg);
+        cn_hook_list_menu(ssd, dlg);
     } else if (event == EVENT_SELCHANGE) {
         if (ctrl == ssd->listbox)
             select_history_entry(ssd, dlg, conf);
@@ -2066,10 +2620,12 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                     return;
                 }
             }
-            if (conf_launchable(conf))
+            if (conf_launchable(conf)) {
                 add_recent_conn(conf_get_str(conf, CONF_host),
                                 conf_get_int(conf, CONF_port),
                                 conf_get_str_ambi(conf, CONF_username, NULL));
+                cn_adopt_current_folder(ssd, conf);
+            }
             /*
              * 就地打开传输窗口：配置框保持显示，加载动画转完（传输窗口
              * 就绪）才结束对话框。
@@ -2117,6 +2673,9 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                 }
             }
         } else if (!ssd->midsession &&
+                   ssd->newfolderbutton && ctrl == ssd->newfolderbutton) {
+            cn_new_folder(ssd, dlg);
+        } else if (!ssd->midsession &&
                    ssd->delbutton && ctrl == ssd->delbutton) {
             int i = dlg_listbox_index(ssd->listbox, dlg);
             if (i < 0) {
@@ -2127,7 +2686,20 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                     del_recent_conn(ssd->history[id].host,
                                     ssd->history[id].port,
                                     ssd->history[id].username);
-                    refresh_history(ssd, dlg);
+                    refresh_history(ssd, dlg, CN_NO_SELECT);
+                } else if (CN_IS_FOLDER_ID(id)) {
+                    /*
+                     * 选中目录行时「删除」删的是目录本身，会话只退回
+                     * 未归类、不跟着消失。
+                     */
+                    int f = CN_FOLDER_OF_ID(id);
+                    if (f >= 0 && f < ssd->nfolders) {
+                        del_recent_folder(ssd->folders[f]);
+                        refresh_history(ssd, dlg, CN_NO_SELECT);
+                    }
+                } else {
+                    /* 「..」返回行不是可删的对象。 */
+                    dlg_beep(dlg);
                 }
             }
         } else if (!ssd->midsession && ctrl == ssd->cancelbutton) {
@@ -2256,10 +2828,12 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                  * the neighbouring box is a baud rate rather than a
                  * port number.
                  */
-                if (conf_get_int(conf, CONF_protocol) != PROT_SERIAL)
+                if (conf_get_int(conf, CONF_protocol) != PROT_SERIAL) {
                     add_recent_conn(conf_get_str(conf, CONF_host),
                                     conf_get_int(conf, CONF_port),
                                     conf_get_str_ambi(conf, CONF_username, NULL));
+                    cn_adopt_current_folder(ssd, conf);
+                }
                 dlg_end(dlg, 1);
             } else
                 dlg_info_msg(dlg, "请先输入主机名称（或 IP 地址），"
@@ -3227,6 +3801,15 @@ void setup_config_box(struct controlbox *b, bool midsession,
     ssd->listbox->listbox.hostportcols = true;
     /* "Save" button lives in the standard panel at the bottom. */
     if (!midsession) {
+        /*
+         * cn: 「新目录」—— 在历史列表里插一个文件夹条目，用来给会话按
+         * IP 归类。位置在「删除」正上方（由 cn_style_snapshot_buttons
+         * 钉），点一下就新建并直接进入改名待改状态。
+         */
+        ssd->newfolderbutton = ctrl_pushbutton(s, "新目录", NO_SHORTCUT,
+                                               HELPCTX(no_help),
+                                               sessionsaver_handler, P(ssd));
+        ssd->newfolderbutton->column = 1;
         ssd->delbutton = ctrl_pushbutton(s, "删除(D)", 'd',
                                          HELPCTX(session_saved),
                                          sessionsaver_handler, P(ssd));
@@ -3258,6 +3841,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
         ssd->logbutton->column = 1;
     } else {
         /* Disable the Delete button mid-session too, for UI consistency. */
+        ssd->newfolderbutton = NULL;
         ssd->delbutton = NULL;
         ssd->logbutton = NULL;
     }
