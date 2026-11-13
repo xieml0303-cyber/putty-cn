@@ -1,4 +1,4 @@
-# PuTTY 0.85-cn6 中文版（Windows 64 位）
+# PuTTY 0.85-cn8 中文版（Windows 64 位）
 
 基于 [larryli/PuTTY](https://github.com/larryli/PuTTY)（原 Google Code `puttycn` 项目）的中文翻译源码，使用 MSYS2 + MinGW-w64 + CMake 在本地编译生成 `putty.exe`。
 
@@ -31,7 +31,7 @@
 | `storage.h`、`dialog.h`、`windows/platform.h` | 新增串口枚举、信息弹窗、只读编辑框等接口声明 |
 | `unix/storage.c`、`unix/dialog.c` | 对应接口的非 Windows 实现 |
 | `conf.h`、`be_list.c` | 默认连接方式 SSH（主机名留空、端口 22），「保存」不携带连接目标；串口参数按华为、华三网络设备 Console 口的标准预置（9600、8 数据位、1 停止位、无校验、无流控）；串口线默认留空，由界面按本机端口自动匹配 |
-| `version.h`、`LATEST.VER` | 版本号递增为 0.85-cn6（`TEXTVER`、`SSHVER`、`BINARY_VERSION` 同步） |
+| `version.h`、`LATEST.VER` | 版本号递增为 0.85-cn8（`TEXTVER`、`SSHVER`、`BINARY_VERSION` 同步） |
 | `windows/sftpwin.c` | 文件传输窗口整体改造：远端面板移至左侧、列头居中与内容右对齐（header 子类自绘）、列宽按内容实测、文件操作迁入右键菜单、传输按钮随选中启用、目录递归传输、拖放上传、同名覆盖三按钮提示、危险按钮悬停高光 |
 | `windows/cn-toast.c`、`windows/cn-toast.h` | 抽取的公共 Toast 轻提示模块（分层窗口 + 自绘圆角 + 滑入/停留/淡出），供会话窗口与文件传输窗口共用 |
 | `windows/window.c`、`windows/win-gui-seat.h` | 「会话」菜单新增「重启会话」（离线可点，用于重连）；新增顶级「日志」菜单，含「开始记录日志」「停止记录日志」，操作后弹 Toast 反馈 |
@@ -43,10 +43,15 @@
 | `windows/putty.c`、`windows/window.c`、`windows/console.c`、`windows/dialog.c`、`windows/network.c`、`windows/pageant.c`、`ssh/common.c`、`ssh/ca-config.c` | 界面与协议提示的翻译修正：术语统一、标点规范、语义反转与错别字修复 |
 | `windows/dialog.c` | 修复串口模式「端口号／波特率」下拉框初始不显示箭头：新增 `cn_hostbox_sync_arrow()`，拦截 `CB_ADDSTRING`／`CB_DELETESTRING`／`CB_RESETCONTENT`，列表由空变非空时主动重绘按钮区（原先箭头被背景色盖掉后无还原路径） |
 | `cmake/platforms/windows.cmake` | 链接 `comctl32`，供组合框与列表控件使用 |
+| 全局（24 个文件） | 内部字符串统一按 UTF-8 处理，所有 Windows ANSI 接口改为宽字符接口（`CreateWindowExW`、`SetDlgItemTextW`、`Reg*W`、`FindFirstFileW`、`CreateProcessW`、`GetUserNameExW`、`ShellExecuteW` 等），在 A/W 边界显式做 UTF-8 ⇄ UTF-16 转换。同时移除 `putty.mft` 等四个 manifest 里的 `activeCodePage` 声明 —— 该声明只在 Windows 10 1903 及以上生效，在旧系统上被忽略，导致进程代码页仍为 936、界面中文按 GBK 误读而乱码。改动后中文显示不再依赖系统区域设置与 manifest |
+| `windows/cn-crash-trace.c` | 崩溃取证日志改为**仅在真正发生未处理异常时**创建（原实现每次启动都覆写 exe 同目录下的 `cn-trace.log`，卸载后会在安装目录残留一个 57 字节的空日志） |
+| `cmdline.c`、`config.c`、`telnet.c` | Telnet 自动登录：Telnet 后端嗅探 `login:`、`Password:`、`用户名：` 等提示并用会话里的凭据自动应答（用户名与密码各只应答一次，避免密码错误时反复重试导致锁号）；`-pw`、`-pwfile` 的适用范围从仅 SSH 放开到 SSH 与 Telnet |
+| `storage.h`、`windows/storage.c`、`unix/storage.c` | 历史连接记录新增密码字段（`RecentHosts` 下的 `N.password`），经 Windows DPAPI 加密后以 `dpapi1:` + Base64 形式存储，**不会明文落盘**；换用户或换机器导致解不开时按无密码处理，需在配置框重填 |
+| `config.c`、`dialog.h`、`windows/controls.c`、`unix/dialog.c` | 密码框右侧新增「显/隐」切换按钮（`dlg_editbox_set_plain()`），切明文时保存原掩码字符、恢复时原样塞回，不重建控件、不丢文本与光标 |
 
 ## 安装包（推荐）
 
-从 [Releases](https://github.com/xieml0303-cyber/putty-cn/releases/latest) 下载 `putty-cn-0.85-cn6-setup.exe`，双击运行、按中文向导安装即可：
+从 [Releases](https://github.com/xieml0303-cyber/putty-cn/releases/latest) 下载 `putty-cn-0.85-cn8-setup.exe`，双击运行、按中文向导安装即可：
 
 - 装到当前用户目录 `%LOCALAPPDATA%\Programs\PuTTY-cn`，不需要管理员权限；
 - 自动创建开始菜单项与桌面快捷方式，安装完可直接启动；
@@ -58,14 +63,14 @@
 
 ## 免安装版
 
-`putty.exe` 为 0.85-cn6 构建、64 位、免安装。安装包仅含该程序；如需单文件版本，可按
+`putty.exe` 为 0.85-cn8 构建、64 位、免安装。安装包仅含该程序；如需单文件版本，可按
 [构建说明](#自行构建)自行编译，或用解压工具从安装包中取出。
 
-下表为 0.85-cn6 构建产物的基准值，可用于核对自行构建或从安装包提取的文件：
+下表为 0.85-cn8 构建产物的基准值，可用于核对自行构建或从安装包提取的文件：
 
 | 文件 | 用途 | 大小（字节） | SHA256 |
 |------|------|-------------|--------|
-| `putty.exe` | 图形界面终端（SSH / Telnet / 串口 / SFTP 双栏） | 3,018,147 | `f3a4dcc6a478ddc5750809271d0c3f90544f1b3d6bb2ce8549c352a9c99e948e` |
+| `putty.exe` | 图形界面终端（SSH / Telnet / 串口 / SFTP 双栏） | 3,026,561 | `8f7b6fcec96797f15933f20407adc659cff7464ac5b3d64a3c9710fdc9d2fa0e` |
 
 - 仅依赖系统 DLL（ADVAPI32、COMCTL32、GDI32、IMM32、KERNEL32、SHELL32、USER32、comdlg32、msvcrt、ole32），无需 MinGW 运行库。
 - `putty.exe` 启动后窗口标题为「PuTTY 配置」（英文版为 "PuTTY Configuration"）。

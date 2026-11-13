@@ -712,6 +712,29 @@ static void config_user_handler(dlgcontrol *ctrl, dlgparam *dlg,
  */
 static bool cn_passbox_refilling;
 
+/*
+ * cn: 用户是否主动把密码框清空过。
+ *
+ * cmdline 槽位只有「有密码」和「没有」两种状态，分不出「用户清空了」
+ * 和「本次没填」。而写历史时这两者必须区别对待：前者要真把记录里的
+ * 密码删掉，后者得保留原值，否则用户从命令行启动一次 PuTTY，所有
+ * 会话记着的密码就全没了。
+ */
+static bool cn_password_cleared_by_user;
+
+/*
+ * cn: 写历史时该给这条会话配什么密码。
+ *
+ * NULL 表示「不知道，保留原值」；空串表示「用户清空了，删掉记录」。
+ */
+static const char *cn_password_for_history(void)
+{
+    const char *pw = cmdline_get_password();
+    if (!pw && cn_password_cleared_by_user)
+        return "";
+    return pw;
+}
+
 static void config_pass_handler(dlgcontrol *ctrl, dlgparam *dlg,
                                 void *data, int event)
 {
@@ -728,6 +751,7 @@ static void config_pass_handler(dlgcontrol *ctrl, dlgparam *dlg,
             return;             /* 程序回填引起的，不是用户编辑 */
         char *s = dlg_editbox_get(ctrl, dlg);
         cmdline_set_password(s);
+        cn_password_cleared_by_user = !s[0];
         smemclr(s, strlen(s));
         sfree(s);
         cn_session_buttons_changed(dlg, (Conf *)data);
@@ -1511,6 +1535,13 @@ struct sessionsaver_data {
     dlgcontrol *initbutton;     /* cn: 恢复到设置初始化快照 */
     dlgcontrol *logbutton;      /* cn: 本次连接记录会话日志（复选框） */
     dlgcontrol *loadkeybutton;  /* cn: 凭据框右侧的「载入密钥」 */
+    dlgcontrol *eyebutton;      /* cn: 凭据框右侧的明文切换「小眼睛」 */
+    /*
+     * cn: 密码框当前是否明文显示。切页会销毁重建面板控件，重建出来的
+     * 密码框又退回 ES_PASSWORD 的掩码态，所以状态得存在这里，每次面板
+     * 刷新再照它施加一遍。
+     */
+    bool pass_plain;
     dlgcontrol *xferbutton;     /* cn: 「连接」左侧的「文件传输」 */
     dlgcontrol *okbutton, *cancelbutton;
     /*
@@ -1685,12 +1716,30 @@ static void set_button_muted(dlgparam *dlg, dlgcontrol *ctrl, bool muted)
 }
 
 /*
- * cn: 按当前 Conf 刷新会话页两个按钮的外观与显隐。
+ * cn: 把「明文显示」状态施加到密码框与那颗小眼睛上。
+ *
+ * 按钮上的字说的是「点它会怎样」，不是「现在是什么」：掩码态显示
+ * 「显」（点我看明文），明文态显示「隐」（点我盖回去）。
+ */
+static void cn_apply_pass_plain(struct sessionsaver_data *ssd,
+                                dlgparam *dlg)
+{
+    if (ssd->passbox)
+        dlg_editbox_set_plain(dlg, ssd->passbox, ssd->pass_plain);
+    if (ssd->eyebutton)
+        dlg_label_change(ssd->eyebutton, dlg,
+                         ssd->pass_plain ? "隐" : "显");
+}
+
+/*
+ * cn: 按当前 Conf 刷新会话页三个按钮的外观与显隐。
  *
  *   「载入密钥」——仅在 SSH 协议下显示；主机名与端口填齐才显示为可用。
  *   「连接」    ——SSH/Telnet 要求主机名与端口填齐；串口只要选了串口。
  *
- * 两个按钮都在不可用状态下保持可点，点下去弹 CN_INPUT_INCOMPLETE_MSG。
+ * 另有「显 / 隐」明文切换按钮，任何协议下都显示，永远可点。
+ *
+ * 三个按钮都在不可用状态下保持可点，点下去弹 CN_INPUT_INCOMPLETE_MSG。
  */
 static void refresh_session_buttons(struct sessionsaver_data *ssd,
                                     dlgparam *dlg, Conf *conf)
@@ -1753,28 +1802,54 @@ static void refresh_session_buttons(struct sessionsaver_data *ssd,
     if (ssd->passbox && ssd->portbox) {
         int pw = dlg_get_ctrl_width(dlg, ssd->passbox);
         int pl = dlg_get_ctrl_left(dlg, ssd->passbox);
-        int pr = dlg_get_ctrl_left(dlg, ssd->portbox);
-        int pwid = dlg_get_ctrl_width(dlg, ssd->portbox);
-        {
-            if (ssd->passbox_base_width <= 0 && pw > 0 && pl >= 0) {
-                ssd->passbox_base_width = pw;
-                ssd->passbox_left = pl;
-                if (pr >= 0 && pwid > 0)
-                    ssd->passbox_max_right = pr + pwid;
-            }
+        int limit = -1;
 
-            {
-                int width = ssd->passbox_base_width;
-                if (!ssh && ssd->passbox_max_right > ssd->passbox_left) {
-                    int wide = ssd->passbox_max_right - ssd->passbox_left;
-                    if (wide > width)
-                        width = wide;
-                }
-                if (width > 0)
-                    dlg_set_ctrl_width(dlg, ssd->passbox, width);
+        /*
+         * cn: 密码框最多能长到哪。
+         *
+         * 右邻先是「小眼睛」（始终显示），再往右才是「密钥」（仅 SSH）。
+         * 所以硬边界是眼睛按钮的左沿，留 4px 呼吸 —— 越过它按钮就被
+         * 盖住了。拿不到眼睛位置时才退回端口框右端：它和主机名框是同
+         * 一组的两列，合起来占满整行，右端就是本页输入区的自然右界。
+         */
+        if (ssd->eyebutton) {
+            int el = dlg_get_ctrl_left(dlg, ssd->eyebutton);
+            if (el > 0)
+                limit = el - 4;
+        }
+        if (limit <= 0) {
+            int pr = dlg_get_ctrl_left(dlg, ssd->portbox);
+            int pwid = dlg_get_ctrl_width(dlg, ssd->portbox);
+            if (pr >= 0 && pwid > 0)
+                limit = pr + pwid;
+        }
+
+        if (ssd->passbox_base_width <= 0 && pw > 0 && pl >= 0) {
+            ssd->passbox_base_width = pw;
+            ssd->passbox_left = pl;
+            ssd->passbox_max_right = limit;
+        }
+
+        {
+            int width = ssd->passbox_base_width;
+            if (!ssh && ssd->passbox_max_right > ssd->passbox_left) {
+                int wide = ssd->passbox_max_right - ssd->passbox_left;
+                if (wide > width)
+                    width = wide;
             }
+            if (width > 0)
+                dlg_set_ctrl_width(dlg, ssd->passbox, width);
         }
     }
+
+    /*
+     * cn: 明文显示状态跟着刷新走。切页回来密码框是新建的，又回到掩码
+     * 态，用户明明开着明文却被悄悄盖回去，这里照 pass_plain 重施加。
+     * 存活检查的理由同上面的「记录日志」复选框：切到别的页之后本页
+     * 控件已销毁，直接拿指针去 dlg_findbyctrl 会命中 assert。
+     */
+    if (ssd->eyebutton && dlg_get_ctrl_base_id(dlg, ssd->eyebutton) >= 0)
+        cn_apply_pass_plain(ssd, dlg);
 
     set_button_muted(dlg, ssd->okbutton, !filled);
 
@@ -2291,7 +2366,7 @@ static LRESULT CALLBACK cn_list_wndproc(HWND hwnd, UINT msg,
     }
 
     if (oldproc)
-        return CallWindowProc(oldproc, hwnd, msg, wparam, lparam);
+        return CallWindowProcW(oldproc, hwnd, msg, wparam, lparam);
     return DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
@@ -2324,7 +2399,13 @@ static void cn_hook_list_menu(struct sessionsaver_data *ssd, dlgparam *dlg)
      */
     SetProp(hwnd, "cn_ssd", (HANDLE)ssd);
     SetProp(hwnd, "cn_dlg", (HANDLE)dlg);
-    old = SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)cn_list_wndproc);
+    /*
+     * 必须用 W 版：SetWindowLongPtrA 设置 GWLP_WNDPROC 时会把窗口的
+     * Unicode 标志清掉，控件随即按 ANSI 解释字符串，列表行首的「▸」
+     * 这类 GBK 里没有的字符就会被降级成「?」。配套的
+     * CallWindowProcW 同理，A 版会在转交前把字符串消息降级。
+     */
+    old = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)cn_list_wndproc);
     SetProp(hwnd, "cn_oldproc", (HANDLE)old);
 }
 
@@ -2366,6 +2447,23 @@ static void select_history_entry(struct sessionsaver_data *ssd,
                 dlg_editbox_set(ssd->userbox, dlg, rc->username);
                 conf_set_str(conf, CONF_username, rc->username);
             }
+            /*
+             * cn: 密码回填。条目里没记密码就清空 —— 绝不能沿用上一条
+             * 会话留在 cmdline 槽位里的口令，那是拿别人的钥匙开锁。
+             * 回填本身会触发 EN_CHANGE，用 refilling 标记挡掉，改由这
+             * 里直接写槽位，保证「框里显示的」和「SSH/Telnet 会用的」
+             * 是同一个值。
+             */
+            cn_passbox_refilling = true;
+            if (ssd->passbox)
+                dlg_editbox_set(ssd->passbox, dlg,
+                                rc->password ? rc->password : "");
+            cn_passbox_refilling = false;
+            cmdline_set_password(rc->password && rc->password[0]
+                                 ? rc->password : NULL);
+            /* 这是程序回填，不是用户清空，别把记录里的密码当垃圾删了。 */
+            cn_password_cleared_by_user = false;
+            cn_session_buttons_changed(dlg, conf);
         }
     }
 }
@@ -2556,6 +2654,13 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
             }
             sfree(changes);
             conf_free(snap);
+        } else if (ssd->eyebutton && ctrl == ssd->eyebutton) {
+            /*
+             * cn: 明文 / 掩码切换。密码本身一个字都不动，只换显示方式，
+             * 所以不会触发 EN_CHANGE，也就不会污染 cmdline 槽位。
+             */
+            ssd->pass_plain = !ssd->pass_plain;
+            cn_apply_pass_plain(ssd, dlg);
         } else if (!ssd->midsession &&
                    ssd->loadkeybutton && ctrl == ssd->loadkeybutton) {
             /*
@@ -2627,7 +2732,8 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
             if (conf_launchable(conf)) {
                 add_recent_conn(conf_get_str(conf, CONF_host),
                                 conf_get_int(conf, CONF_port),
-                                conf_get_str_ambi(conf, CONF_username, NULL));
+                                conf_get_str_ambi(conf, CONF_username, NULL),
+                                cn_password_for_history());
                 cn_adopt_current_folder(ssd, conf);
             }
             /*
@@ -2835,7 +2941,8 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                 if (conf_get_int(conf, CONF_protocol) != PROT_SERIAL) {
                     add_recent_conn(conf_get_str(conf, CONF_host),
                                     conf_get_int(conf, CONF_port),
-                                    conf_get_str_ambi(conf, CONF_username, NULL));
+                                    conf_get_str_ambi(conf, CONF_username, NULL),
+                                    cn_password_for_history());
                     cn_adopt_current_folder(ssd, conf);
                 }
                 dlg_end(dlg, 1);
@@ -3694,13 +3801,19 @@ void setup_config_box(struct controlbox *b, bool midsession,
          */
         ctrl_columns(s, 1, 100);
         /*
-         * 列宽按 50/35/15。第三列给「载入密钥」，15% 换算下来约 36px。
-         * 注意：四个中文字在默认 GUI 字体下实测要 48px，加内边距至少
-         * 58px，这一列装不下完整文案。此处保持约定的 50/35/15，按钮
-         * 文字的实际显示由 dlg 层决定（见 cn_style_snapshot_buttons 里
-         * 对该按钮的放行说明）。
+         * cn: 列宽 42/35/9/14。
+         *
+         * 第三列（9%）给「小眼睛」，第四列（14%）给「载入密钥」。
+         *
+         * 密码那一列必须守住 35%：标签「凭据（密码）：」七个字符在默认
+         * GUI 字体下实测约 84px，而 35% 换算下来约 88px，刚好放得下 ——
+         * 再窄就截成「凭据（密…」。所以能压缩的只有用户名列，从 50%
+         * 让到 42%（它的标签只有四个字，宽裕得很）。
+         *
+         * 「密钥」两字约 24px，14% 约 35px 够用；眼睛是单字，9% 约
+         * 22px 也够。
          */
-        ctrl_columns(s, 3, 50, 35, 15);
+        ctrl_columns(s, 4, 42, 35, 9, 14);
         c = ctrl_text(s, "用户名：", HELPCTX(session_hostname));
         c->column = 0;
         c = ctrl_text(s, "凭据（密码）：", HELPCTX(session_hostname));
@@ -3730,10 +3843,23 @@ void setup_config_box(struct controlbox *b, bool midsession,
          * 只有 36px，而四个中文字在默认 GUI 字体下实测要 48px 以上，
          * 会被截成「载入密…」。三字 36px 正好放得下。
          */
+        /*
+         * cn: 「小眼睛」—— 点一下把密码框从圆点换成明文，再点一下盖回去。
+         *
+         * 文案用单字：这一列只有 9%，两个字放不下。掩码态写「显」、明文
+         * 态写「隐」，说的都是「点下去会怎样」。高度跟输入框对齐，同下
+         * 面「密钥」按钮。
+         */
+        ssd->eyebutton = ctrl_pushbutton(s, "显", NO_SHORTCUT,
+                                         HELPCTX(session_hostname),
+                                         sessionsaver_handler, P(ssd));
+        ssd->eyebutton->column = 2;
+        ssd->eyebutton->button.cn_editheight = true;
+
         ssd->loadkeybutton = ctrl_pushbutton(s, "密钥", NO_SHORTCUT,
                                              HELPCTX(ssh_auth_privkey),
                                              sessionsaver_handler, P(ssd));
-        ssd->loadkeybutton->column = 2;
+        ssd->loadkeybutton->column = 3;
         /*
          * cn: 按钮默认按 PUSHBTNHEIGHT（14 个对话框单位）画，比同排的
          * 输入框 EDITHEIGHT（12）高出 2 个单位 —— 当前 DPI 下就是 6px，

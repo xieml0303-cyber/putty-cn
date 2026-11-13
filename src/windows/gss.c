@@ -144,16 +144,18 @@ struct ssh_gss_liblist *ssh_gss_setup(Conf *conf)
             if (p_AddDllDirectory) {
                 /* Add MIT Kerberos' path to the DLL search path,
                  * it loads its own DLLs further down the road */
-                wchar_t *dllPath = dup_mb_to_wc(DEFAULT_CODEPAGE, bindir);
+                wchar_t *dllPath = dup_mb_to_wc(CP_UTF8, bindir);
                 p_AddDllDirectory(dllPath);
                 sfree(dllPath);
             }
 
             char *dllfile = dupcat(bindir, "\\gssapi"MIT_KERB_SUFFIX".dll");
-            module = LoadLibraryEx(dllfile, NULL,
-                                   LOAD_LIBRARY_SEARCH_SYSTEM32 |
-                                   LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
-                                   LOAD_LIBRARY_SEARCH_USER_DIRS);
+            wchar_t *wdllfile = dup_mb_to_wc(CP_UTF8, dllfile);
+            module = LoadLibraryExW(wdllfile, NULL,
+                                    LOAD_LIBRARY_SEARCH_SYSTEM32 |
+                                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
+                                    LOAD_LIBRARY_SEARCH_USER_DIRS);
+            sfree(wdllfile);
 
             /*
              * The MIT Kerberos DLL suffers an internal segfault for

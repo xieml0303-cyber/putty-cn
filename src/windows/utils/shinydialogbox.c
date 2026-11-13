@@ -64,9 +64,23 @@ int ShinyDialogBox(HINSTANCE hinst, LPCTSTR tmpl, const char *winclass,
      * name to match their template resource via the 'winclass'
      * parameter.
      */
-    WNDCLASS wc;
+    /*
+     * The window class and the dialog itself must both be created via
+     * the Unicode (W) entry points. A window's ANSI/Unicode flag is
+     * inherited from its parent at creation time, so an ANSI dialog
+     * forces every child control to be an ANSI window as well - and
+     * once that happens, even a SendMessageW is silently thunked back
+     * to ANSI using the process code page, so any character outside
+     * the system code page (e.g. U+25B8 in the session list's folder
+     * marker) is destroyed on the way in.
+     *
+     * 'winclass' is a UTF-8 string; 'tmpl' is always a MAKEINTRESOURCE
+     * resource id from our callers, so widening it is just a cast.
+     */
+    wchar_t *wclassw = dup_mb_to_wc(CP_UTF8, winclass);
+    WNDCLASSW wc;
     wc.style = CS_DBLCLKS | CS_SAVEBITS | CS_BYTEALIGNWINDOW;
-    wc.lpfnWndProc = DefDlgProc;
+    wc.lpfnWndProc = DefDlgProcW;
     wc.cbClsExtra = 0;
     wc.cbWndExtra = DLGWINDOWEXTRA + sizeof(LONG_PTR);
     wc.hInstance = hinst;
@@ -74,8 +88,9 @@ int ShinyDialogBox(HINSTANCE hinst, LPCTSTR tmpl, const char *winclass,
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH) (COLOR_BACKGROUND +1);
     wc.lpszMenuName = NULL;
-    wc.lpszClassName = winclass;
-    RegisterClass(&wc);
+    wc.lpszClassName = wclassw;
+    RegisterClassW(&wc);
+    sfree(wclassw);
 
     struct ShinyDialogBoxState state[1];
     state->ended = false;
@@ -83,14 +98,15 @@ int ShinyDialogBox(HINSTANCE hinst, LPCTSTR tmpl, const char *winclass,
     state->ctx = ctx;
 
     sdb_tempstate = state;
-    HWND hwnd = CreateDialog(hinst, tmpl, hwndparent, ShinyRealDlgProc);
+    HWND hwnd = CreateDialogParamW(hinst, MAKEINTRESOURCEW((ULONG_PTR)tmpl),
+                                   hwndparent, ShinyRealDlgProc, 0);
     SetWindowLongPtr(hwnd, DLGWINDOWEXTRA, (LONG_PTR)state);
     sdb_tempstate = NULL;
 
     MSG msg;
     int gm;
     while ((gm = GetMessage(&msg, NULL, 0, 0)) > 0) {
-        if (!state->ended && !IsDialogMessage(hwnd, &msg))
+        if (!state->ended && !IsDialogMessageW(hwnd, &msg))
             DispatchMessage(&msg);
         if (state->ended)
             break;

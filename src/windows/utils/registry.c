@@ -74,49 +74,89 @@ char *enum_regkey(HKEY key, int index)
 bool get_reg_dword(HKEY key, const char *name, DWORD *out)
 {
     DWORD type, size;
-    size = sizeof(*out);
+    /*
+     * cn: 值名本身是 ASCII，但 Reg*W 要 wchar_t*，统一按 UTF-8 解一次。
+     * 纯 ASCII 在 UTF-8 下逐字节等价，不存在歧义。
+     */
+    wchar_t *wname = decode_utf8_to_wide_string(name);
+    bool toret = false;
 
-    if (RegQueryValueEx(key, name, 0, &type,
-                        (BYTE *)out, &size) != ERROR_SUCCESS ||
-        size != sizeof(*out) || type != REG_DWORD)
-        return false;
-    else
-        return true;
+    size = sizeof(*out);
+    if (RegQueryValueExW(key, wname, 0, &type,
+                         (BYTE *)out, &size) == ERROR_SUCCESS &&
+        size == sizeof(*out) && type == REG_DWORD)
+        toret = true;
+
+    sfree(wname);
+    return toret;
 }
 
 bool put_reg_dword(HKEY key, const char *name, DWORD value)
 {
-    return RegSetValueEx(key, name, 0, REG_DWORD, (CONST BYTE *) &value,
-                         sizeof(value)) == ERROR_SUCCESS;
+    wchar_t *wname = decode_utf8_to_wide_string(name);
+    bool toret = RegSetValueExW(key, wname, 0, REG_DWORD,
+                                (CONST BYTE *)&value,
+                                sizeof(value)) == ERROR_SUCCESS;
+
+    sfree(wname);
+    return toret;
 }
 
 char *get_reg_sz(HKEY key, const char *name)
 {
     DWORD type, size;
+    wchar_t *wname, *wtoret = NULL;
+    char *toret = NULL;
+    DWORD size2;
+    size_t nchars, got;
 
-    if (RegQueryValueEx(key, name, 0, &type, NULL,
-                        &size) != ERROR_SUCCESS || type != REG_SZ)
-        return NULL;                   /* not a string */
+    /*
+     * cn: 注册表里存的永远是 UTF-16，所以用 W 接口读出来就是正确的中文，
+     * 跟进程代码页无关；再统一编码成 UTF-8 交给上层。此前由 A 接口写入
+     * 的老数据也一并正确 —— 那只是写入口按 ACP 转成了 UTF-16，存的本身
+     * 没问题。
+     */
+    wname = decode_utf8_to_wide_string(name);
 
-    size_t allocsize = size+1;         /* allow for an extra NUL if needed */
-    char *toret = snewn(allocsize, char);
-    if (RegQueryValueEx(key, name, 0, &type, (BYTE *)toret,
-                        &size) != ERROR_SUCCESS || type != REG_SZ) {
-        sfree(toret);
-        return NULL;
-    }
-    assert(size < allocsize);
-    toret[size] = '\0'; /* add an extra NUL in case RegQueryValueEx
-                         * didn't supply one */
+    if (RegQueryValueExW(key, wname, 0, &type, NULL,
+                         &size) != ERROR_SUCCESS || type != REG_SZ)
+        goto out;                      /* not a string */
 
+    nchars = size / sizeof(wchar_t);
+    wtoret = snewn(nchars + 1, wchar_t);
+    size2 = size;
+    if (RegQueryValueExW(key, wname, 0, &type, (BYTE *)wtoret,
+                         &size2) != ERROR_SUCCESS || type != REG_SZ)
+        goto out;
+
+    got = size2 / sizeof(wchar_t);
+    if (got > nchars)
+        got = nchars;                  /* 值在两次查询之间变长了，截断 */
+    wtoret[got] = L'\0';               /* add an extra NUL in case
+                                        * RegQueryValueExW didn't supply one */
+
+    toret = encode_wide_string_as_utf8(wtoret);
+
+  out:
+    sfree(wtoret);
+    sfree(wname);
     return toret;
 }
 
 bool put_reg_sz(HKEY key, const char *name, const char *str)
 {
+    wchar_t *wname = decode_utf8_to_wide_string(name);
+    wchar_t *wstr = decode_utf8_to_wide_string(str);
+    bool toret;
+
     /* You have to store the trailing NUL as well */
-    return RegSetValueEx(key, name, 0, REG_SZ, (CONST BYTE *)str,
-                         1 + strlen(str)) == ERROR_SUCCESS;
+    toret = RegSetValueExW(key, wname, 0, REG_SZ, (CONST BYTE *)wstr,
+                           (DWORD)((wcslen(wstr) + 1) *
+                                   sizeof(wchar_t))) == ERROR_SUCCESS;
+
+    sfree(wstr);
+    sfree(wname);
+    return toret;
 }
 
 /*
@@ -140,37 +180,93 @@ bool put_reg_sz(HKEY key, const char *name, const char *str)
 strbuf *get_reg_multi_sz(HKEY key, const char *name)
 {
     DWORD type, size;
+    wchar_t *wname = decode_utf8_to_wide_string(name);
+    wchar_t *wbuf = NULL;
+    strbuf *toret = NULL;
+    DWORD size2;
+    size_t wsize, wlen, i;
 
-    if (RegQueryValueEx(key, name, 0, &type, NULL,
-                        &size) != ERROR_SUCCESS || type != REG_MULTI_SZ)
-        return NULL;                   /* not a string */
+    if (RegQueryValueExW(key, wname, 0, &type, NULL,
+                         &size) != ERROR_SUCCESS || type != REG_MULTI_SZ)
+        goto out;                      /* not a string */
 
-    strbuf *toret = strbuf_new();
-    void *ptr = strbuf_append(toret, (size_t)size + 2);
-    if (RegQueryValueEx(key, name, 0, &type, (BYTE *)ptr,
-                        &size) != ERROR_SUCCESS || type != REG_MULTI_SZ) {
-        strbuf_free(toret);
-        return NULL;
+    wsize = size / sizeof(wchar_t) + 1;
+    wbuf = snewn(wsize, wchar_t);
+    wbuf[0] = L'\0';
+    size2 = size;
+    if (RegQueryValueExW(key, wname, 0, &type, (BYTE *)wbuf,
+                         &size2) != ERROR_SUCCESS || type != REG_MULTI_SZ)
+        goto out;
+
+    wlen = size2 / sizeof(wchar_t);
+    if (wlen >= wsize)
+        wlen = wsize - 1;
+    wbuf[wlen] = L'\0';
+
+    /*
+     * cn: 注册表里是 UTF-16 的多串，程序内部统一用 UTF-8，所以逐段解码
+     * 后按原格式（各段以 NUL 分隔）重新拼一个 strbuf。
+     */
+    toret = strbuf_new();
+    i = 0;
+    while (i < wlen && wbuf[i]) {
+        size_t seglen = 0;
+        while (i + seglen < wlen && wbuf[i + seglen])
+            seglen++;
+        char *seg = encode_wide_string_as_utf8(wbuf + i);
+        put_data(toret, seg, strlen(seg));
+        put_byte(toret, '\0');
+        sfree(seg);
+        i += seglen + 1;
     }
-    strbuf_shrink_to(toret, size);
     /* Ensure we end with exactly one \0 */
     while (strbuf_chomp(toret, '\0'));
     put_byte(toret, '\0');
+
+  out:
+    sfree(wbuf);
+    sfree(wname);
     return toret;
 }
 
 bool put_reg_multi_sz(HKEY key, const char *name, strbuf *str)
 {
+    wchar_t *wname = decode_utf8_to_wide_string(name);
+    strbuf *wbuf = strbuf_new();
+    const char *p = str->s, *end = str->s + str->len;
+    const wchar_t nul = L'\0';
+    bool toret;
+
     /*
-     * Of course, to write our string list into the registry, we _do_
-     * have to include both trailing NULs. But this is easy, because a
-     * strbuf is also designed to hold a single string and make it
-     * conveniently accessible in NUL-terminated form, so it stores a
-     * NUL in its buffer just beyond its formal length. So we just
-     * include that extra byte in the data we write.
+     * cn: str 里是 UTF-8 多串（各段以 NUL 分隔，结尾一个 NUL）。逐段解码
+     * 成 UTF-16 拼进 wbuf，末尾再补一个 NUL 作为列表结束标记。
      */
-    return RegSetValueEx(key, name, 0, REG_MULTI_SZ, (CONST BYTE *)str->s,
-                         str->len + 1) == ERROR_SUCCESS;
+    while (p < end) {
+        size_t seglen = 0;
+        while (p + seglen < end && p[seglen])
+            seglen++;
+        if (seglen == 0)
+            break;                     /* empty string: end of the list */
+        char *seg = snewn(seglen + 1, char);
+        wchar_t *wseg;
+        memcpy(seg, p, seglen);
+        seg[seglen] = '\0';
+        wseg = decode_utf8_to_wide_string(seg);
+        put_data(wbuf, wseg, wcslen(wseg) * sizeof(wchar_t));
+        put_data(wbuf, &nul, sizeof(nul));
+        sfree(wseg);
+        sfree(seg);
+        p += seglen + 1;
+    }
+    put_data(wbuf, &nul, sizeof(nul));
+
+    toret = RegSetValueExW(key, wname, 0, REG_MULTI_SZ,
+                           (CONST BYTE *)wbuf->s,
+                           (DWORD)wbuf->len) == ERROR_SUCCESS;
+
+    strbuf_free(wbuf);
+    sfree(wname);
+    return toret;
 }
 
 char *get_reg_sz_simple(HKEY key, const char *name, const char *leaf)

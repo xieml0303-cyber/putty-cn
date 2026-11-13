@@ -2631,6 +2631,8 @@ void cmdline_cleanup(void);
 /* cn: 供配置框「凭据（密码）」框直接设置自动应答用的密码。 */
 void cmdline_set_password(const char *password);
 bool cmdline_have_password(void);
+/* cn: 借出密码明文（只读、不复制、不得 free），供 Telnet 后端自行应答。 */
+const char *cmdline_get_password(void);
 SeatPromptResult cmdline_get_passwd_input(
     prompts_t *p, cmdline_get_passwd_input_state *state, bool restartable);
 bool cmdline_host_ok(Conf *);

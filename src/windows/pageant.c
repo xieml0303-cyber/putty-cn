@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <assert.h>
 #include <tchar.h>
+#include <wchar.h>
 
 #include "putty.h"
 #include "ssh.h"
@@ -75,6 +76,80 @@ static filereq_saved_dir *keypath = NULL;
 static int initial_menuitems_count;
 
 /*
+ * puTTY-cn: this program keeps its internal strings in UTF-8, so every
+ * narrow Win32 entry point that takes user-visible text has to convert
+ * explicitly instead of letting the ANSI API interpret those bytes
+ * using the process code page.
+ */
+static wchar_t *cn_w(const char *s)
+{
+    return s ? dup_mb_to_wc(CP_UTF8, s) : NULL;
+}
+
+static wchar_t *cn_w_len(const char *s, size_t len, size_t *outlen)
+{
+    return dup_mb_to_wc_c(CP_UTF8, s, (int)len, outlen);
+}
+
+static int cn_message_box(HWND hwnd, const char *text, const char *caption,
+                          UINT type)
+{
+    wchar_t *wtext = cn_w(text), *wcap = cn_w(caption);
+    int ret = MessageBoxW(hwnd, wtext, wcap, type);
+    sfree(wtext);
+    sfree(wcap);
+    return ret;
+}
+
+static void cn_set_dlg_item_text(HWND hwnd, int id, const char *text)
+{
+    wchar_t *w = cn_w(text);
+    SetDlgItemTextW(hwnd, id, w);
+    sfree(w);
+}
+
+static void cn_append_menu(HMENU menu, UINT flags, UINT_PTR id,
+                           const char *text)
+{
+    wchar_t *w = cn_w(text);
+    AppendMenuW(menu, flags, id, w);
+    sfree(w);
+}
+
+static void cn_wremove(const char *path)
+{
+    wchar_t *w = cn_w(path);
+    if (w) {
+        _wremove(w);
+        sfree(w);
+    }
+}
+
+static void cn_text_extent(HDC hdc, strbuf *sb, SIZE *sz)
+{
+    wchar_t *w = cn_w_len(sb->s, sb->len, NULL);
+    GetTextExtentPoint32W(hdc, w, (int)wcslen(w), sz);
+    sfree(w);
+}
+
+static void cn_ext_text_out(HDC hdc, int x, int y, const RECT *clip,
+                            strbuf *sb)
+{
+    size_t wlen = 0;
+    wchar_t *w = cn_w_len(sb->s, sb->len, &wlen);
+    ExtTextOutW(hdc, x, y, ETO_CLIPPED, clip, w, (int)wlen, NULL);
+    sfree(w);
+}
+
+static void cn_tabbed_text_out(HDC hdc, int x, int y, strbuf *sb)
+{
+    size_t wlen = 0;
+    wchar_t *w = cn_w_len(sb->s, sb->len, &wlen);
+    TabbedTextOutW(hdc, x, y, w, (int)wlen, 0, NULL, 0);
+    sfree(w);
+}
+
+/*
  * Print a modal (Really Bad) message box and perform a fatal exit.
  */
 void modalfatalbox(const char *fmt, ...)
@@ -85,7 +160,7 @@ void modalfatalbox(const char *fmt, ...)
     va_start(ap, fmt);
     buf = dupvprintf(fmt, ap);
     va_end(ap);
-    MessageBox(traywindow, buf, "Pageant 致命错误",
+    cn_message_box(traywindow, buf, "Pageant 致命错误",
                MB_SYSTEMMODAL | MB_ICONERROR | MB_OK);
     sfree(buf);
     exit(1);
@@ -107,7 +182,7 @@ static INT_PTR CALLBACK LicenceProc(HWND hwnd, UINT msg,
 {
     switch (msg) {
       case WM_INITDIALOG:
-        SetDlgItemText(hwnd, IDC_LICENCE_TEXTBOX, LICENCE_TEXT("\r\n\r\n"));
+        cn_set_dlg_item_text(hwnd, IDC_LICENCE_TEXTBOX, LICENCE_TEXT("\r\n\r\n"));
         return 1;
       case WM_COMMAND:
         switch (LOWORD(wParam)) {
@@ -138,7 +213,7 @@ static INT_PTR CALLBACK AboutProc(HWND hwnd, UINT msg,
             ver, buildinfo_text,
             "(C) " SHORT_COPYRIGHT_DETAILS ". 保留所有权利。");
         sfree(buildinfo_text);
-        SetDlgItemText(hwnd, IDC_ABOUT_TEXTBOX, text);
+        cn_set_dlg_item_text(hwnd, IDC_ABOUT_TEXTBOX, text);
         MakeDlgItemBorderless(hwnd, IDC_ABOUT_TEXTBOX);
         sfree(text);
         return 1;
@@ -158,9 +233,9 @@ static INT_PTR CALLBACK AboutProc(HWND hwnd, UINT msg,
             return 0;
           case IDC_ABOUT_WEBSITE:
             /* Load web browser */
-            ShellExecute(hwnd, "open",
-                         "https://www.chiark.greenend.org.uk/~sgtatham/putty/",
-                         0, 0, SW_SHOWDEFAULT);
+            ShellExecuteW(hwnd, L"open",
+                          L"https://www.chiark.greenend.org.uk/~sgtatham/putty/",
+                          0, 0, SW_SHOWDEFAULT);
             return 0;
         }
         return 0;
@@ -250,10 +325,10 @@ static INT_PTR CALLBACK PassphraseProc(HWND hwnd, UINT msg,
         if (!p->modal)
             SetActiveWindow(hwnd); /* this won't have happened automatically */
         if (p->comment)
-            SetDlgItemText(hwnd, IDC_PASSPHRASE_FINGERPRINT, p->comment);
+            cn_set_dlg_item_text(hwnd, IDC_PASSPHRASE_FINGERPRINT, p->comment);
         burnstr(p->passphrase);
         p->passphrase = dupstr("");
-        SetDlgItemText(hwnd, IDC_PASSPHRASE_EDITBOX, p->passphrase);
+        cn_set_dlg_item_text(hwnd, IDC_PASSPHRASE_EDITBOX, p->passphrase);
         if (!p->help_topic || !has_help()) {
             HWND item = GetDlgItem(hwnd, IDHELP);
             if (item)
@@ -307,7 +382,7 @@ void old_keyfile_warning(void)
         "请使用 PuTTYgen 载入该密钥进行转换然\n"
         "后保存。";
 
-    MessageBox(NULL, message, mbtitle, MB_OK);
+    cn_message_box(NULL, message, mbtitle, MB_OK);
 }
 
 struct keylist_update_ctx {
@@ -384,15 +459,15 @@ static void keylist_update_callback(
 
     SIZE sz;
     if (disp->bits->len) {
-        GetTextExtentPoint32(ctx->hdc, disp->alg->s, disp->alg->len, &sz);
+        cn_text_extent(ctx->hdc, disp->alg, &sz);
         if (ctx->algwidth < sz.cx) ctx->algwidth = sz.cx;
-        GetTextExtentPoint32(ctx->hdc, disp->bits->s, disp->bits->len, &sz);
+        cn_text_extent(ctx->hdc, disp->bits, &sz);
         if (ctx->bitswidth < sz.cx) ctx->bitswidth = sz.cx;
     } else {
-        GetTextExtentPoint32(ctx->hdc, disp->alg->s, disp->alg->len, &sz);
+        cn_text_extent(ctx->hdc, disp->alg, &sz);
         if (ctx->algbitswidth < sz.cx) ctx->algbitswidth = sz.cx;
     }
-    GetTextExtentPoint32(ctx->hdc, disp->hash->s, disp->hash->len, &sz);
+    cn_text_extent(ctx->hdc, disp->hash, &sz);
     if (ctx->hashwidth < sz.cx) ctx->hashwidth = sz.cx;
 
     if (ext_flags & LIST_EXTENDED_FLAG_HAS_NO_CLEARTEXT_KEY) {
@@ -453,7 +528,7 @@ void keylist_update(void)
         int status = pageant_enum_keys(keylist_update_callback, ctx, &errmsg);
 
         SIZE sz;
-        GetTextExtentPoint32(ctx->hdc, "MM", 2, &sz);
+        GetTextExtentPoint32W(ctx->hdc, L"MM", 2, &sz);
         int gutter = sz.cx;
 
         DeleteDC(ctx->hdc);
@@ -603,8 +678,10 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
 
         int selection = 0;
         for (size_t i = 0; i < lenof(fptypes); i++) {
-            SendDlgItemMessage(hwnd, IDC_KEYLIST_FPTYPE, CB_ADDSTRING,
-                               0, (LPARAM)fptypes[i].name);
+            wchar_t *wname = cn_w(fptypes[i].name);
+            SendDlgItemMessageW(hwnd, IDC_KEYLIST_FPTYPE, CB_ADDSTRING,
+                                0, (LPARAM)wname);
+            sfree(wname);
             if (fptype == fptypes[i].value)
                 selection = (int)i;
         }
@@ -655,10 +732,10 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
             HFONT font = (HFONT)SendMessage(hwnd, WM_GETFONT, 0, 0);
             HFONT oldfont = SelectObject(di->hDC, font);
 
-            /* ExtTextOut("") is an easy way to just draw the
+            /* ExtTextOutW("") is an easy way to just draw the
              * background rectangle */
-            ExtTextOut(di->hDC, di->rcItem.left, di->rcItem.top,
-                       ETO_OPAQUE | ETO_CLIPPED, &di->rcItem, "", 0, NULL);
+            ExtTextOutW(di->hDC, di->rcItem.left, di->rcItem.top,
+                        ETO_OPAQUE | ETO_CLIPPED, &di->rcItem, L"", 0, NULL);
 
             struct keylist_display_data *disp =
                 (struct keylist_display_data *)di->itemData;
@@ -669,19 +746,17 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
             r.left = r.top = r.bottom = 0;
             r.right = 1;
             MapDialogRect(hwnd, &r);
-            ExtTextOut(di->hDC, di->rcItem.left + r.right, di->rcItem.top,
-                       ETO_CLIPPED, &di->rcItem, disp->alg->s,
-                       disp->alg->len, NULL);
+            cn_ext_text_out(di->hDC, di->rcItem.left + r.right,
+                            di->rcItem.top, &di->rcItem, disp->alg);
 
             if (disp->bits->len) {
-                ExtTextOut(di->hDC, di->rcItem.left + r.right + colpos_bits,
-                           di->rcItem.top, ETO_CLIPPED, &di->rcItem,
-                           disp->bits->s, disp->bits->len, NULL);
+                cn_ext_text_out(di->hDC,
+                                di->rcItem.left + r.right + colpos_bits,
+                                di->rcItem.top, &di->rcItem, disp->bits);
             }
 
-            ExtTextOut(di->hDC, di->rcItem.left + r.right + colpos_hash,
-                       di->rcItem.top, ETO_CLIPPED, &di->rcItem,
-                       disp->hash->s, disp->hash->len, NULL);
+            cn_ext_text_out(di->hDC, di->rcItem.left + r.right + colpos_hash,
+                            di->rcItem.top, &di->rcItem, disp->hash);
 
             strbuf *sb = strbuf_new();
             put_datapl(sb, ptrlen_from_strbuf(disp->comment));
@@ -690,8 +765,9 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
                 put_datapl(sb, ptrlen_from_strbuf(disp->info));
             }
 
-            TabbedTextOut(di->hDC, di->rcItem.left + r.right + colpos_comment,
-                          di->rcItem.top, sb->s, sb->len, 0, NULL, 0);
+            cn_tabbed_text_out(di->hDC,
+                               di->rcItem.left + r.right + colpos_comment,
+                               di->rcItem.top, sb);
 
             strbuf_free(sb);
 
@@ -842,23 +918,25 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
 static BOOL AddTrayIcon(HWND hwnd)
 {
     BOOL res;
-    NOTIFYICONDATA tnid;
+    NOTIFYICONDATAW tnid;
     HICON hicon;
+
+    memset(&tnid, 0, sizeof(tnid));
 
 #ifdef NIM_SETVERSION
     tnid.uVersion = 0;
-    res = Shell_NotifyIcon(NIM_SETVERSION, &tnid);
+    res = Shell_NotifyIconW(NIM_SETVERSION, &tnid);
 #endif
 
-    tnid.cbSize = sizeof(NOTIFYICONDATA);
+    tnid.cbSize = sizeof(NOTIFYICONDATAW);
     tnid.hWnd = hwnd;
     tnid.uID = 1;              /* unique within this systray use */
     tnid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     tnid.uCallbackMessage = WM_SYSTRAY;
     tnid.hIcon = hicon = LoadIcon(hinst, MAKEINTRESOURCE(201));
-    strcpy(tnid.szTip, "Pageant (PuTTY 认证代理)");
+    wcscpy(tnid.szTip, cn_w("Pageant (PuTTY 认证代理)"));
 
-    res = Shell_NotifyIcon(NIM_ADD, &tnid);
+    res = Shell_NotifyIconW(NIM_ADD, &tnid);
 
     if (hicon) DestroyIcon(hicon);
 
@@ -870,8 +948,8 @@ static void update_sessions(void)
 {
     int num_entries;
     HKEY hkey;
-    TCHAR buf[MAX_PATH + 1];
-    MENUITEMINFO mii;
+    wchar_t buf[MAX_PATH + 1];
+    MENUITEMINFOW mii;
     strbuf *sb;
 
     int index_key, index_menu;
@@ -879,8 +957,14 @@ static void update_sessions(void)
     if (!putty_path)
         return;
 
-    if (ERROR_SUCCESS != RegOpenKey(HKEY_CURRENT_USER, PUTTY_REGKEY, &hkey))
-        return;
+    {
+        wchar_t *wregkey = cn_w(PUTTY_REGKEY);
+        LONG rk = RegOpenKeyExW(HKEY_CURRENT_USER, wregkey, 0, KEY_READ,
+                                &hkey);
+        sfree(wregkey);
+        if (ERROR_SUCCESS != rk)
+            return;
+    }
 
     for (num_entries = GetMenuItemCount(session_menu);
         num_entries > initial_menuitems_count;
@@ -891,10 +975,11 @@ static void update_sessions(void)
     index_menu = 0;
 
     sb = strbuf_new();
-    while (ERROR_SUCCESS == RegEnumKey(hkey, index_key, buf, MAX_PATH)) {
-        if (strcmp(buf, PUTTY_DEFAULT) != 0) {
+    while (ERROR_SUCCESS == RegEnumKeyW(hkey, index_key, buf, MAX_PATH)) {
+        char *keyname = encode_wide_string_as_utf8(buf);
+        if (strcmp(keyname, PUTTY_DEFAULT) != 0) {
             strbuf_clear(sb);
-            unescape_registry_key(buf, sb);
+            unescape_registry_key(keyname, sb);
 
             memset(&mii, 0, sizeof(mii));
             mii.cbSize = sizeof(mii);
@@ -902,10 +987,12 @@ static void update_sessions(void)
             mii.fType = MFT_STRING;
             mii.fState = MFS_ENABLED;
             mii.wID = (index_menu * 16) + IDM_SESSIONS_BASE;
-            mii.dwTypeData = sb->s;
-            InsertMenuItem(session_menu, index_menu, true, &mii);
+            mii.dwTypeData = cn_w(sb->s);
+            InsertMenuItemW(session_menu, index_menu, true, &mii);
+            sfree(mii.dwTypeData);
             index_menu++;
         }
+        sfree(keyname);
         index_key++;
     }
     strbuf_free(sb);
@@ -917,8 +1004,9 @@ static void update_sessions(void)
         mii.fMask = MIIM_TYPE | MIIM_STATE;
         mii.fType = MFT_STRING;
         mii.fState = MFS_GRAYED;
-        mii.dwTypeData = _T("(没有会话)");
-        InsertMenuItem(session_menu, index_menu, true, &mii);
+        mii.dwTypeData = cn_w("(没有会话)");
+        InsertMenuItemW(session_menu, index_menu, true, &mii);
+        sfree(mii.dwTypeData);
     }
 }
 
@@ -1254,7 +1342,7 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT message,
 
     switch (message) {
       case WM_CREATE:
-        msgTaskbarCreated = RegisterWindowMessage(_T("TaskbarCreated"));
+        msgTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
         break;
       default:
         if (message==msgTaskbarCreated) {
@@ -1295,14 +1383,19 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT message,
         unsigned command = wParam & ~0xF; /* low 4 bits reserved to Windows */
         switch (command) {
           case IDM_PUTTY: {
-            TCHAR cmdline[10];
-            cmdline[0] = '\0';
+            wchar_t cmdline[10];
+            wchar_t *wputty;
+            INT_PTR sr;
+            cmdline[0] = L'\0';
             if (restrict_putty_acl)
-                strcat(cmdline, "&R");
+                wcscat(cmdline, L"&R");
 
-            if ((INT_PTR)ShellExecute(hwnd, NULL, putty_path, cmdline,
-                                      _T(""), SW_SHOW) <= 32) {
-                MessageBox(NULL, "无法执行 PuTTY！",
+            wputty = dup_mb_to_wc(CP_UTF8, putty_path);
+            sr = (INT_PTR)ShellExecuteW(hwnd, NULL, wputty, cmdline,
+                                        L"", SW_SHOW);
+            sfree(wputty);
+            if (sr <= 32) {
+                cn_message_box(NULL, "无法执行 PuTTY！",
                            "错误", MB_OK | MB_ICONERROR);
             }
             break;
@@ -1361,23 +1454,28 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT message,
             break;
           default: {
             if (wParam >= IDM_SESSIONS_BASE && wParam <= IDM_SESSIONS_MAX) {
-                MENUITEMINFO mii;
-                TCHAR buf[MAX_PATH + 1];
-                TCHAR param[MAX_PATH + 1];
+                MENUITEMINFOW mii;
+                wchar_t buf[MAX_PATH + 1];
+                wchar_t param[MAX_PATH + 1];
+                wchar_t *wputty;
+                INT_PTR sr;
                 memset(&mii, 0, sizeof(mii));
                 mii.cbSize = sizeof(mii);
                 mii.fMask = MIIM_TYPE;
                 mii.cch = MAX_PATH;
                 mii.dwTypeData = buf;
-                _GetMenuItemInfo(session_menu, wParam, false, &mii);
-                param[0] = '\0';
+                GetMenuItemInfoW(session_menu, wParam, false, &mii);
+                param[0] = L'\0';
                 if (restrict_putty_acl)
-                    strcat(param, "&R");
-                strcat(param, "@");
-                strcat(param, mii.dwTypeData);
-                if ((INT_PTR)ShellExecute(hwnd, NULL, putty_path, param,
-                                          _T(""), SW_SHOW) <= 32) {
-                    MessageBox(NULL, "无法执行 PuTTY！", "错误",
+                    wcscat(param, L"&R");
+                wcscat(param, L"@");
+                wcscat(param, mii.dwTypeData);
+                wputty = dup_mb_to_wc(CP_UTF8, putty_path);
+                sr = (INT_PTR)ShellExecuteW(hwnd, NULL, wputty, param,
+                                            L"", SW_SHOW);
+                sfree(wputty);
+                if (sr <= 32) {
+                    cn_message_box(NULL, "无法执行 PuTTY！", "错误",
                                MB_OK | MB_ICONERROR);
                 }
             }
@@ -1452,14 +1550,18 @@ static DWORD WINAPI wm_copydata_threadfunc(void *param)
  */
 void spawn_cmd(const char *cmdline, const char *args, int show)
 {
-    if (ShellExecute(NULL, _T("open"), cmdline,
-                     args, NULL, show) <= (HINSTANCE) 32) {
+    wchar_t *wcmd = dup_mb_to_wc(CP_UTF8, cmdline);
+    wchar_t *wargs = args ? dup_mb_to_wc(CP_UTF8, args) : NULL;
+    if ((INT_PTR)ShellExecuteW(NULL, L"open", wcmd,
+                               wargs, NULL, show) <= (INT_PTR) 32) {
         char *msg;
         msg = dupprintf("无法运行 \"%s\": %s", cmdline,
                         win_strerror(GetLastError()));
-        MessageBox(NULL, msg, APPNAME, MB_OK | MB_ICONEXCLAMATION);
+        cn_message_box(NULL, msg, APPNAME, MB_OK | MB_ICONEXCLAMATION);
         sfree(msg);
     }
+    sfree(wcmd);
+    sfree(wargs);
 }
 
 void noise_ultralight(NoiseSourceId id, unsigned long data)
@@ -1499,7 +1601,7 @@ static NORETURN void opt_error(const char *fmt, ...)
     char *msg = dupvprintf(fmt, ap);
     va_end(ap);
 
-    MessageBox(NULL, msg, "Pageant 命令行错误", MB_ICONERROR | MB_OK);
+    cn_message_box(NULL, msg, "Pageant 命令行错误", MB_ICONERROR | MB_OK);
 
     exit(1);
 }
@@ -1547,7 +1649,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
          * Attempt to get the security API we need.
          */
         if (!got_advapi()) {
-            MessageBox(NULL,
+            cn_message_box(NULL,
                         "无法访问安全认证 API 函数。\nPageant"
                         "无法运行，因为存在安全隐患。",
                        "Pageant 致命错误", MB_ICONERROR | MB_OK);
@@ -1565,19 +1667,17 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      * submenu if we find it).
      */
     {
-        char b[2048], *p, *q, *r;
-        FILE *fp;
-        GetModuleFileName(NULL, b, sizeof(b) - 16);
-        r = b;
-        p = strrchr(b, '\\');
+        wchar_t wb[2048], *p, *q, *r;
+        GetModuleFileNameW(NULL, wb, lenof(wb) - 16);
+        r = wb;
+        p = wcsrchr(wb, L'\\');
         if (p && p >= r) r = p+1;
-        q = strrchr(b, ':');
+        q = wcsrchr(wb, L':');
         if (q && q >= r) r = q+1;
-        strcpy(r, "putty.exe");
-        if ( (fp = fopen(b, "r")) != NULL) {
-            putty_path = dupstr(b);
-            fclose(fp);
-        } else
+        wcscpy(r, L"putty.exe");
+        if (GetFileAttributesW(wb) != INVALID_FILE_ATTRIBUTES)
+            putty_path = dup_wc_to_mb(CP_UTF8, wb, "?");
+        else
             putty_path = NULL;
     }
 
@@ -1659,7 +1759,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         mutex = lock_interprocess_mutex(mutexname, &err);
         sfree(mutexname);
         if (!mutex) {
-            MessageBox(NULL, err, "Pageant 错误", MB_ICONERROR | MB_OK);
+            cn_message_box(NULL, err, "Pageant 错误", MB_ICONERROR | MB_OK);
             return 1;
         }
     }
@@ -1719,7 +1819,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                 char *err = dupprintf("无法打开命名管道 %s "
                                       "用于 SSH 代理:\n%s", pipename,
                                       sk_socket_error(sock));
-                MessageBox(NULL, err, "Pageant 错误", MB_ICONERROR | MB_OK);
+                cn_message_box(NULL, err, "Pageant 错误", MB_ICONERROR | MB_OK);
                 return 1;
             }
             pageant_listener_got_socket(pl, sock);
@@ -1734,7 +1834,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                     char *err = dupprintf(
                         "无法写入 OpenSSH 配置文件到 %s",
                         filename_to_str(openssh_config_file));
-                    MessageBox(NULL, err, "Pageant 错误",
+                    cn_message_box(NULL, err, "Pageant 错误",
                                MB_ICONERROR | MB_OK);
                     return 1;
                 }
@@ -1763,7 +1863,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
             /* FIXME: diagnose any error except file-not-found. Also,
              * check the file type if possible? */
-            remove(unixsocket);
+            cn_wremove(unixsocket);
 
             Plug *pl_plug;
             struct pageant_listen_state *pl =
@@ -1773,7 +1873,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                 char *err = dupprintf("无法打开 AF_UNIX 套接字 %s "
                                       "用于 SSH 代理:\n%s", unixsocket,
                                       sk_socket_error(sock));
-                MessageBox(NULL, err, "Pageant 错误", MB_ICONERROR | MB_OK);
+                cn_message_box(NULL, err, "Pageant 错误", MB_ICONERROR | MB_OK);
                 return 1;
             }
             pageant_listener_got_socket(pl, sock);
@@ -1854,7 +1954,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      */
     if (already_running) {
         if (!command && !nclkeys) {
-            MessageBox(NULL, "Pageant 已在运行", "Pageant 错误",
+            cn_message_box(NULL, "Pageant 已在运行", "Pageant 错误",
                        MB_ICONERROR | MB_OK);
         }
         return 0;
@@ -1867,27 +1967,27 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     systray_menu = CreatePopupMenu();
     if (putty_path) {
         session_menu = CreateMenu();
-        AppendMenu(systray_menu, MF_ENABLED, IDM_PUTTY, "新会话(&N)");
-        AppendMenu(systray_menu, MF_POPUP | MF_ENABLED,
+        cn_append_menu(systray_menu, MF_ENABLED, IDM_PUTTY, "新会话(&N)");
+        cn_append_menu(systray_menu, MF_POPUP | MF_ENABLED,
                    (UINT_PTR) session_menu, "保存的会话(&S)");
-        AppendMenu(systray_menu, MF_SEPARATOR, 0, 0);
+        cn_append_menu(systray_menu, MF_SEPARATOR, 0, 0);
     }
-    AppendMenu(systray_menu, MF_ENABLED, IDM_VIEWKEYS,
+    cn_append_menu(systray_menu, MF_ENABLED, IDM_VIEWKEYS,
                "查看密钥(&V)");
-    AppendMenu(systray_menu, MF_ENABLED, IDM_ADDKEY, "增加密钥(&K)");
-    AppendMenu(systray_menu, MF_ENABLED, IDM_ADDKEY_ENCRYPTED,
+    cn_append_menu(systray_menu, MF_ENABLED, IDM_ADDKEY, "增加密钥(&K)");
+    cn_append_menu(systray_menu, MF_ENABLED, IDM_ADDKEY_ENCRYPTED,
                "增加(加密的)密钥");
-    AppendMenu(systray_menu, MF_SEPARATOR, 0, 0);
-    AppendMenu(systray_menu, MF_ENABLED, IDM_REMOVE_ALL,
+    cn_append_menu(systray_menu, MF_SEPARATOR, 0, 0);
+    cn_append_menu(systray_menu, MF_ENABLED, IDM_REMOVE_ALL,
                "删除所有密钥");
-    AppendMenu(systray_menu, MF_ENABLED, IDM_REENCRYPT_ALL,
+    cn_append_menu(systray_menu, MF_ENABLED, IDM_REENCRYPT_ALL,
                "重新加密所有密钥");
-    AppendMenu(systray_menu, MF_SEPARATOR, 0, 0);
+    cn_append_menu(systray_menu, MF_SEPARATOR, 0, 0);
     if (has_help())
-        AppendMenu(systray_menu, MF_ENABLED, IDM_HELP, "帮助(&H)");
-    AppendMenu(systray_menu, MF_ENABLED, IDM_ABOUT, "关于(&A)");
-    AppendMenu(systray_menu, MF_SEPARATOR, 0, 0);
-    AppendMenu(systray_menu, MF_ENABLED, IDM_CLOSE, "退出(&X)");
+        cn_append_menu(systray_menu, MF_ENABLED, IDM_HELP, "帮助(&H)");
+    cn_append_menu(systray_menu, MF_ENABLED, IDM_ABOUT, "关于(&A)");
+    cn_append_menu(systray_menu, MF_SEPARATOR, 0, 0);
+    cn_append_menu(systray_menu, MF_ENABLED, IDM_CLOSE, "退出(&X)");
     initial_menuitems_count = GetMenuItemCount(session_menu);
 
     /* Set the default menu item. */
@@ -1937,13 +2037,14 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
     /* Clean up the system tray icon */
     {
-        NOTIFYICONDATA tnid;
+        NOTIFYICONDATAW tnid;
 
-        tnid.cbSize = sizeof(NOTIFYICONDATA);
+        memset(&tnid, 0, sizeof(tnid));
+        tnid.cbSize = sizeof(NOTIFYICONDATAW);
         tnid.hWnd = traywindow;
         tnid.uID = 1;
 
-        Shell_NotifyIcon(NIM_DELETE, &tnid);
+        Shell_NotifyIconW(NIM_DELETE, &tnid);
 
         DestroyMenu(systray_menu);
     }

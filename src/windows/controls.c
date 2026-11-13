@@ -110,7 +110,7 @@ static LRESULT CALLBACK radio_button_subclass(
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
         RECT r, rr, tr;
-        char text[128];
+        wchar_t text[128];
         bool selected = SendMessage(hwnd, BM_GETCHECK, 0, 0) == BST_CHECKED;
         bool disabled = !IsWindowEnabled(hwnd);
         COLORREF textcol = disabled ? GetSysColor(COLOR_GRAYTEXT) :
@@ -122,7 +122,7 @@ static LRESULT CALLBACK radio_button_subclass(
         int texty;
 
         GetClientRect(hwnd, &r);
-        GetWindowText(hwnd, text, sizeof(text));
+        GetWindowTextW(hwnd, text, lenof(text));
 
         SetBkMode(hdc, TRANSPARENT);
         FillRect(hdc, &r, GetSysColorBrush(COLOR_BTNFACE));
@@ -172,7 +172,7 @@ static LRESULT CALLBACK radio_button_subclass(
         tr.top = texty;
         tr.bottom = texty + tm.tmHeight;
         SetTextColor(hdc, textcol);
-        DrawText(hdc, text, -1, &tr, DT_LEFT | DT_SINGLELINE);
+        DrawTextW(hdc, text, -1, &tr, DT_LEFT | DT_SINGLELINE);
         SelectObject(hdc, oldfont);
 
         EndPaint(hwnd, &ps);
@@ -183,6 +183,22 @@ static LRESULT CALLBACK radio_button_subclass(
     return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
+
+/*
+ * cn: 本仓库内部字符串统一是 UTF-8，而 Windows 控件的 ANSI 入口按
+ * 进程代码页（GetACP）解码 —— 简体中文系统上是 936，UTF-8 字节会被
+ * 当成 GBK 解码，界面整片乱码。
+ *
+ * 早先靠 manifest 里的 <activeCodePage>UTF-8</activeCodePage> 把进程
+ * 代码页抬到 65001 绕开这件事，但那条声明只在 Windows 10 1903 及以上
+ * 生效，老系统直接忽略，装上去照样乱码。所以现在声明已经删掉，凡是要
+ * 把 char * 交给控件的场合一律显式转宽字符走 W 接口，彻底不依赖进程
+ * 代码页。调用方负责 sfree 返回值。
+ */
+static wchar_t *cn_w(const char *s)
+{
+    return dup_mb_to_wc(CP_UTF8, s ? s : "");
+}
 
 HWND doctl(struct ctlpos *cp, RECT r, const char *wclass, int wstyle,
            int exstyle, const char *wtext, int wid)
@@ -202,10 +218,14 @@ HWND doctl(struct ctlpos *cp, RECT r, const char *wclass, int wstyle,
      * without creating any actual controls.
      */
     if (cp->hwnd) {
-        ctl = CreateWindowEx(exstyle, wclass, wtext, wstyle,
-                             r.left, r.top, r.right, r.bottom,
-                             cp->hwnd, (HMENU)(ULONG_PTR)wid, hinst, NULL);
-        SendMessage(ctl, WM_SETFONT, cp->font, MAKELPARAM(true, 0));
+        wchar_t *wclassw = cn_w(wclass);
+        wchar_t *wtextw = cn_w(wtext);
+        ctl = CreateWindowExW(exstyle, wclassw, wtextw, wstyle,
+                              r.left, r.top, r.right, r.bottom,
+                              cp->hwnd, (HMENU)(ULONG_PTR)wid, hinst, NULL);
+        sfree(wclassw);
+        sfree(wtextw);
+        SendMessageW(ctl, WM_SETFONT, (WPARAM)cp->font, MAKELPARAM(true, 0));
 
         if (!strcmp(wclass, "LISTBOX")) {
             /*
@@ -1419,19 +1439,19 @@ void prefslist(struct prefslist *hdl, struct ctlpos *cp, int lines,
 static void pl_moveitem(HWND hwnd, int listid, int src, int dst)
 {
     int tlen, val;
-    char *txt;
+    wchar_t *txt;
     /* Get the item's data. */
-    tlen = SendDlgItemMessage (hwnd, listid, LB_GETTEXTLEN, src, 0);
-    txt = snewn(tlen+1, char);
-    SendDlgItemMessage (hwnd, listid, LB_GETTEXT, src, (LPARAM) txt);
-    val = SendDlgItemMessage (hwnd, listid, LB_GETITEMDATA, src, 0);
+    tlen = SendDlgItemMessageW (hwnd, listid, LB_GETTEXTLEN, src, 0);
+    txt = snewn(tlen+1, wchar_t);
+    SendDlgItemMessageW (hwnd, listid, LB_GETTEXT, src, (LPARAM) txt);
+    val = SendDlgItemMessageW (hwnd, listid, LB_GETITEMDATA, src, 0);
     /* Deselect old location. */
-    SendDlgItemMessage (hwnd, listid, LB_SETSEL, false, src);
+    SendDlgItemMessageW (hwnd, listid, LB_SETSEL, false, src);
     /* Delete it at the old location. */
-    SendDlgItemMessage (hwnd, listid, LB_DELETESTRING, src, 0);
+    SendDlgItemMessageW (hwnd, listid, LB_DELETESTRING, src, 0);
     /* Insert it at new location. */
-    SendDlgItemMessage (hwnd, listid, LB_INSERTSTRING, dst,
-                        (LPARAM) txt);
+    SendDlgItemMessageW (hwnd, listid, LB_INSERTSTRING, dst,
+                         (LPARAM) txt);
     SendDlgItemMessage (hwnd, listid, LB_SETITEMDATA, dst,
                         (LPARAM) val);
     /* Set selection. */
@@ -1504,8 +1524,8 @@ int handle_prefslist(struct prefslist *hdl,
                  * FIXME: this causes scrollbar glitches if the count of
                  *        listbox contains >= its height. */
                 hdl->dummyitem =
-                    SendDlgItemMessage(hwnd, hdl->listid,
-                                       LB_ADDSTRING, 0, (LPARAM) "");
+                    SendDlgItemMessageW(hwnd, hdl->listid,
+                                        LB_ADDSTRING, 0, (LPARAM) L"");
 
                 hdl->srcitem = p_LBItemFromPt(dlm->hWnd, dlm->ptCursor, true);
                 hdl->dragging = false;
@@ -1986,7 +2006,11 @@ void winctrl_layout(struct dlgparam *dp, struct winctrls *wc,
             } else {
                 num_ids = 1;
                 editboxfw(&pos, false, true, NULL, 0, base_id);
-                SetDlgItemText(pos.hwnd, base_id, ctrl->label);
+                {
+                    wchar_t *wlabel = cn_w(ctrl->label);
+                    SetDlgItemTextW(pos.hwnd, base_id, wlabel);
+                    sfree(wlabel);
+                }
                 MakeDlgItemBorderless(pos.hwnd, base_id);
             }
             break;
@@ -2369,7 +2393,7 @@ static LRESULT CALLBACK cn_muted_button_subclass(
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
         RECT r;
-        char text[128];
+        wchar_t text[128];
         bool muted = GetProp(hwnd, CN_MUTED_PROP) != NULL;
         bool disabled = !IsWindowEnabled(hwnd);
         UINT state = SendMessage(hwnd, BM_GETSTATE, 0, 0);
@@ -2379,7 +2403,7 @@ static LRESULT CALLBACK cn_muted_button_subclass(
         int saveddc;
 
         GetClientRect(hwnd, &r);
-        GetWindowText(hwnd, text, sizeof(text));
+        GetWindowTextW(hwnd, text, lenof(text));
 
         /* 背景：按下时用高光，否则用标准按钮脸。 */
         FillRect(hdc, &r, GetSysColorBrush(
@@ -2402,7 +2426,7 @@ static LRESULT CALLBACK cn_muted_button_subclass(
             r.left += 1; r.right += 1;
             r.top += 1; r.bottom += 1;
         }
-        DrawText(hdc, text, -1, &r,
+        DrawTextW(hdc, text, -1, &r,
                  DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         SelectObject(hdc, oldfont);
         RestoreDC(hdc, saveddc);
@@ -2575,6 +2599,58 @@ int dlg_get_ctrl_left(dlgparam *dp, dlgcontrol *ctrl)
     return pt.x;
 }
 
+/*
+ * cn: 密码框的明文 / 掩码切换。
+ *
+ * ES_PASSWORD 样式决定了「有没有掩码」这件事本身，但真正画哪个字符
+ * 由 EM_SETPASSWORDCHAR 说了算：字符设成 0 就是明文，恢复成原值又是
+ * 掩码。这样切换不用重建控件，文本、光标、选中区全都原地保留。
+ *
+ * 原掩码字符不硬编码，切明文时先把它存进窗口属性，恢复时原样塞回。
+ * 理由：ES_PASSWORD 建出来的默认字符各版本不一（本机实测 0x25CF，圆点），
+ * 自己编一个常量会让恢复后的观感跟新建控件对不上。
+ *
+ * 消息必须走 W 版。这是本项目反复踩到的同一个坑：控件是 CreateWindowExW
+ * 建出来的 Unicode 窗口，用 A 版 SendMessage 发 EM_GETPASSWORDCHAR 会把
+ * 0x25CF 读成 0x25（宽字符被截成高字节），存下来再塞回去，密码框就变成
+ * 一排百分号。实测就是这样发现的。
+ */
+#define CN_PASSWORD_MASK_PROP L"cn_pwmask"
+
+void dlg_editbox_set_plain(dlgparam *dp, dlgcontrol *ctrl, bool plain)
+{
+    HWND hwnd;
+    HANDLE saved;
+
+    if (!dp || !dp->hwnd || !ctrl)
+        return;
+    hwnd = cn_ctrl_pick_hwnd(dp, ctrl, NULL);
+    if (!hwnd)
+        return;
+
+    if (plain) {
+        WPARAM mask = SendMessageW(hwnd, EM_GETPASSWORDCHAR, 0, 0);
+        if (mask) {
+            SetPropW(hwnd, CN_PASSWORD_MASK_PROP,
+                     (HANDLE)(ULONG_PTR)mask);
+            SendMessageW(hwnd, EM_SETPASSWORDCHAR, 0, 0);
+        }
+    } else {
+        /*
+         * 没存过原值就什么都不做：控件刚建出来本来就是掩码态，而
+         * EM_SETPASSWORDCHAR 传 0 恰恰是「取消掩码」，硬塞过去反而
+         * 会把一个新建的密码框变成明文。
+         */
+        saved = GetPropW(hwnd, CN_PASSWORD_MASK_PROP);
+        if (saved) {
+            SendMessageW(hwnd, EM_SETPASSWORDCHAR,
+                         (WPARAM)(ULONG_PTR)saved, 0);
+            RemovePropW(hwnd, CN_PASSWORD_MASK_PROP);
+        }
+    }
+    InvalidateRect(hwnd, NULL, TRUE);
+}
+
 void dlg_update_apply_buttons(dlgparam *dp)
 {
     if (!dp->ctrlbox || !dp->track_changes)
@@ -2707,19 +2783,19 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
             RECT r = di->rcItem;
             COLORREF bgcol, fgcol;
             HBRUSH bg;
-            char *text;
+            wchar_t *text;
             int len;
 
             if (di->itemID == (UINT)-1)
                 return true;           /* nothing to draw */
 
-            len = (int)SendMessage(di->hwndItem, LB_GETTEXTLEN,
-                                   di->itemID, 0);
+            len = (int)SendMessageW(di->hwndItem, LB_GETTEXTLEN,
+                                    di->itemID, 0);
             if (len < 0)
                 return true;
-            text = snewn(len + 1, char);
-            SendMessage(di->hwndItem, LB_GETTEXT, di->itemID,
-                        (LPARAM)text);
+            text = snewn(len + 1, wchar_t);
+            SendMessageW(di->hwndItem, LB_GETTEXT, di->itemID,
+                         (LPARAM)text);
 
             if (di->itemState & ODS_SELECTED) {
                 bgcol = GetSysColor(COLOR_HIGHLIGHT);
@@ -2755,10 +2831,10 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
                     int colwidth = hostport_colwidth(hdc);
                     int rule = r.right - colwidth;
                     RECT hr = r, pr = r;
-                    char *tab = text ? strchr(text, '\t') : NULL;
+                    wchar_t *tab = text ? wcschr(text, L'\t') : NULL;
 
                     if (tab) {
-                        *tab = '\0';   /* split in place */
+                        *tab = L'\0';  /* split in place */
                         hr.right = rule - HOSTPORT_GAP;
                         /*
                          * 端口格从竖线右侧留一份内边距开始，到行尾
@@ -2773,12 +2849,12 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
                     }
 
                     hr.left += HOSTPORT_GAP;
-                    DrawText(hdc, text, -1, &hr,
+                    DrawTextW(hdc, text, -1, &hr,
                              DT_LEFT | DT_VCENTER | DT_SINGLELINE |
                              DT_NOPREFIX);
 
                     if (tab) {
-                        DrawText(hdc, tab + 1, -1, &pr,
+                        DrawTextW(hdc, tab + 1, -1, &pr,
                                  DT_CENTER | DT_VCENTER | DT_SINGLELINE |
                                  DT_NOPREFIX);
                     }
@@ -2799,7 +2875,7 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
                     RECT tr = r;
                     tr.left += 2;
                     tr.right -= 2;
-                    DrawText(hdc, text, len, &tr,
+                    DrawTextW(hdc, text, len, &tr,
                              DT_LEFT | DT_VCENTER | DT_SINGLELINE |
                              DT_EXPANDTABS | DT_NOPREFIX);
                 }
@@ -2855,13 +2931,22 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
 
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, RGB(255, 255, 255));
-        GetTextExtentPoint32(hdc, (char *)c->data,
-                             strlen((char *)c->data), &s);
-        DrawEdge(hdc, &r, EDGE_ETCHED, BF_ADJUST | BF_RECT);
-        TextOut(hdc,
-                r.left + (r.right-r.left-s.cx)/2,
-                r.top + (r.bottom-r.top-s.cy)/2,
-                (char *)c->data, strlen((char *)c->data));
+        /*
+         * cn: c->data 是 UTF-8。标题条是自绘的，GetTextExtentPoint32 /
+         * TextOut 的 A 版会按进程代码页（本机 936）解释这些字节，中文
+         * 就成了乱码方块，所以这里转宽字符走 W 版量尺寸与绘制。
+         */
+        {
+            wchar_t *wtext = cn_w((const char *)c->data);
+            int wlen = (int)wcslen(wtext);
+            GetTextExtentPoint32W(hdc, wtext, wlen, &s);
+            DrawEdge(hdc, &r, EDGE_ETCHED, BF_ADJUST | BF_RECT);
+            TextOutW(hdc,
+                     r.left + (r.right-r.left-s.cx)/2,
+                     r.top + (r.bottom-r.top-s.cy)/2,
+                     wtext, wlen);
+            sfree(wtext);
+        }
 
         if (boldfont) {
             SelectObject(hdc, oldfont);
@@ -2906,16 +2991,16 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
             ctrl->editbox.has_list) {
             if (HIWORD(wParam) == CBN_SELCHANGE) {
                 int index, len;
-                char *text;
+                wchar_t *text;
 
-                index = SendDlgItemMessage(dp->hwnd, c->base_id+1,
-                                           CB_GETCURSEL, 0, 0);
-                len = SendDlgItemMessage(dp->hwnd, c->base_id+1,
-                                         CB_GETLBTEXTLEN, index, 0);
-                text = snewn(len+1, char);
-                SendDlgItemMessage(dp->hwnd, c->base_id+1, CB_GETLBTEXT,
-                                   index, (LPARAM)text);
-                SetDlgItemText(dp->hwnd, c->base_id+1, text);
+                index = SendDlgItemMessageW(dp->hwnd, c->base_id+1,
+                                            CB_GETCURSEL, 0, 0);
+                len = SendDlgItemMessageW(dp->hwnd, c->base_id+1,
+                                          CB_GETLBTEXTLEN, index, 0);
+                text = snewn(len+1, wchar_t);
+                SendDlgItemMessageW(dp->hwnd, c->base_id+1, CB_GETLBTEXT,
+                                    index, (LPARAM)text);
+                SetDlgItemTextW(dp->hwnd, c->base_id+1, text);
                 sfree(text);
                 dlg_send_event(ctrl, dp, EVENT_VALCHANGE);
             } else if (HIWORD(wParam) == CBN_EDITCHANGE) {
@@ -3245,9 +3330,8 @@ bool dlg_checkbox_get(dlgcontrol *ctrl, dlgparam *dp)
 
 void dlg_editbox_set(dlgcontrol *ctrl, dlgparam *dp, char const *text)
 {
-    struct winctrl *c = dlg_findbyctrl(dp, ctrl);
-    assert(c && c->ctrl->type == CTRL_EDITBOX);
-    SetDlgItemText(dp->hwnd, c->base_id+1, text);
+    /* cn: 仓库内部字符串一律 UTF-8，直接走上游的 utf8 变体。 */
+    dlg_editbox_set_utf8(ctrl, dp, text);
 }
 
 void dlg_editbox_set_utf8(dlgcontrol *ctrl, dlgparam *dp, char const *text)
@@ -3261,9 +3345,8 @@ void dlg_editbox_set_utf8(dlgcontrol *ctrl, dlgparam *dp, char const *text)
 
 char *dlg_editbox_get(dlgcontrol *ctrl, dlgparam *dp)
 {
-    struct winctrl *c = dlg_findbyctrl(dp, ctrl);
-    assert(c && c->ctrl->type == CTRL_EDITBOX);
-    return GetDlgItemText_alloc(dp->hwnd, c->base_id+1);
+    /* cn: 读回来也按 UTF-8 交付，和内部约定一致。 */
+    return dlg_editbox_get_utf8(ctrl, dp);
 }
 
 char *dlg_editbox_get_utf8(dlgcontrol *ctrl, dlgparam *dp)
@@ -3367,7 +3450,11 @@ void dlg_listbox_add(dlgcontrol *ctrl, dlgparam *dp, char const *text)
              c->ctrl->editbox.has_list)));
     msg = (c->ctrl->type==CTRL_LISTBOX && c->ctrl->listbox.height!=0 ?
            LB_ADDSTRING : CB_ADDSTRING);
-    SendDlgItemMessage(dp->hwnd, c->base_id+1, msg, 0, (LPARAM)text);
+    {
+        wchar_t *wtext = cn_w(text);
+        SendDlgItemMessageW(dp->hwnd, c->base_id+1, msg, 0, (LPARAM)wtext);
+        sfree(wtext);
+    }
 }
 
 /*
@@ -3390,8 +3477,13 @@ void dlg_listbox_addwithid(dlgcontrol *ctrl, dlgparam *dp,
            LB_ADDSTRING : CB_ADDSTRING);
     msg2 = (c->ctrl->type==CTRL_LISTBOX && c->ctrl->listbox.height!=0 ?
             LB_SETITEMDATA : CB_SETITEMDATA);
-    index = SendDlgItemMessage(dp->hwnd, c->base_id+1, msg, 0, (LPARAM)text);
-    SendDlgItemMessage(dp->hwnd, c->base_id+1, msg2, index, (LPARAM)id);
+    {
+        wchar_t *wtext = cn_w(text);
+        index = SendDlgItemMessageW(dp->hwnd, c->base_id+1, msg, 0,
+                                    (LPARAM)wtext);
+        sfree(wtext);
+    }
+    SendDlgItemMessageW(dp->hwnd, c->base_id+1, msg2, index, (LPARAM)id);
 }
 
 int dlg_listbox_getid(dlgcontrol *ctrl, dlgparam *dp, int index)
@@ -3730,7 +3822,11 @@ void dlg_text_set(dlgcontrol *ctrl, dlgparam *dp, char const *text)
 {
     struct winctrl *c = dlg_findbyctrl(dp, ctrl);
     assert(c && c->ctrl->type == CTRL_TEXT);
-    SetDlgItemText(dp->hwnd, c->base_id, text);
+    {
+        wchar_t *wtext = cn_w(text);
+        SetDlgItemTextW(dp->hwnd, c->base_id, wtext);
+        sfree(wtext);
+    }
 }
 
 void dlg_label_change(dlgcontrol *ctrl, dlgparam *dp, char const *text)
@@ -3776,7 +3872,9 @@ void dlg_label_change(dlgcontrol *ctrl, dlgparam *dp, char const *text)
         unreachable("bad control type in label_change");
     }
     if (escaped) {
-        SetDlgItemText(dp->hwnd, id, escaped);
+        wchar_t *wescaped = cn_w(escaped);
+        SetDlgItemTextW(dp->hwnd, id, wescaped);
+        sfree(wescaped);
         sfree(escaped);
     }
 }
@@ -3821,7 +3919,11 @@ void dlg_fontsel_set(dlgcontrol *ctrl, dlgparam *dp, FontSpec *fs)
         buf = dupprintf("字体: %s, %s%d %s", fs->name, boldstr,
                         (fs->height < 0 ? -fs->height : fs->height),
                         (fs->height < 0 ? "像素" : "点"));
-    SetDlgItemText(dp->hwnd, c->base_id+1, buf);
+    {
+        wchar_t *wbuf = cn_w(buf);
+        SetDlgItemTextW(dp->hwnd, c->base_id+1, wbuf);
+        sfree(wbuf);
+    }
     sfree(buf);
 
     /*
@@ -3906,14 +4008,20 @@ void dlg_beep(dlgparam *dp)
 
 void dlg_error_msg(dlgparam *dp, const char *msg)
 {
-    MessageBox(dp->hwnd, msg,
-               dp->errtitle ? dp->errtitle : NULL,
-               MB_OK | MB_ICONERROR);
+    wchar_t *wmsg = cn_w(msg);
+    wchar_t *wtitle = dp->errtitle ? cn_w(dp->errtitle) : NULL;
+    MessageBoxW(dp->hwnd, wmsg, wtitle, MB_OK | MB_ICONERROR);
+    sfree(wmsg);
+    sfree(wtitle);
 }
 
 void dlg_info_msg(dlgparam *dp, const char *msg)
 {
-    MessageBox(dp->hwnd, msg, "PuTTY", MB_OK | MB_ICONINFORMATION);
+    wchar_t *wmsg = cn_w(msg);
+    wchar_t *wtitle = cn_w("PuTTY");
+    MessageBoxW(dp->hwnd, wmsg, wtitle, MB_OK | MB_ICONINFORMATION);
+    sfree(wmsg);
+    sfree(wtitle);
 }
 
 /*

@@ -161,6 +161,8 @@ target_link_libraries(bidi_test guiterminal utils ${platform_libraries})
 add_executable(test_conf
   test/test_conf.c
   stubs/no-agent.c
+  stubs/no-cmdline-tooltype.c # cmdline.c 引用的前端符号
+  stubs/no-console.c         # console.c 不在测试目标里
   stubs/no-callback.c
   stubs/no-gss.c
   stubs/no-ldisc.c

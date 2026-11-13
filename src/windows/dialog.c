@@ -121,6 +121,25 @@ static void pds_free(PortableDialogStuff *pds)
  * 旦对不上，整个定位函数就静默返回、什么都不做。属性挂在控件自身，
  * 随控件生死，不依赖任何编码假设。
  */
+static wchar_t *cn_w(const char *s)
+{
+    return dup_mb_to_wc(CP_UTF8, s ? s : "");
+}
+
+/*
+ * cn: 控件文本一律按宽字符读回，再与源码里的 UTF-8 字面量比较。
+ * 用 A 版 GetWindowText 读回来的是进程代码页字节，在 GBK 系统上与
+ * UTF-8 字面量根本对不上，这类「按文字找控件」的布局代码就会静默
+ * 失效。前缀比较，允许按钮文本带助记符后缀。
+ */
+static bool cn_text_is(const wchar_t *text, const char *utf8)
+{
+    wchar_t *w = cn_w(utf8);
+    bool match = !wcsncmp(text, w, wcslen(w));
+    sfree(w);
+    return match;
+}
+
 static HWND cn_find_button(HWND hwnd, const char *prop, const char *label)
 {
     HWND h = NULL;
@@ -131,9 +150,9 @@ static HWND cn_find_button(HWND hwnd, const char *prop, const char *label)
     if (label && *label) {
         h = NULL;
         while ((h = FindWindowEx(hwnd, h, "Button", NULL)) != NULL) {
-            char text[64];
-            GetWindowText(h, text, sizeof(text));
-            if (!strncmp(text, label, strlen(label)))
+            wchar_t text[64];
+            GetWindowTextW(h, text, lenof(text));
+            if (cn_text_is(text, label))
                 return h;
         }
     }
@@ -266,9 +285,9 @@ static void cn_style_snapshot_buttons(HWND hwnd)
         HWND hgrp = NULL;
         h = 0;
         while ((h = FindWindowEx(hwnd, h, "Button", NULL)) != NULL) {
-            char text[64];
-            GetWindowText(h, text, sizeof(text));
-            if (strncmp(text, "已保存的会话", 18) == 0) {
+            wchar_t text[64];
+            GetWindowTextW(h, text, lenof(text));
+            if (cn_text_is(text, "已保存的会话")) {
                 hgrp = h;
                 break;
             }
@@ -293,12 +312,12 @@ static void cn_style_snapshot_buttons(HWND hwnd)
              */
             h = 0;
             while ((h = FindWindowEx(hwnd, h, "Button", NULL)) != NULL) {
-                char text[64];
-                GetWindowText(h, text, sizeof(text));
-                if (strncmp(text, "保存", 6) == 0 ||
-                    strncmp(text, "文件传输", 12) == 0 ||
-                    strncmp(text, "连接", 6) == 0 ||
-                    strncmp(text, "退出", 6) == 0) {
+                wchar_t text[64];
+                GetWindowTextW(h, text, lenof(text));
+                if (cn_text_is(text, "保存") ||
+                    cn_text_is(text, "文件传输") ||
+                    cn_text_is(text, "连接") ||
+                    cn_text_is(text, "退出")) {
                     RECT rb;
                     if (!GetWindowRect(h, &rb))
                         continue;
@@ -319,9 +338,9 @@ static void cn_style_snapshot_buttons(HWND hwnd)
             HWND hsave = NULL;
             h = 0;
             while ((h = FindWindowEx(hwnd, h, "Button", NULL)) != NULL) {
-                char text[64];
-                GetWindowText(h, text, sizeof(text));
-                if (strncmp(text, "保存", 6) == 0) {
+                wchar_t text[64];
+                GetWindowTextW(h, text, lenof(text));
+                if (cn_text_is(text, "保存")) {
                     hsave = h;
                     break;
                 }
@@ -525,8 +544,11 @@ static void pds_initdialog_start(PortableDialogStuff *pds, HWND hwnd)
 {
     pds->dp->hwnd = hwnd;
 
-    if (pds->dp->wintitle)     /* apply override title, if provided */
-        SetWindowText(hwnd, pds->dp->wintitle);
+    if (pds->dp->wintitle) {   /* apply override title, if provided */
+        wchar_t *wtitle = cn_w(pds->dp->wintitle);
+        SetWindowTextW(hwnd, wtitle);
+        sfree(wtitle);
+    }
 
     /*
      * The title bar deliberately carries no context-help "?" button;
@@ -820,20 +842,19 @@ static void update_logbox_horizontal_extent(HWND logbox)
      * all of them. */
     HWND listbox = GetDlgItem(logbox, IDN_LIST);
     HDC hdc = GetDC(listbox);
-    int count = SendMessage(listbox, LB_GETCOUNT, 0, 0);
-    strbuf *sb = strbuf_new();
+    int count = SendMessageW(listbox, LB_GETCOUNT, 0, 0);
     WPARAM maxwidth = 0;
     for (int i = 0; i < count; i++) {
-        size_t len = SendMessage(listbox, LB_GETTEXTLEN, i, 0);
-        strbuf_clear(sb);
-        SendMessage(listbox, LB_GETTEXT, i, (LPARAM)strbuf_append(sb, len));
+        int len = (int)SendMessageW(listbox, LB_GETTEXTLEN, i, 0);
+        wchar_t *wtxt = snewn(len + 1, wchar_t);
+        SendMessageW(listbox, LB_GETTEXT, i, (LPARAM)wtxt);
         SIZE size;
-        if (GetTextExtentPoint(hdc, sb->s, sb->len, &size)) {
+        if (GetTextExtentPointW(hdc, wtxt, len, &size)) {
             if (maxwidth < size.cx)
                 maxwidth = size.cx;
         }
+        sfree(wtxt);
     }
-    strbuf_free(sb);
     ReleaseDC(listbox, hdc);
 
     /*
@@ -862,19 +883,26 @@ static INT_PTR CALLBACK LogProc(HWND hwnd, UINT msg,
     switch (msg) {
       case WM_INITDIALOG: {
         char *str = dupprintf("%s 事件日志", appname);
-        SetWindowText(hwnd, str);
+        wchar_t *wstr = cn_w(str);
+        SetWindowTextW(hwnd, wstr);
+        sfree(wstr);
         sfree(str);
 
         static int tabs[4] = { 78, 108 };
         SendDlgItemMessage(hwnd, IDN_LIST, LB_SETTABSTOPS, 2,
                            (LPARAM) tabs);
 
-        for (i = 0; i < ninitial; i++)
-            SendDlgItemMessage(hwnd, IDN_LIST, LB_ADDSTRING,
-                               0, (LPARAM) events_initial[i]);
-        for (i = 0; i < ncircular; i++)
-            SendDlgItemMessage(hwnd, IDN_LIST, LB_ADDSTRING,
-                               0, (LPARAM) events_circular[(circular_first + i) % LOGEVENT_CIRCULAR_MAX]);
+        for (i = 0; i < ninitial; i++) {
+            wchar_t *w = cn_w(events_initial[i]);
+            SendDlgItemMessageW(hwnd, IDN_LIST, LB_ADDSTRING, 0, (LPARAM) w);
+            sfree(w);
+        }
+        for (i = 0; i < ncircular; i++) {
+            wchar_t *w = cn_w(
+                events_circular[(circular_first + i) % LOGEVENT_CIRCULAR_MAX]);
+            SendDlgItemMessageW(hwnd, IDN_LIST, LB_ADDSTRING, 0, (LPARAM) w);
+            sfree(w);
+        }
         update_logbox_horizontal_extent(hwnd);
 
         return 1;
@@ -945,9 +973,13 @@ static INT_PTR CALLBACK LicenceProc(HWND hwnd, UINT msg,
     switch (msg) {
       case WM_INITDIALOG: {
         char *str = dupprintf("%s 许可证", appname);
-        SetWindowText(hwnd, str);
+        wchar_t *wstr = cn_w(str);
+        SetWindowTextW(hwnd, wstr);
+        sfree(wstr);
         sfree(str);
-        SetDlgItemText(hwnd, IDA_TEXT, LICENCE_TEXT("\r\n\r\n"));
+        wchar_t *wlic = cn_w(LICENCE_TEXT("\r\n\r\n"));
+        SetDlgItemTextW(hwnd, IDA_TEXT, wlic);
+        sfree(wlic);
         return 1;
       }
       case WM_COMMAND:
@@ -973,7 +1005,9 @@ static INT_PTR CALLBACK AboutProc(HWND hwnd, UINT msg,
     switch (msg) {
       case WM_INITDIALOG: {
         str = dupprintf("关于 %s", appname);
-        SetWindowText(hwnd, str);
+        wchar_t *wstr = cn_w(str);
+        SetWindowTextW(hwnd, wstr);
+        sfree(wstr);
         sfree(str);
         char *buildinfo_text = buildinfo("\r\n");
         char *text = dupprintf(
@@ -981,7 +1015,9 @@ static INT_PTR CALLBACK AboutProc(HWND hwnd, UINT msg,
             appname, ver, buildinfo_text,
             "(C) " SHORT_COPYRIGHT_DETAILS ". 保留所有权利。");
         sfree(buildinfo_text);
-        SetDlgItemText(hwnd, IDA_TEXT, text);
+        wchar_t *wtext = cn_w(text);
+        SetDlgItemTextW(hwnd, IDA_TEXT, wtext);
+        sfree(wtext);
         MakeDlgItemBorderless(hwnd, IDA_TEXT);
         sfree(text);
         return 1;
@@ -1040,9 +1076,12 @@ struct treeview_faff {
 static HTREEITEM treeview_insert(struct treeview_faff *faff,
                                  int level, char *text, char *path)
 {
-    TVINSERTSTRUCT ins;
+    /* cn: 树的文本走 W 接口。pszText 必须按 UTF-8 解码成宽字符，
+     * 否则 A 接口会拿进程代码页(GBK)去解 UTF-8 字节，整棵树乱码。 */
+    TVINSERTSTRUCTW ins;
     int i;
     HTREEITEM newitem;
+    wchar_t *wtext = cn_w(text);
     ins.hParent = (level > 0 ? faff->lastat[level - 1] : TVI_ROOT);
     ins.hInsertAfter = faff->lastat[level];
 #if _WIN32_IE >= 0x0400 && defined NONAMELESSUNION
@@ -1051,10 +1090,12 @@ static HTREEITEM treeview_insert(struct treeview_faff *faff,
 #define INSITEM item
 #endif
     ins.INSITEM.mask = TVIF_TEXT | TVIF_PARAM;
-    ins.INSITEM.pszText = text;
-    ins.INSITEM.cchTextMax = strlen(text)+1;
+    ins.INSITEM.pszText = wtext;
+    ins.INSITEM.cchTextMax = 0;
     ins.INSITEM.lParam = (LPARAM)path;
-    newitem = TreeView_InsertItem(faff->treeview, &ins);
+    newitem = (HTREEITEM)SendMessageW(faff->treeview, TVM_INSERTITEMW,
+                                      0, (LPARAM)&ins);
+    sfree(wtext);
     if (level > 0)
         TreeView_Expand(faff->treeview, faff->lastat[level - 1],
                         (level > 1 ? TVE_COLLAPSE : TVE_EXPAND));
@@ -1081,13 +1122,10 @@ static HTREEITEM treeview_find_by_path(HWND treeview, HTREEITEM item,
                                        const char *pathname)
 {
     while (item) {
-        TVITEMEX tv;
-        char buf[256];
-        tv.mask = TVIF_TEXT | TVIF_PARAM | TVIF_HANDLE;
+        TVITEMW tv;
+        tv.mask = TVIF_PARAM | TVIF_HANDLE;
         tv.hItem = item;
-        tv.pszText = buf;
-        tv.cchTextMax = sizeof(buf);
-        if (TreeView_GetItem(treeview, &tv)) {
+        if (SendMessageW(treeview, TVM_GETITEMW, 0, (LPARAM)&tv)) {
             if (tv.lParam && !strcmp((const char *)tv.lParam, pathname))
                 return item;
 
@@ -1209,12 +1247,17 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
             r.top = 3;
             r.bottom = r.top + 10;
             MapDialogRect(hwnd, &r);
-            tvstatic = CreateWindowEx(0, "STATIC", "分类(&G)：",
-                                      WS_CHILD | WS_VISIBLE,
-                                      r.left, r.top,
-                                      r.right - r.left, r.bottom - r.top,
-                                      hwnd, (HMENU) IDCX_TVSTATIC, hinst,
-                                      NULL);
+            {
+                wchar_t *wtvstatic = cn_w("分类(&G)：");
+                tvstatic = CreateWindowExW(0, L"STATIC", wtvstatic,
+                                           WS_CHILD | WS_VISIBLE,
+                                           r.left, r.top,
+                                           r.right - r.left,
+                                           r.bottom - r.top,
+                                           hwnd, (HMENU) IDCX_TVSTATIC, hinst,
+                                           NULL);
+                sfree(wtvstatic);
+            }
             font = SendMessage(hwnd, WM_GETFONT, 0, 0);
             SendMessage(tvstatic, WM_SETFONT, font, MAKELPARAM(true, 0));
 
@@ -1225,15 +1268,15 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
              * （按钮行已上移到组框底+10，树需同步让位）。 */
             r.bottom = r.top + 202;
             MapDialogRect(hwnd, &r);
-            treeview = CreateWindowEx(WS_EX_CLIENTEDGE, WC_TREEVIEW, "",
-                                      WS_CHILD | WS_VISIBLE |
-                                      WS_TABSTOP | TVS_HASLINES |
-                                      TVS_DISABLEDRAGDROP | TVS_HASBUTTONS
-                                      | TVS_LINESATROOT |
-                                      TVS_SHOWSELALWAYS, r.left, r.top,
-                                      r.right - r.left, r.bottom - r.top,
-                                      hwnd, (HMENU) IDCX_TREEVIEW, hinst,
-                                      NULL);
+            treeview = CreateWindowExW(WS_EX_CLIENTEDGE, WC_TREEVIEWW, L"",
+                                       WS_CHILD | WS_VISIBLE |
+                                       WS_TABSTOP | TVS_HASLINES |
+                                       TVS_DISABLEDRAGDROP | TVS_HASBUTTONS
+                                       | TVS_LINESATROOT |
+                                       TVS_SHOWSELALWAYS, r.left, r.top,
+                                       r.right - r.left, r.bottom - r.top,
+                                       hwnd, (HMENU) IDCX_TREEVIEW, hinst,
+                                       NULL);
             font = SendMessage(hwnd, WM_GETFONT, 0, 0);
             SendMessage(treeview, WM_SETFONT, font, MAKELPARAM(true, 0));
             tvfaff.treeview = treeview;
@@ -1359,9 +1402,9 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
             }
             h = 0;
             while ((h = FindWindowEx(hwnd, h, "Button", NULL)) != NULL) {
-                char text[64];
-                GetWindowText(h, text, sizeof(text));
-                if (strncmp(text, "初始化设置", 15) == 0)
+                wchar_t text[64];
+                GetWindowTextW(h, text, lenof(text));
+                if (cn_text_is(text, "初始化设置"))
                     cn_init = h;
             }
             if (cn_list && cn_init) {
@@ -1383,8 +1426,10 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
             char *err = save_screenshot(
                 hwnd, dialog_box_demo_screenshot_filename);
             if (err) {
-                MessageBox(hwnd, err, "演示截图失败",
-                           MB_OK | MB_ICONERROR);
+                wchar_t *werr = cn_w(err), *wcap = cn_w("演示截图失败");
+                MessageBoxW(hwnd, werr, wcap, MB_OK | MB_ICONERROR);
+                sfree(werr);
+                sfree(wcap);
                 sfree(err);
             }
             ShinyEndDialog(hwnd, 0);
@@ -1417,8 +1462,7 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
              * ignored.
              */
             HTREEITEM i;
-            TVITEM item;
-            char buffer[64];
+            TVITEMW item;
 
             if (!pds->initialised)
                 return 0;
@@ -1427,11 +1471,12 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
 
             SendMessage (hwnd, WM_SETREDRAW, false, 0);
 
+            /* cn: 这里只用到 lParam（页面 pathname），不必再取文本，
+             * 顺带避开 A 版取文本带来的代码页问题。 */
             item.hItem = i;
-            item.pszText = buffer;
-            item.cchTextMax = sizeof(buffer);
-            item.mask = TVIF_TEXT | TVIF_PARAM;
-            TreeView_GetItem(((LPNMHDR) lParam)->hwndFrom, &item);
+            item.mask = TVIF_PARAM;
+            SendMessageW(((LPNMHDR) lParam)->hwndFrom, TVM_GETITEMW,
+                         0, (LPARAM)&item);
             {
                 /* Destroy all controls in the currently visible panel. */
                 int k;
@@ -1655,10 +1700,13 @@ static void win_gui_eventlog(LogPolicy *lp, const char *string)
     *location = dupcat(timebuf, string);
     if (logbox) {
         int count;
-        SendDlgItemMessage(logbox, IDN_LIST, LB_ADDSTRING,
-                           0, (LPARAM) *location);
-        count = SendDlgItemMessage(logbox, IDN_LIST, LB_GETCOUNT, 0, 0);
-        SendDlgItemMessage(logbox, IDN_LIST, LB_SETTOPINDEX, count - 1, 0);
+        {
+            wchar_t *w = cn_w(*location);
+            SendDlgItemMessageW(logbox, IDN_LIST, LB_ADDSTRING, 0, (LPARAM) w);
+            sfree(w);
+        }
+        count = SendDlgItemMessageW(logbox, IDN_LIST, LB_GETCOUNT, 0, 0);
+        SendDlgItemMessageW(logbox, IDN_LIST, LB_SETTOPINDEX, count - 1, 0);
 
         update_logbox_horizontal_extent(logbox);
     }
@@ -1755,17 +1803,23 @@ static INT_PTR HostKeyMoreInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
                 }
 
                 MapDialogRect(hwnd, &rk);
-                HWND ctl = CreateWindowEx(
-                    0, "STATIC", key, WS_CHILD | WS_VISIBLE,
+                wchar_t *wkey = cn_w(key);
+                HWND ctl = CreateWindowExW(
+                    0, L"STATIC", wkey, WS_CHILD | WS_VISIBLE,
                     rk.left, rk.top, rk.right, rk.bottom,
                     hwnd, (HMENU)(ULONG_PTR)index++, hinst, NULL);
+                sfree(wkey);
                 SendMessage(ctl, WM_SETFONT, font, MAKELPARAM(true, 0));
 
                 MapDialogRect(hwnd, &rv);
-                ctl = CreateWindowEx(
-                    WS_EX_CLIENTEDGE, "EDIT", item->text, editstyle,
-                    rv.left, rv.top, rv.right, rv.bottom,
-                    hwnd, (HMENU)(ULONG_PTR)index++, hinst, NULL);
+                {
+                    wchar_t *wval = cn_w(item->text);
+                    ctl = CreateWindowExW(
+                        WS_EX_CLIENTEDGE, L"EDIT", wval, editstyle,
+                        rv.left, rv.top, rv.right, rv.bottom,
+                        hwnd, (HMENU)(ULONG_PTR)index++, hinst, NULL);
+                    sfree(wval);
+                }
                 SendMessage(ctl, WM_SETFONT, font, MAKELPARAM(true, 0));
                 break;
               }
@@ -1867,15 +1921,25 @@ static INT_PTR HostKeyDialogProc(HWND hwnd, UINT msg,
 
         LPCTSTR iconid = IDI_QUESTION;
         if (scary_heading) {
-            SetDlgItemText(hwnd, IDC_HK_TITLE, scary_heading);
+            wchar_t *wh = cn_w(scary_heading);
+            SetDlgItemTextW(hwnd, IDC_HK_TITLE, wh);
+            sfree(wh);
             iconid = IDI_WARNING;
         }
 
-        SetDlgItemText(hwnd, IDC_HK_TEXT, dlg_text->s);
+        {
+            wchar_t *wt = cn_w(dlg_text->s);
+            SetDlgItemTextW(hwnd, IDC_HK_TEXT, wt);
+            sfree(wt);
+        }
         MakeDlgItemBorderless(hwnd, IDC_HK_TEXT);
         strbuf_free(dlg_text);
 
-        SetWindowText(hwnd, dlg_title);
+        {
+            wchar_t *wtitle = cn_w(dlg_title);
+            SetWindowTextW(hwnd, wtitle);
+            sfree(wtitle);
+        }
 
         if (!ctx->has_title) {
             HWND item = GetDlgItem(hwnd, IDC_HK_TITLE);
@@ -2050,8 +2114,11 @@ SeatPromptResult win_seat_confirm_weak_crypto_primitive(
     strbuf *dlg_text = strbuf_new();
     const char *dlg_title = process_seatdialogtext(dlg_text, NULL, text);
 
-    int mbret = MessageBox(NULL, dlg_text->s, dlg_title,
-                           MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2);
+    wchar_t *wtext = cn_w(dlg_text->s), *wtitle = cn_w(dlg_title);
+    int mbret = MessageBoxW(NULL, wtext, wtitle,
+                            MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2);
+    sfree(wtext);
+    sfree(wtitle);
     socket_reselect_all();
     strbuf_free(dlg_text);
 
@@ -2068,8 +2135,11 @@ SeatPromptResult win_seat_confirm_weak_cached_hostkey(
     strbuf *dlg_text = strbuf_new();
     const char *dlg_title = process_seatdialogtext(dlg_text, NULL, text);
 
-    int mbret = MessageBox(NULL, dlg_text->s, dlg_title,
-                           MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2);
+    wchar_t *wtext = cn_w(dlg_text->s), *wtitle = cn_w(dlg_title);
+    int mbret = MessageBoxW(NULL, wtext, wtitle,
+                            MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2);
+    sfree(wtext);
+    sfree(wtitle);
     socket_reselect_all();
     strbuf_free(dlg_text);
 
@@ -2151,7 +2221,12 @@ void old_keyfile_warning(void)
     msg = dupprintf(message, appname);
     title = dupprintf(mbtitle, appname);
 
-    MessageBox(NULL, msg, title, MB_OK);
+    {
+        wchar_t *wmsg = cn_w(msg), *wtitle = cn_w(title);
+        MessageBoxW(NULL, wmsg, wtitle, MB_OK);
+        sfree(wmsg);
+        sfree(wtitle);
+    }
 
     socket_reselect_all();
 
@@ -2354,7 +2429,7 @@ static LRESULT CALLBACK cn_inline_wndproc(HWND hwnd, UINT msg,
     }
 
     if (ie && ie->oldproc)
-        return CallWindowProc(ie->oldproc, hwnd, msg, wparam, lparam);
+        return CallWindowProcW(ie->oldproc, hwnd, msg, wparam, lparam);
     return DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 

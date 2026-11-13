@@ -8,10 +8,14 @@
 
 Filename *filename_from_str(const char *str)
 {
+    /*
+     * 入参按 UTF-8 解释（本项目内部字符串统一 UTF-8），cpath 与
+     * utf8path 同义，不再经过 ACP。
+     */
     Filename *fn = snew(Filename);
     fn->cpath = dupstr(str);
-    fn->wpath = dup_mb_to_wc(DEFAULT_CODEPAGE, fn->cpath);
-    fn->utf8path = encode_wide_string_as_utf8(fn->wpath);
+    fn->wpath = decode_utf8_to_wide_string(fn->cpath);
+    fn->utf8path = dupstr(fn->cpath);
     return fn;
 }
 
@@ -19,8 +23,8 @@ Filename *filename_from_wstr(const wchar_t *str)
 {
     Filename *fn = snew(Filename);
     fn->wpath = dupwcs(str);
-    fn->cpath = dup_wc_to_mb(DEFAULT_CODEPAGE, fn->wpath, "?");
-    fn->utf8path = encode_wide_string_as_utf8(fn->wpath);
+    fn->cpath = encode_wide_string_as_utf8(fn->wpath);
+    fn->utf8path = dupstr(fn->cpath);
     return fn;
 }
 
@@ -29,7 +33,7 @@ Filename *filename_from_utf8(const char *ustr)
     Filename *fn = snew(Filename);
     fn->utf8path = dupstr(ustr);
     fn->wpath = decode_utf8_to_wide_string(fn->utf8path);
-    fn->cpath = dup_wc_to_mb(DEFAULT_CODEPAGE, fn->wpath, "?");
+    fn->cpath = dupstr(fn->utf8path);
     return fn;
 }
 
@@ -44,7 +48,8 @@ Filename *filename_copy(const Filename *fn)
 
 const char *filename_to_str(const Filename *fn)
 {
-    return fn->cpath;                  /* FIXME */
+    /* cpath 现在就是 UTF-8，与内部字符串约定一致。 */
+    return fn->cpath;
 }
 
 const wchar_t *filename_to_wstr(const Filename *fn)
@@ -100,7 +105,7 @@ FILE *f_open(const Filename *fn, const char *mode, bool isprivate)
         return fopen(fn->cpath, mode);
 #endif
 
-    wchar_t *wmode = dup_mb_to_wc(DEFAULT_CODEPAGE, mode);
+    wchar_t *wmode = dup_mb_to_wc(CP_UTF8, mode);
     FILE *fp = _wfopen(fn->wpath, wmode);
     sfree(wmode);
     return fp;

@@ -32,6 +32,43 @@
 #include <richedit.h>
 #include <mmsystem.h>
 
+/*
+ * cn: 内部字符串统一是 UTF-8，而 Win32 的文本接口分 A/W 两版 —— A 版按
+ * 进程代码页（本机 936）解释字节，UTF-8 中文进去就是乱码。所以凡是从
+ * 内部字符串直接喂给系统对象的（菜单、消息框），都必须在这里显式转成
+ * 宽字符。三个 helper 都是「转换 -> 调 W 版 -> 释放」，不留悬垂缓冲。
+ */
+static wchar_t *cn_w(const char *s)
+{
+    return s ? dup_mb_to_wc(CP_UTF8, s) : NULL;
+}
+
+static void cn_append_menu(HMENU menu, UINT flags, UINT_PTR id,
+                           const char *text)
+{
+    wchar_t *w = cn_w(text);
+    AppendMenuW(menu, flags, id, w);
+    sfree(w);
+}
+
+static void cn_insert_menu(HMENU menu, UINT item, UINT flags, UINT_PTR id,
+                           const char *text)
+{
+    wchar_t *w = cn_w(text);
+    InsertMenuW(menu, item, flags, id, w);
+    sfree(w);
+}
+
+static int cn_message_box(HWND hwnd, const char *text, const char *title,
+                          UINT type)
+{
+    wchar_t *wt = cn_w(text), *wc = cn_w(title);
+    int ret = MessageBoxW(hwnd, wt, wc, type);
+    sfree(wt);
+    sfree(wc);
+    return ret;
+}
+
 /* From MSDN: In the WM_SYSCOMMAND message, the four low-order bits of
  * wParam are used by Windows, and should be masked off, so we shouldn't
  * attempt to store information in them. Hence all these identifiers have
@@ -331,7 +368,7 @@ static void start_backend(WinGuiSeat *wgs)
          * 「卡在连接中」的错觉。窗口随后退出（原行为）。
          */
         cn_set_offline_title(wgs);
-        MessageBox(NULL, msg, str, MB_ICONERROR | MB_OK);
+        cn_message_box(NULL, msg, str, MB_ICONERROR | MB_OK);
         sfree(str);
         sfree(msg);
         exit(0);
@@ -362,7 +399,7 @@ static void start_backend(WinGuiSeat *wgs)
             PROT_SERIAL ? dupcat(wgs->title_hostname, "（正在连接...）", NULL)
             : dupprintf("%s：%d（正在连接...）", wgs->title_hostname,
                         wgs->title_port);
-        win_set_title(&wgs->termwin, connecting, DEFAULT_CODEPAGE);
+        win_set_title(&wgs->termwin, connecting, CP_UTF8);
         sfree(connecting);
     } else {
         term_setup_window_titles(wgs->term, realhost, wgs->title_port);
@@ -422,8 +459,8 @@ static void cn_set_offline_title(WinGuiSeat *wgs)
     } else {
         newtitle = dupprintf("%s (已断开)", appname);
     }
-    win_set_icon_title(&wgs->termwin, newtitle, DEFAULT_CODEPAGE);
-    win_set_title(&wgs->termwin, newtitle, DEFAULT_CODEPAGE);
+    win_set_icon_title(&wgs->termwin, newtitle, CP_UTF8);
+    win_set_title(&wgs->termwin, newtitle, CP_UTF8);
     sfree(newtitle);
 }
 
@@ -519,7 +556,7 @@ static void close_session(void *vctx)
      */
     for (i = 0; i < lenof(wgs->popup_menus); i++) {
         DeleteMenu(wgs->popup_menus[i].menu, IDM_RESTART, MF_BYCOMMAND);
-        InsertMenu(wgs->popup_menus[i].menu, IDM_DUPSESS,
+        cn_insert_menu(wgs->popup_menus[i].menu, IDM_DUPSESS,
                    MF_BYCOMMAND | MF_ENABLED, IDM_RESTART, "重启会话(&R)");
     }
 
@@ -559,7 +596,7 @@ static void sw_SetWindowText(HWND hwnd, wchar_t *text)
     if (unicode_window) {
         SetWindowTextW(hwnd, text);
     } else {
-        char *mb = dup_wc_to_mb(DEFAULT_CODEPAGE, text, "?");
+        char *mb = dup_wc_to_mb(CP_UTF8, text, "?");
         SetWindowTextA(hwnd, mb);
         sfree(mb);
     }
@@ -679,7 +716,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     hr = CoInitialize(NULL);
     if (hr != S_OK && hr != S_FALSE) {
         char *str = dupprintf("%s 致命错误", appname);
-        MessageBox(NULL, "初始化 COM 子系统失败",
+        cn_message_box(NULL, "初始化 COM 子系统失败",
                    str, MB_OK | MB_ICONEXCLAMATION);
         sfree(str);
         return 1;
@@ -928,8 +965,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
         for (j = 0; j < lenof(wgs->popup_menus); j++) {
             m = wgs->popup_menus[j].menu;
-            AppendMenu(m, MF_ENABLED, IDM_COPY, "复制(&C)");
-            AppendMenu(m, MF_ENABLED, IDM_PASTE, "粘贴(&P)");
+            cn_append_menu(m, MF_ENABLED, IDM_COPY, "复制(&C)");
+            cn_append_menu(m, MF_ENABLED, IDM_PASTE, "粘贴(&P)");
         }
 
         wgs->savedsess_menu = CreateMenu();
@@ -945,9 +982,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         wgs->menu_func = CreatePopupMenu();
         wgs->menu_log = CreatePopupMenu();
 
-        AppendMenu(wgs->menu_session, MF_ENABLED, IDM_NEWSESS,
+        cn_append_menu(wgs->menu_session, MF_ENABLED, IDM_NEWSESS,
                    "新会话(&W)...");
-        AppendMenu(wgs->menu_session, MF_ENABLED, IDM_RECONF,
+        cn_append_menu(wgs->menu_session, MF_ENABLED, IDM_RECONF,
                    "会话设置(&G)...");
         /*
          * cn: 「重启会话」（2026-11-09 主人要求）。语义与右键菜单里
@@ -958,7 +995,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
          * 注意这一项与右键菜单里的 IDM_RESTART 共用同一个 ID，两处
          * 的启用状态必须同步维护（见 cn_sync_session_menus）。
          */
-        AppendMenu(wgs->menu_session,
+        cn_append_menu(wgs->menu_session,
                    wgs->backend ? MF_GRAYED : MF_ENABLED,
                    IDM_RESTART, "重启会话(&R)");
         /*
@@ -966,11 +1003,11 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
          * 另外一定要在连接建立之后才可用，否则拿不到可用的 conf
          * 和已认证的会话参数。
          */
-        AppendMenu(wgs->menu_session, MF_SEPARATOR, 0, 0);
+        cn_append_menu(wgs->menu_session, MF_SEPARATOR, 0, 0);
         {
             bool can_xfer = (wgs->backend != NULL) &&
                 conf_get_int(wgs->conf, CONF_protocol) == PROT_SSH;
-            AppendMenu(wgs->menu_session,
+            cn_append_menu(wgs->menu_session,
                        can_xfer ? MF_ENABLED : MF_GRAYED,
                        IDM_XFER, "文件传输(&F)...");
         }
@@ -983,41 +1020,41 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
          * 状态判定看 LogContext 里的 logtype（>0 表示在记），不看
          * conf —— conf 里可能是用户配置的旧值，与运行态未必一致。
          */
-        AppendMenu(wgs->menu_log, MF_ENABLED, IDM_LOGSTART,
+        cn_append_menu(wgs->menu_log, MF_ENABLED, IDM_LOGSTART,
                    "开始记录日志(&S)");
-        AppendMenu(wgs->menu_log, MF_ENABLED, IDM_LOGSTOP,
+        cn_append_menu(wgs->menu_log, MF_ENABLED, IDM_LOGSTOP,
                    "停止记录日志(&T)");
         cn_sync_log_menu(wgs);
         cn_sync_restart_menu(wgs);
 
-        AppendMenu(wgs->menu_func, MF_ENABLED, IDM_SHOWLOG,
+        cn_append_menu(wgs->menu_func, MF_ENABLED, IDM_SHOWLOG,
                    "事件日志(&E)");
-        AppendMenu(wgs->menu_func, MF_ENABLED, IDM_COPYALL,
+        cn_append_menu(wgs->menu_func, MF_ENABLED, IDM_COPYALL,
                    "全部复制到剪贴板(&O)");
-        AppendMenu(wgs->menu_func, MF_ENABLED, IDM_RESET, "清屏(&T)");
-        AppendMenu(wgs->menu_func, MF_ENABLED, IDM_CLRSB,
+        cn_append_menu(wgs->menu_func, MF_ENABLED, IDM_RESET, "清屏(&T)");
+        cn_append_menu(wgs->menu_func, MF_ENABLED, IDM_CLRSB,
                    "清空回滚内容(&L)");
 
-        AppendMenu(wgs->menubar, MF_POPUP | MF_ENABLED,
+        cn_append_menu(wgs->menubar, MF_POPUP | MF_ENABLED,
                    (UINT_PTR)wgs->menu_session, "会话(&S)");
-        AppendMenu(wgs->menubar, MF_POPUP | MF_ENABLED,
+        cn_append_menu(wgs->menubar, MF_POPUP | MF_ENABLED,
                    (UINT_PTR)wgs->menu_log, "日志(&L)");
-        AppendMenu(wgs->menubar, MF_POPUP | MF_ENABLED,
+        cn_append_menu(wgs->menubar, MF_POPUP | MF_ENABLED,
                    (UINT_PTR)wgs->menu_func, "功能(&F)");
         SetMenu(wgs->term_hwnd, wgs->menubar);
 
         for (j = 0; j < lenof(wgs->popup_menus); j++) {
             m = wgs->popup_menus[j].menu;
 
-            AppendMenu(m, MF_SEPARATOR, 0, 0);
-            AppendMenu(m, MF_ENABLED, IDM_CLRSB, "清空回滚内容(&L)");
-            AppendMenu(m, MF_SEPARATOR, 0, 0);
-            AppendMenu(m, (conf_get_int(wgs->conf, CONF_resize_action)
+            cn_append_menu(m, MF_SEPARATOR, 0, 0);
+            cn_append_menu(m, MF_ENABLED, IDM_CLRSB, "清空回滚内容(&L)");
+            cn_append_menu(m, MF_SEPARATOR, 0, 0);
+            cn_append_menu(m, (conf_get_int(wgs->conf, CONF_resize_action)
                            == RESIZE_DISABLED) ? MF_GRAYED : MF_ENABLED,
                        IDM_FULLSCREEN, "全屏(&F)");
-            AppendMenu(m, MF_SEPARATOR, 0, 0);
+            cn_append_menu(m, MF_SEPARATOR, 0, 0);
             if (has_help())
-                AppendMenu(m, MF_ENABLED, IDM_HELP, "帮助(&H)");
+                cn_append_menu(m, MF_ENABLED, IDM_HELP, "帮助(&H)");
             /* 关于/帮助按钮已按改造移除，菜单里不再保留「关于」项。 */
         }
     }
@@ -1332,11 +1369,11 @@ static void update_savedsess_menu(WinGuiSeat *wgs)
          i < ((sesslist.nsessions <= MENU_SAVED_MAX+1) ? sesslist.nsessions
                                                        : MENU_SAVED_MAX+1);
          i++)
-        AppendMenu(wgs->savedsess_menu, MF_ENABLED,
+        cn_append_menu(wgs->savedsess_menu, MF_ENABLED,
                    IDM_SAVED_MIN + (i-1)*MENU_SAVED_STEP,
                    sesslist.sessions[i]);
     if (sesslist.nsessions <= 1)
-        AppendMenu(wgs->savedsess_menu, MF_GRAYED, IDM_SAVED_MIN,
+        cn_append_menu(wgs->savedsess_menu, MF_GRAYED, IDM_SAVED_MIN,
                    "(没有会话)");
 }
 
@@ -1364,14 +1401,14 @@ static void win_seat_update_specials_menu(Seat *seat)
             assert(IDM_SPECIAL_MIN + 0x10 * i < IDM_SPECIAL_MAX);
             switch (wgs->specials[i].code) {
               case SS_SEP:
-                AppendMenu(new_menu, MF_SEPARATOR, 0, 0);
+                cn_append_menu(new_menu, MF_SEPARATOR, 0, 0);
                 break;
               case SS_SUBMENU:
                 assert(nesting < 2);
                 nesting++;
                 saved_menu = new_menu; /* XXX lame stacking */
                 new_menu = CreatePopupMenu();
-                AppendMenu(saved_menu, MF_POPUP | MF_ENABLED,
+                cn_append_menu(saved_menu, MF_POPUP | MF_ENABLED,
                            (UINT_PTR) new_menu, wgs->specials[i].name);
                 break;
               case SS_EXITMENU:
@@ -1382,7 +1419,7 @@ static void win_seat_update_specials_menu(Seat *seat)
                 }
                 break;
               default:
-                AppendMenu(new_menu, MF_ENABLED, IDM_SPECIAL_MIN + 0x10 * i,
+                cn_append_menu(new_menu, MF_ENABLED, IDM_SPECIAL_MIN + 0x10 * i,
                            wgs->specials[i].name);
                 break;
             }
@@ -1406,10 +1443,10 @@ static void win_seat_update_specials_menu(Seat *seat)
             DeleteMenu(wgs->menu_func, IDM_SPECIALSEP, MF_BYCOMMAND);
         }
         if (new_menu) {
-            InsertMenu(wgs->menu_func, IDM_SHOWLOG,
+            cn_insert_menu(wgs->menu_func, IDM_SHOWLOG,
                        MF_BYCOMMAND | MF_POPUP | MF_ENABLED,
                        (UINT_PTR) new_menu, "特殊命令(&P)");
-            InsertMenu(wgs->menu_func, IDM_SHOWLOG,
+            cn_insert_menu(wgs->menu_func, IDM_SHOWLOG,
                        MF_BYCOMMAND | MF_SEPARATOR, IDM_SPECIALSEP, 0);
         }
     }
@@ -1488,7 +1525,7 @@ static void win_seat_connection_fatal(Seat *seat, const char *msg)
      */
     cn_set_offline_title(wgs);
     show_mouseptr(wgs, true);
-    MessageBox(wgs->term_hwnd, msg, title, MB_ICONERROR | MB_OK);
+    cn_message_box(wgs->term_hwnd, msg, title, MB_ICONERROR | MB_OK);
     sfree(title);
 
     if (conf_get_int(wgs->conf, CONF_close_on_exit) == FORCE_ON)
@@ -1506,7 +1543,7 @@ static void win_seat_nonfatal(Seat *seat, const char *msg)
     WinGuiSeat *wgs = container_of(seat, WinGuiSeat, seat);
     char *title = dupprintf("%s 错误", appname);
     show_mouseptr(wgs, true);
-    MessageBox(wgs->term_hwnd, msg, title, MB_ICONERROR | MB_OK);
+    cn_message_box(wgs->term_hwnd, msg, title, MB_ICONERROR | MB_OK);
     sfree(title);
 }
 
@@ -1532,7 +1569,7 @@ void cmdline_error(const char *fmt, ...)
     message = dupvprintf(fmt, ap);
     va_end(ap);
     title = dupprintf("%s 命令行错误", appname);
-    MessageBox(find_window_for_msgbox(), message, title, MB_ICONERROR | MB_OK);
+    cn_message_box(find_window_for_msgbox(), message, title, MB_ICONERROR | MB_OK);
     sfree(message);
     sfree(title);
     exit(1);
@@ -2442,7 +2479,7 @@ static void exit_callback(void *vctx)
                                       exitcode);
                 cn_set_offline_title(wgs);
                 show_mouseptr(wgs, true);
-                MessageBox(wgs->term_hwnd, msg, appname,
+                cn_message_box(wgs->term_hwnd, msg, appname,
                            MB_OK | MB_ICONINFORMATION);
                 sfree(msg);
             }
@@ -2933,7 +2970,7 @@ static void outline_show_hint(HWND hwnd)
 
     outline_hint_mark_shown();
 
-    ret = MessageBox(hwnd,
+    ret = cn_message_box(hwnd,
                      "系统当前关闭了「拖动时显示窗口内容」。\n\n"
                      "这会让窗口在拖动边框时只显示虚线轮廓，"
                      "终端文字要等松手后才重新排版，而不是随拖动实时折行。\n\n"
@@ -2944,7 +2981,7 @@ static void outline_show_hint(HWND hwnd)
                      MB_ICONINFORMATION | MB_YESNO | MB_DEFBUTTON1);
 
     if (ret == IDYES && !outline_hint_enable())
-        MessageBox(hwnd, "打开设置失败，请手动在"
+        cn_message_box(hwnd, "打开设置失败，请手动在"
                    "「系统属性 - 高级 - 性能设置 - 视觉效果」中"
                    "勾选「拖动时显示窗口内容」。",
                    "拖动实时重排提示", MB_ICONWARNING | MB_OK);
@@ -3024,7 +3061,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                         additional ? additional : "");
         if (wgs->session_closed ||
             !conf_get_bool(wgs->conf, CONF_warn_on_close) ||
-            MessageBox(hwnd, msg, title,
+            cn_message_box(hwnd, msg, title,
                        MB_ICONWARNING | MB_OKCANCEL | MB_DEFBUTTON1)
             == IDOK)
             DestroyWindow(hwnd);
@@ -3104,7 +3141,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
             {
                 char *err = sftp_window_open(wgs->conf, hwnd);
                 if (err) {
-                    MessageBox(hwnd, err, "文件传输",
+                    cn_message_box(hwnd, err, "文件传输",
                                MB_ICONERROR | MB_OK | MB_SETFOREGROUND);
                     sfree(err);
                 }
@@ -3113,11 +3150,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
           case IDM_NEWSESS:
           case IDM_DUPSESS:
           case IDM_SAVEDSESS: {
-            char b[2048];
+            wchar_t wb[2048];
             char *cl;
             const char *argprefix;
             bool inherit_handles;
-            STARTUPINFO si;
+            STARTUPINFOW si;
             PROCESS_INFORMATION pi;
             HANDLE filemap = NULL;
 
@@ -3175,7 +3212,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                 inherit_handles = false;
             }
 
-            GetModuleFileName(NULL, b, sizeof(b) - 1);
+            GetModuleFileNameW(NULL, wb, lenof(wb) - 1);
             si.cb = sizeof(si);
             si.lpReserved = NULL;
             si.lpDesktop = NULL;
@@ -3183,8 +3220,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
             si.dwFlags = 0;
             si.cbReserved2 = 0;
             si.lpReserved2 = NULL;
-            CreateProcess(b, cl, NULL, NULL, inherit_handles,
-                          NORMAL_PRIORITY_CLASS, NULL, NULL, &si, &pi);
+            wchar_t *wcl = dup_mb_to_wc(CP_UTF8, cl);
+            CreateProcessW(wb, wcl, NULL, NULL, inherit_handles,
+                           NORMAL_PRIORITY_CLASS, NULL, NULL, &si, &pi);
+            sfree(wcl);
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
 
@@ -6293,7 +6332,7 @@ void modalfatalbox(const char *fmt, ...)
     va_end(ap);
     show_mouseptr(NULL, true);
     title = dupprintf("%s 致命错误", appname);
-    MessageBox(find_window_for_msgbox(), message, title,
+    cn_message_box(find_window_for_msgbox(), message, title,
                MB_SYSTEMMODAL | MB_ICONERROR | MB_OK);
     sfree(message);
     sfree(title);
@@ -6313,7 +6352,7 @@ void nonfatal(const char *fmt, ...)
     va_end(ap);
     show_mouseptr(NULL, true);
     title = dupprintf("%s 错误", appname);
-    MessageBox(find_window_for_msgbox(), message, title, MB_ICONERROR | MB_OK);
+    cn_message_box(find_window_for_msgbox(), message, title, MB_ICONERROR | MB_OK);
     sfree(message);
     sfree(title);
 }

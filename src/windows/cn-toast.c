@@ -376,7 +376,7 @@ void cn_toast_show(CnToast *t, HWND owner, HFONT font,
     if (!t || !owner || !text || !*text)
         return;
 
-    w = dup_mb_to_wc(DEFAULT_CODEPAGE, text);
+    w = dup_mb_to_wc(CP_UTF8, text);
     if (!w || !*w) {
         sfree(w);
         return;

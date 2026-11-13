@@ -11,7 +11,9 @@
  *   3) 提供 cn_trace()，让关键路径留面包屑 —— 只写文件、绝不
  *      往 stderr 刷，因为 GUI 进程没有控制台，stderr 全丢。
  *
- * 只在定义了 CN_CRASH_TRACE 时编译进去，正常构建零开销。
+ * 说明：构建系统不定义 CN_CRASH_TRACE，所以本文件总是编进 putty.exe。
+ * 正常使用不产生任何文件 —— 日志只在 cn_trace() 埋点被命中、或
+ * 真的抓到未处理异常时才创建。
  */
 #ifndef CN_CRASH_TRACE
 #define CN_CRASH_TRACE 1
@@ -20,11 +22,12 @@
 #include <winsock2.h>   /* 必须先于 windows.h，否则 mingw 会警告 */
 #include <stdio.h>
 #include <stdarg.h>
+#include <wchar.h>
 #include <windows.h>
 #include "putty.h"
 
 static FILE *cn_trace_fp = NULL;
-static char cn_trace_path[MAX_PATH];
+static wchar_t cn_trace_path[MAX_PATH];
 
 /* 日志路径：exe 同目录的 cn-trace.log，方便直接捡。 */
 static void cn_trace_open(void)
@@ -32,22 +35,23 @@ static void cn_trace_open(void)
     if (cn_trace_fp)
         return;
     {
-        char exe[MAX_PATH];
-        DWORD n = GetModuleFileNameA(NULL, exe, sizeof(exe));
-        if (n == 0 || n >= sizeof(exe))
-            strcpy(exe, "putty.exe");
+        wchar_t exe[MAX_PATH];
+        DWORD n = GetModuleFileNameW(NULL, exe, lenof(exe));
+        if (n == 0 || n >= lenof(exe))
+            wcscpy(exe, L"putty.exe");
         {
-            char *slash = strrchr(exe, '\\');
+            wchar_t *slash = wcsrchr(exe, L'\\');
             if (slash) {
-                *slash = '\0';
-                snprintf(cn_trace_path, sizeof(cn_trace_path),
-                         "%s\\cn-trace.log", exe);
+                *slash = L'\0';
+                _snwprintf(cn_trace_path, lenof(cn_trace_path),
+                           L"%s\\cn-trace.log", exe);
+                cn_trace_path[lenof(cn_trace_path) - 1] = L'\0';
             } else {
-                strcpy(cn_trace_path, "cn-trace.log");
+                wcscpy(cn_trace_path, L"cn-trace.log");
             }
         }
     }
-    cn_trace_fp = fopen(cn_trace_path, "w");
+    cn_trace_fp = _wfopen(cn_trace_path, L"w");
 }
 
 void cn_trace(const char *fmt, ...)
@@ -101,7 +105,12 @@ static LONG WINAPI cn_crash_filter(EXCEPTION_POINTERS *ep)
 
 void cn_crash_trace_init(void)
 {
-    cn_trace_open();
+    /*
+     * cn: 这里刻意不预先打开日志文件。早先的实现会在每次启动时
+     * 就在 exe 同目录建一个 cn-trace.log 并写一行「日志已就绪」，
+     * 正常使用根本用不上，却让安装目录平白多出个文件，装到
+     * Program Files 这类只读目录时还会静默失败。改成只装过滤器，
+     * 真崩了再由 cn_crash_filter 打开写现场。
+     */
     SetUnhandledExceptionFilter(cn_crash_filter);
-    cn_trace("=== cn_crash_trace_init: 日志已就绪 ===");
 }

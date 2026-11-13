@@ -98,11 +98,22 @@ struct recent_conn {
      * 一律不动 —— 双击回填、连接目标、去重比较都还按真实值走。
      */
     char *label;
+    /*
+     * cn: 这条会话的登录密码，空串 = 没记（旧条目，或用户没填）。
+     *
+     * 落盘时按当前用户用 DPAPI 加密，注册表里只有密文（见
+     * windows/storage.c 的 cn_seal_password）。读出来的是明文，仅用于
+     * 回填配置框和 Telnet 自动应答，不参与去重比较 —— 同一个主机换
+     * 了密码仍是同一条会话，只是密码跟着更新。
+     */
+    char *password;
 };
 
 /* caller frees via free_recent_conns */
 struct recent_conn *get_recent_conns(int *count);
-void add_recent_conn(const char *host, int port, const char *username);
+/* cn: password 传 NULL 表示这次没拿到密码，条目里原有的密码保持不变 */
+void add_recent_conn(const char *host, int port, const char *username,
+                     const char *password);
 void del_recent_conn(const char *host, int port, const char *username);
 void free_recent_conns(struct recent_conn *list, int count);
 

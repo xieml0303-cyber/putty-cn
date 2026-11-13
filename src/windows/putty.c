@@ -162,7 +162,9 @@ void gui_term_process_cmdline(Conf *conf, char *cmdline)
                         cmdline_arg_to_str(arglist->args[arglistpos++]);
                     terminal_demo_screenshot_filename =
                         cmdline_arg_to_filename(arglist->args[arglistpos++]);
-                    FILE *fp = fopen(infile, "rb");
+                    wchar_t *winfile = dup_mb_to_wc(CP_UTF8, infile);
+                    FILE *fp = _wfopen(winfile, L"rb");
+                    sfree(winfile);
                     if (!fp)
                         cmdline_error("无法打开输入文件 \"%s\"", infile);
                     demo_terminal_data = strbuf_new();
@@ -381,7 +383,7 @@ void gui_term_process_cmdline(Conf *conf, char *cmdline)
              */
             char *msg = cn_hostbox_scheme_complaint(conf);
             if (msg) {
-                MessageBox(NULL, msg, "PuTTY 错误", MB_OK | MB_ICONERROR);
+                message_box(NULL, msg, "PuTTY 错误", MB_OK | MB_ICONERROR, true, 0);
                 sfree(msg);
                 if (!do_config(conf))
                     cleanup_exit(0);
@@ -411,8 +413,8 @@ const struct BackendVtable *backend_vt_from_conf(Conf *conf)
         conf_get_int(conf, CONF_protocol));
     if (!vt) {
         char *str = dupprintf("%s 内部错误", appname);
-        MessageBox(NULL, "发现不支持的协议号",
-                   str, MB_OK | MB_ICONEXCLAMATION);
+        message_box(NULL, "发现不支持的协议号",
+                    str, MB_OK | MB_ICONEXCLAMATION, true, 0);
         sfree(str);
         cleanup_exit(1);
     }
@@ -429,7 +431,7 @@ static void demo_terminal_screenshot(void *ctx, unsigned long now)
     HWND hwnd = (HWND)ctx;
     char *err = save_screenshot(hwnd, terminal_demo_screenshot_filename);
     if (err) {
-        MessageBox(hwnd, err, "演示截图失败", MB_OK | MB_ICONERROR);
+        message_box(hwnd, err, "演示截图失败", MB_OK | MB_ICONERROR, true, 0);
         sfree(err);
     }
     cleanup_exit(0);

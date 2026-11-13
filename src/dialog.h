@@ -719,6 +719,14 @@ int dlg_get_ctrl_width(dlgparam *dp, dlgcontrol *ctrl);
  */
 int dlg_get_ctrl_left(dlgparam *dp, dlgcontrol *ctrl);
 /*
+ * cn: 密码框的明文 / 掩码切换。plain=true 显示原文，false 恢复掩码。
+ *
+ * 只改 EM_SETPASSWORDCHAR，不动控件样式也不碰文本内容 —— 光标、
+ * 选中区、滚动位置全都原地保留，切换是「瞬移」而不是「重建」。
+ * 对非密码框调用无副作用。
+ */
+void dlg_editbox_set_plain(dlgparam *dp, dlgcontrol *ctrl, bool plain);
+/*
  * cn: 把配置框跳到 pathname 指定的那一页（如
  * "连接/SSH/认证/证书"）。成功返回 true；对话框没有分类树
  * （如 puttygen 的窗口）或找不到该页时返回 false。

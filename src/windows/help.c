@@ -26,8 +26,18 @@ void quit_help(HWND hwnd) { }
 static char *chm_path = NULL;
 static bool chm_created_by_us = false;
 
+/* chm_path 内部是 UTF-8，删除时显式转宽字符。 */
+static void delete_chm_file(const char *path)
+{
+    if (!path)
+        return;
+    wchar_t *wpath = dup_mb_to_wc(CP_UTF8, path);
+    DeleteFileW(wpath);
+    sfree(wpath);
+}
+
 static bool requested_help;
-DECL_WINDOWS_FUNCTION(static, HWND, HtmlHelpA, (HWND, LPCSTR, UINT, DWORD_PTR));
+DECL_WINDOWS_FUNCTION(static, HWND, HtmlHelpW, (HWND, LPCWSTR, UINT, DWORD_PTR));
 
 static HRSRC chm_hrsrc;
 static DWORD chm_resource_size = 0;
@@ -78,6 +88,7 @@ static bool load_chm_resource(void)
 {
     bool toret = false;
     char *filename = NULL;
+    char *tempdir = NULL;
     HANDLE filehandle = INVALID_HANDLE_VALUE;
     bool created = false;
 
@@ -93,18 +104,21 @@ static bool load_chm_resource(void)
 
     /* GetTempPath is documented as returning a size of up to
      * MAX_PATH+1 which does not count the NUL */
-    char tempdir[MAX_PATH + 2];
-    if (GetTempPath(sizeof(tempdir), tempdir) == 0)
+    wchar_t wtempdir[MAX_PATH + 2];
+    if (GetTempPathW(lenof(wtempdir), wtempdir) == 0)
         goto out;
+    tempdir = dup_wc_to_mb(CP_UTF8, wtempdir, "?");
 
     unsigned long pid = GetCurrentProcessId();
 
     for (uint64_t counter = 0;; counter++) {
         filename = dupprintf(
             "%s\\putty_%lu_%"PRIu64".chm", tempdir, pid, counter);
-        filehandle = CreateFile(
-            filename, GENERIC_WRITE, FILE_SHARE_READ,
+        wchar_t *wfilename = dup_mb_to_wc(CP_UTF8, filename);
+        filehandle = CreateFileW(
+            wfilename, GENERIC_WRITE, FILE_SHARE_READ,
             NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        sfree(wfilename);
 
         if (filehandle != INVALID_HANDLE_VALUE)
             break;                     /* success! */
@@ -134,8 +148,9 @@ static bool load_chm_resource(void)
 
   out:
     if (created && !toret)
-        DeleteFile(filename);
+        delete_chm_file(filename);
     sfree(filename);
+    sfree(tempdir);
     if (filehandle != INVALID_HANDLE_VALUE)
         CloseHandle(filehandle);
     return toret;
@@ -175,8 +190,8 @@ void init_help(void)
      * the HtmlHelp() API function.
      */
     HINSTANCE dllHH = load_system32_dll("hhctrl.ocx");
-    GET_WINDOWS_FUNCTION(dllHH, HtmlHelpA);
-    if (!p_HtmlHelpA) {
+    GET_WINDOWS_FUNCTION(dllHH, HtmlHelpW);
+    if (!p_HtmlHelpW) {
         FreeLibrary(dllHH);
         return;
     }
@@ -199,8 +214,8 @@ void init_help(void)
 void shutdown_help(void)
 {
     if (chm_path && chm_created_by_us) {
-        p_HtmlHelpA(NULL, NULL, HH_CLOSE_ALL, 0);
-        DeleteFile(chm_path);
+        p_HtmlHelpW(NULL, NULL, HH_CLOSE_ALL, 0);
+        delete_chm_file(chm_path);
     }
     sfree(chm_path);
     chm_path = NULL;
@@ -231,10 +246,14 @@ void launch_help(HWND hwnd, const char *topic)
     if (topic) {
         char *fname = dupprintf(
             "%s::/%s.html>main", chm_path, topic);
-        p_HtmlHelpA(hwnd, fname, HH_DISPLAY_TOPIC, 0);
+        wchar_t *wfname = dup_mb_to_wc(CP_UTF8, fname);
+        p_HtmlHelpW(hwnd, wfname, HH_DISPLAY_TOPIC, 0);
+        sfree(wfname);
         sfree(fname);
     } else {
-        p_HtmlHelpA(hwnd, chm_path, HH_DISPLAY_TOPIC, 0);
+        wchar_t *wpath = dup_mb_to_wc(CP_UTF8, chm_path);
+        p_HtmlHelpW(hwnd, wpath, HH_DISPLAY_TOPIC, 0);
+        sfree(wpath);
     }
     requested_help = true;
 }
@@ -242,9 +261,9 @@ void launch_help(HWND hwnd, const char *topic)
 void quit_help(HWND hwnd)
 {
     if (requested_help)
-        p_HtmlHelpA(NULL, NULL, HH_CLOSE_ALL, 0);
+        p_HtmlHelpW(NULL, NULL, HH_CLOSE_ALL, 0);
     if (chm_path && chm_created_by_us)
-        DeleteFile(chm_path);
+        delete_chm_file(chm_path);
 }
 
 #endif /* NO_HTMLHELP */

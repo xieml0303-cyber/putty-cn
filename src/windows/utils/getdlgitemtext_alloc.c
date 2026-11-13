@@ -10,10 +10,16 @@
 
 char *GetDlgItemText_alloc(HWND hwnd, int id)
 {
-    HWND item = GetDlgItem(hwnd, id);
-    size_t size = GetWindowTextLengthA(item) + 1;
-    char *text = snewn(size, char);
-    GetWindowTextA(item, text, size);
+    /*
+     * puTTY-cn: this program's internal string encoding is UTF-8, so
+     * the narrow version of this function reads the control's text as
+     * wide characters and converts to UTF-8 explicitly, instead of
+     * relying on the ANSI API and the process code page (which would
+     * mangle non-ASCII text on a CP936 system).
+     */
+    wchar_t *wtext = GetDlgItemTextW_alloc(hwnd, id);
+    char *text = encode_wide_string_as_utf8(wtext);
+    sfree(wtext);
     return text;
 }
 

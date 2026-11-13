@@ -70,13 +70,16 @@ static LogPolicy sftp_gui_logpolicy[1];
 
 /* 自测路径：把日志事件直接写进文件。 */
 static FILE *sftp_selftest_logfp = NULL;
+
+/* 本地路径统一是 UTF-8，定义在后面，这里先声明。 */
+static FILE *sftp_local_fopen(const char *path, const wchar_t *mode);
 static LogPolicy sftp_selftest_logpolicy[1];
 
 /* 供界面自检打开日志，否则卡住时看不到任何握手细节。 */
 void sftp_selftest_enable_log(const char *path)
 {
     if (!sftp_selftest_logfp)
-        sftp_selftest_logfp = fopen(path, "w");
+        sftp_selftest_logfp = sftp_local_fopen(path, L"w");
 }
 
 /*
@@ -399,7 +402,7 @@ SftpXfer *sftp_xfer_open(Conf *conf, HWND hwnd, char **errmsg)
     const char *err;
     Conf *beconf;
     char *tracepath = sftp_selftest_outpath("sftp-trace.txt");
-    FILE *dbg = fopen(tracepath, "a");
+    FILE *dbg = sftp_local_fopen(tracepath, L"a");
     sfree(tracepath);
 
 #define TRACE(...) do { if (dbg) { fprintf(dbg, __VA_ARGS__); fflush(dbg); } } while (0)
@@ -953,7 +956,7 @@ bool sftp_xfer_stat(SftpXfer *sx, const char *path, struct fxp_attrs *attrs)
 
 static FILE *sftp_local_fopen(const char *path, const wchar_t *mode)
 {
-    wchar_t *wpath = dup_mb_to_wc(DEFAULT_CODEPAGE, path);
+    wchar_t *wpath = dup_mb_to_wc(CP_UTF8, path);
     FILE *fp = _wfopen(wpath, mode);
     sfree(wpath);
     return fp;
@@ -961,7 +964,7 @@ static FILE *sftp_local_fopen(const char *path, const wchar_t *mode)
 
 static int64_t sftp_local_size(const char *path)
 {
-    wchar_t *wpath = dup_mb_to_wc(DEFAULT_CODEPAGE, path);
+    wchar_t *wpath = dup_mb_to_wc(CP_UTF8, path);
     struct _stat64 st;
     int ok = _wstat64(wpath, &st) == 0;
     sfree(wpath);
@@ -987,7 +990,7 @@ static bool sftp_download_cancelled(SftpXfer *sx)
  */
 static uint64_t cn_local_resume_offset(const char *localpath)
 {
-    wchar_t *w = dup_mb_to_wc(DEFAULT_CODEPAGE, localpath);
+    wchar_t *w = dup_mb_to_wc(CP_UTF8, localpath);
     WIN32_FILE_ATTRIBUTE_DATA fad;
     uint64_t size = 0;
 
@@ -1155,7 +1158,7 @@ XferOutcome sftp_xfer_download(SftpXfer *sx, const char *remotepath,
      * 删了下次就得从头传，「续传」等于白做。
      */
     if (!ok && outcome != XFER_PAUSED) {
-        wchar_t *wpath = dup_mb_to_wc(DEFAULT_CODEPAGE, localpath);
+        wchar_t *wpath = dup_mb_to_wc(CP_UTF8, localpath);
         _wremove(wpath);
         sfree(wpath);
     }
@@ -1362,7 +1365,7 @@ SftpEntry *sftp_local_list(const char *path, size_t *count, char **errmsg)
         *errmsg = NULL;
     *count = 0;
 
-    wpath = dup_mb_to_wc(DEFAULT_CODEPAGE, path);
+    wpath = dup_mb_to_wc(CP_UTF8, path);
     {
         size_t plen = wcslen(wpath);
         wpattern = snewn(plen + 3, wchar_t);
@@ -1386,7 +1389,7 @@ SftpEntry *sftp_local_list(const char *path, size_t *count, char **errmsg)
 
         if (n >= size)
             sgrowarray(result, size, n);
-        result[n].name = dup_wc_to_mb(DEFAULT_CODEPAGE, fd.cFileName, "?");
+        result[n].name = dup_wc_to_mb(CP_UTF8, fd.cFileName, "?");
         result[n].is_dir =
             (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         /*
@@ -1421,7 +1424,7 @@ SftpEntry *sftp_local_list(const char *path, size_t *count, char **errmsg)
 
 bool sftp_local_mkdir(const char *path, char **errmsg)
 {
-    wchar_t *w = dup_mb_to_wc(DEFAULT_CODEPAGE, path);
+    wchar_t *w = dup_mb_to_wc(CP_UTF8, path);
     bool ok = _wmkdir(w) == 0;
     sfree(w);
     if (!ok && errmsg)
@@ -1431,7 +1434,7 @@ bool sftp_local_mkdir(const char *path, char **errmsg)
 
 bool sftp_local_rmdir(const char *path, char **errmsg)
 {
-    wchar_t *w = dup_mb_to_wc(DEFAULT_CODEPAGE, path);
+    wchar_t *w = dup_mb_to_wc(CP_UTF8, path);
     bool ok = _wrmdir(w) == 0;
     sfree(w);
     if (!ok && errmsg)
@@ -1441,7 +1444,7 @@ bool sftp_local_rmdir(const char *path, char **errmsg)
 
 bool sftp_local_remove(const char *path, char **errmsg)
 {
-    wchar_t *w = dup_mb_to_wc(DEFAULT_CODEPAGE, path);
+    wchar_t *w = dup_mb_to_wc(CP_UTF8, path);
     bool ok = _wremove(w) == 0;
     sfree(w);
     if (!ok && errmsg)
@@ -1451,8 +1454,8 @@ bool sftp_local_remove(const char *path, char **errmsg)
 
 bool sftp_local_rename(const char *src, const char *dst, char **errmsg)
 {
-    wchar_t *ws = dup_mb_to_wc(DEFAULT_CODEPAGE, src);
-    wchar_t *wd = dup_mb_to_wc(DEFAULT_CODEPAGE, dst);
+    wchar_t *ws = dup_mb_to_wc(CP_UTF8, src);
+    wchar_t *wd = dup_mb_to_wc(CP_UTF8, dst);
     bool ok = _wrename(ws, wd) == 0;
     sfree(ws);
     sfree(wd);
@@ -1667,7 +1670,7 @@ void sftp_selftest_list(Conf *conf, const char *path)
     SftpEntry *entries = NULL;
     size_t count = 0;
     char *outpath = sftp_selftest_outpath("sftp-selftest.txt");
-    FILE *fp = fopen(outpath, "w");
+    FILE *fp = sftp_local_fopen(outpath, L"w");
     sfree(outpath);
 
     if (!fp)
@@ -1675,7 +1678,7 @@ void sftp_selftest_list(Conf *conf, const char *path)
 
     /* 自测专用：日志写进单独文件，看握手和认证细节。 */
     char *logpath = sftp_selftest_outpath("sftp-log.txt");
-    sftp_selftest_logfp = fopen(logpath, "w");
+    sftp_selftest_logfp = sftp_local_fopen(logpath, L"w");
     sfree(logpath);
 
     fprintf(fp, "[0] 创建网络事件窗口 ...\n");
@@ -1797,7 +1800,7 @@ static void sftp_selftest_transfer(SftpXfer *sx, FILE *fp)
 
     /* 本地暂存目录 */
     {
-        wchar_t *w = dup_mb_to_wc(DEFAULT_CODEPAGE, tmpdir);
+        wchar_t *w = dup_mb_to_wc(CP_UTF8, tmpdir);
         _wmkdir(w);
         sfree(w);
     }
@@ -1868,10 +1871,10 @@ static void sftp_selftest_transfer(SftpXfer *sx, FILE *fp)
             errmsg = NULL;
         }
         {
-            wchar_t *w = dup_mb_to_wc(DEFAULT_CODEPAGE, local);
+            wchar_t *w = dup_mb_to_wc(CP_UTF8, local);
             _wremove(w);
             sfree(w);
-            w = dup_mb_to_wc(DEFAULT_CODEPAGE, localback);
+            w = dup_mb_to_wc(CP_UTF8, localback);
             _wremove(w);
             sfree(w);
         }

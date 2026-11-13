@@ -168,6 +168,26 @@ static const struct Opt *const opts[] = {
     &o_we_sga, &o_they_sga, &o_we_bin, &o_they_bin, NULL
 };
 
+/*
+ * cn: Telnet 自动登录。
+ *
+ * Telnet 没有 SSH 那样的认证协商 —— 服务器就是把「login:」「Password:」
+ * 当普通文本打到屏幕上，等人手敲。要替用户敲，只能从服务器输出里认
+ * 这个提示，所以这里维护一段「输出尾巴」，每收到一批数据就比对结尾。
+ *
+ * 尾巴只留能构成提示的字符：字母数字、空格和常见标点，中文（0x80 以上
+ * 的字节）原样保留。ANSI 转义序列（ESC [ ... 终止字节）和所有控制字符
+ * 一律吃掉，否则 "\x1b[1;32mlocalhost login:" 里混进来的字母会把提示
+ * 切碎，CR/LF 也会让尾巴跨行。
+ *
+ * 用户名和密码各只应答一次：猜错了就老实让用户自己敲，绝不反复试密码
+ * 把账号试到锁定。
+ */
+#define CN_TAIL_MAX 96
+#define CN_ESC_NONE  0
+#define CN_ESC_START 1
+#define CN_ESC_CSI   2
+
 typedef struct Telnet Telnet;
 struct Telnet {
     Socket *s;
@@ -196,6 +216,12 @@ struct Telnet {
 
     Conf *conf;
 
+    /* cn: 自动登录的嗅探状态 */
+    char cn_tail[CN_TAIL_MAX];
+    size_t cn_tail_len;
+    int cn_esc;
+    bool cn_login_sent, cn_pw_sent;
+
     Pinger *pinger;
 
     Plug plug;
@@ -207,9 +233,166 @@ struct Telnet {
 
 #define SB_DELTA 1024
 
+/*
+ * cn: 把一段服务器输出喂进尾巴。只收「提示可能出现」的字符，控制字符
+ * 清空尾巴（提示一定在同一行内），ANSI 转义序列整个跳过。
+ */
+static void cn_tail_feed(Telnet *telnet, const char *buf, size_t len)
+{
+    size_t i;
+
+    for (i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)buf[i];
+
+        if (telnet->cn_esc == CN_ESC_START) {
+            /* ESC 之后：'[' 进 CSI，其余单字节序列直接丢弃 */
+            telnet->cn_esc = (c == '[') ? CN_ESC_CSI : CN_ESC_NONE;
+            continue;
+        }
+        if (telnet->cn_esc == CN_ESC_CSI) {
+            /* CSI 参数是 0x20-0x3F，终止字节是 0x40-0x7E */
+            if (c >= 0x40 && c <= 0x7e)
+                telnet->cn_esc = CN_ESC_NONE;
+            continue;
+        }
+
+        if (c == 0x1b) {
+            telnet->cn_esc = CN_ESC_START;
+            continue;
+        }
+
+        if (c < 0x20 || c == 0x7f) {
+            telnet->cn_tail_len = 0;
+            continue;
+        }
+
+        if (telnet->cn_tail_len == CN_TAIL_MAX) {
+            memmove(telnet->cn_tail, telnet->cn_tail + 1, CN_TAIL_MAX - 1);
+            telnet->cn_tail_len--;
+        }
+        telnet->cn_tail[telnet->cn_tail_len++] = (char)c;
+    }
+}
+
+/*
+ * cn: 尾巴是不是以 pat 结尾。比较前先剥掉尾部空格 —— 服务器习惯在提示
+ * 后面留一个空格等人敲。ASCII 大小写不敏感；中文按字节比，高位字节不
+ * 参与大小写折叠。
+ */
+static bool cn_tail_is(Telnet *telnet, const char *pat)
+{
+    size_t len = telnet->cn_tail_len;
+    size_t plen = strlen(pat);
+    const char *p;
+    size_t i;
+
+    while (len > 0 && (telnet->cn_tail[len - 1] == ' ' ||
+                       telnet->cn_tail[len - 1] == '\t'))
+        len--;
+
+    if (len < plen)
+        return false;
+
+    p = telnet->cn_tail + (len - plen);
+    for (i = 0; i < plen; i++) {
+        char a = p[i], b = pat[i];
+        if (a >= 'A' && a <= 'Z')
+            a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z')
+            b = (char)(b - 'A' + 'a');
+        if (a != b)
+            return false;
+    }
+    return true;
+}
+
+/*
+ * cn: 替用户敲一行并回车。
+ *
+ * 不走 telnet_send：那个函数会把所有不可打印字节当成「回车键」发成
+ * CR NUL，中文密码（UTF-8 多字节）会被整段换成回车，等于发了一串空
+ * 回车。这里只转义 IAC（0xFF），其余字节原样送，末尾补一个 CR NUL ——
+ * 和用户手动敲回车在协议层完全等价。
+ */
+static void cn_reply(Telnet *telnet, const char *text)
+{
+    static const unsigned char iac[2] = { IAC, IAC };
+    static const unsigned char cr[2] = { CR, NUL };
+    const unsigned char *p = (const unsigned char *)text;
+    size_t len = strlen(text);
+
+    if (!telnet->s)
+        return;
+
+    while (len > 0) {
+        const unsigned char *hit = memchr(p, IAC, len);
+        size_t chunk = hit ? (size_t)(hit - p) : len;
+
+        if (chunk)
+            telnet->bufsize = sk_write(telnet->s, p, chunk);
+        if (!hit)
+            break;
+        telnet->bufsize = sk_write(telnet->s, iac, 2);
+        p = hit + 1;
+        len -= chunk + 1;
+    }
+    telnet->bufsize = sk_write(telnet->s, cr, 2);
+}
+
+/*
+ * cn: 认出登录提示就自动应答。两类提示各只应答一次，且必须真有对应
+ * 凭据才动手 —— 没填用户名就别瞎敲，交回给用户。
+ */
+static void cn_autologin(Telnet *telnet, const char *buf, size_t len)
+{
+    if (telnet->cn_login_sent && telnet->cn_pw_sent)
+        return;
+
+    cn_tail_feed(telnet, buf, len);
+
+    if (!telnet->cn_pw_sent &&
+        (cn_tail_is(telnet, "password:") ||
+         cn_tail_is(telnet, "passwd:") ||
+         cn_tail_is(telnet, "passcode:") ||
+         cn_tail_is(telnet, "密码:") ||
+         cn_tail_is(telnet, "密码：") ||
+         cn_tail_is(telnet, "口令:"))) {
+        const char *pw = cmdline_get_password();
+        if (pw && pw[0]) {
+            telnet->cn_pw_sent = true;
+            telnet->cn_tail_len = 0;
+            cn_reply(telnet, pw);
+            return;
+        }
+    }
+
+    if (!telnet->cn_login_sent &&
+        (cn_tail_is(telnet, "login:") ||
+         cn_tail_is(telnet, "login as:") ||
+         cn_tail_is(telnet, "username:") ||
+         cn_tail_is(telnet, "user name:") ||
+         cn_tail_is(telnet, "user:") ||
+         cn_tail_is(telnet, "登录名:") ||
+         cn_tail_is(telnet, "用户名:") ||
+         cn_tail_is(telnet, "用户名："))) {
+        char *user = get_remote_username(telnet->conf);
+        if (user && user[0]) {
+            telnet->cn_login_sent = true;
+            telnet->cn_tail_len = 0;
+            cn_reply(telnet, user);
+        }
+        sfree(user);
+    }
+}
+
 static void c_write(Telnet *telnet, const void *buf, size_t len)
 {
-    size_t backlog = seat_stdout(telnet->seat, buf, len);
+    size_t backlog;
+
+    /* cn: 先看一眼服务器是不是在要账号密码，再照常送屏 */
+    cn_autologin(telnet, (const char *)buf, len);
+
+    backlog = seat_stdout(telnet->seat, buf, len);
     sk_set_frozen(telnet->s, backlog > TELNET_MAX_BACKLOG);
 }
 

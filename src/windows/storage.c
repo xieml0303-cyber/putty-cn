@@ -11,6 +11,7 @@
 #include "storage.h"
 
 #include <shlobj.h>
+#include <wincrypt.h>
 #ifndef CSIDL_APPDATA
 #define CSIDL_APPDATA 0x001a
 #endif
@@ -25,8 +26,8 @@ static const char *const host_ca_key = PUTTY_REG_POS "\\SshHostCAs";
 
 static bool tried_shgetfolderpath = false;
 static HMODULE shell32_module = NULL;
-DECL_WINDOWS_FUNCTION(static, HRESULT, SHGetFolderPathA,
-                      (HWND, int, HANDLE, DWORD, LPSTR));
+DECL_WINDOWS_FUNCTION(static, HRESULT, SHGetFolderPathW,
+                      (HWND, int, HANDLE, DWORD, LPWSTR));
 
 struct settings_w {
     HKEY sesskey;
@@ -529,23 +530,27 @@ char *host_ca_delete(const char *name)
 enum { DEL, OPEN_R, OPEN_W };
 static bool try_random_seed(char const *path, int action, HANDLE *ret)
 {
+    wchar_t *wpath = dup_mb_to_wc(CP_UTF8, path);
+
     if (action == DEL) {
-        if (!DeleteFile(path) && GetLastError() != ERROR_FILE_NOT_FOUND) {
+        if (!DeleteFileW(wpath) && GetLastError() != ERROR_FILE_NOT_FOUND) {
             nonfatal("无法删除 '%s': %s", path,
                      win_strerror(GetLastError()));
         }
+        sfree(wpath);
         *ret = INVALID_HANDLE_VALUE;
         return false;                  /* so we'll do the next ones too */
     }
 
-    *ret = CreateFile(path,
-                      action == OPEN_W ? GENERIC_WRITE : GENERIC_READ,
-                      action == OPEN_W ? 0 : (FILE_SHARE_READ |
-                                              FILE_SHARE_WRITE),
-                      NULL,
-                      action == OPEN_W ? CREATE_ALWAYS : OPEN_EXISTING,
-                      action == OPEN_W ? FILE_ATTRIBUTE_NORMAL : 0,
-                      NULL);
+    *ret = CreateFileW(wpath,
+                       action == OPEN_W ? GENERIC_WRITE : GENERIC_READ,
+                       action == OPEN_W ? 0 : (FILE_SHARE_READ |
+                                               FILE_SHARE_WRITE),
+                       NULL,
+                       action == OPEN_W ? CREATE_ALWAYS : OPEN_EXISTING,
+                       action == OPEN_W ? FILE_ATTRIBUTE_NORMAL : 0,
+                       NULL);
+    sfree(wpath);
 
     return (*ret != INVALID_HANDLE_VALUE);
 }
@@ -604,22 +609,33 @@ static HANDLE access_random_seed(int action)
          * However, the invocation below requires IE5+ anyway,
          * so stuff that. */
         shell32_module = load_system32_dll("shell32.dll");
-        GET_WINDOWS_FUNCTION(shell32_module, SHGetFolderPathA);
+        GET_WINDOWS_FUNCTION(shell32_module, SHGetFolderPathW);
         tried_shgetfolderpath = true;
     }
-    if (p_SHGetFolderPathA) {
-        char profile[MAX_PATH + 1];
-        if (SUCCEEDED(p_SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA,
-                                         NULL, SHGFP_TYPE_CURRENT, profile)) &&
-            try_random_seed_and_free(dupcat(profile, "\\PUTTY.RND"),
-                                     action, &rethandle))
-            return rethandle;
+    if (p_SHGetFolderPathW) {
+        wchar_t wprofile[MAX_PATH + 1];
+        char *profile;
+        if (SUCCEEDED(p_SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA,
+                                         NULL, SHGFP_TYPE_CURRENT, wprofile))) {
+            profile = dup_wc_to_mb(CP_UTF8, wprofile, "?");
+            if (try_random_seed_and_free(dupcat(profile, "\\PUTTY.RND"),
+                                         action, &rethandle)) {
+                sfree(profile);
+                return rethandle;
+            }
+            sfree(profile);
+        }
 
-        if (SUCCEEDED(p_SHGetFolderPathA(NULL, CSIDL_APPDATA,
-                                         NULL, SHGFP_TYPE_CURRENT, profile)) &&
-            try_random_seed_and_free(dupcat(profile, "\\PUTTY.RND"),
-                                     action, &rethandle))
-            return rethandle;
+        if (SUCCEEDED(p_SHGetFolderPathW(NULL, CSIDL_APPDATA,
+                                         NULL, SHGFP_TYPE_CURRENT, wprofile))) {
+            profile = dup_wc_to_mb(CP_UTF8, wprofile, "?");
+            if (try_random_seed_and_free(dupcat(profile, "\\PUTTY.RND"),
+                                         action, &rethandle)) {
+                sfree(profile);
+                return rethandle;
+            }
+            sfree(profile);
+        }
     }
 
     /*
@@ -627,33 +643,45 @@ static HANDLE access_random_seed(int action)
      * user's home directory.
      */
     {
-        char drv[MAX_PATH], path[MAX_PATH];
+        wchar_t wdrv[MAX_PATH], wpath[MAX_PATH];
 
-        DWORD drvlen = GetEnvironmentVariable("HOMEDRIVE", drv, sizeof(drv));
-        DWORD pathlen = GetEnvironmentVariable("HOMEPATH", path, sizeof(path));
+        DWORD drvlen = GetEnvironmentVariableW(L"HOMEDRIVE", wdrv,
+                                               lenof(wdrv));
+        DWORD pathlen = GetEnvironmentVariableW(L"HOMEPATH", wpath,
+                                                lenof(wpath));
 
         /* We permit %HOMEDRIVE% to expand to an empty string, but if
          * %HOMEPATH% does that, we abort the attempt. Same if either
          * variable overflows its buffer. */
         if (drvlen == 0)
-            drv[0] = '\0';
+            wdrv[0] = L'\0';
 
-        if (drvlen < lenof(drv) && pathlen < lenof(path) && pathlen > 0 &&
-            try_random_seed_and_free(
-                dupcat(drv, path, "\\PUTTY.RND"), action, &rethandle))
-            return rethandle;
+        if (drvlen < lenof(wdrv) && pathlen < lenof(wpath) && pathlen > 0) {
+            char *drv = dup_wc_to_mb(CP_UTF8, wdrv, "?");
+            char *path = dup_wc_to_mb(CP_UTF8, wpath, "?");
+            bool ok = try_random_seed_and_free(
+                dupcat(drv, path, "\\PUTTY.RND"), action, &rethandle);
+            sfree(drv);
+            sfree(path);
+            if (ok)
+                return rethandle;
+        }
     }
 
     /*
      * And finally, fall back to C:\WINDOWS.
      */
     {
-        char windir[MAX_PATH];
-        DWORD len = GetWindowsDirectory(windir, sizeof(windir));
-        if (len < lenof(windir) &&
-            try_random_seed_and_free(
-                dupcat(windir, "\\PUTTY.RND"), action, &rethandle))
-            return rethandle;
+        wchar_t wwindir[MAX_PATH];
+        DWORD len = GetWindowsDirectoryW(wwindir, lenof(wwindir));
+        if (len < lenof(wwindir)) {
+            char *windir = dup_wc_to_mb(CP_UTF8, wwindir, "?");
+            bool ok = try_random_seed_and_free(
+                dupcat(windir, "\\PUTTY.RND"), action, &rethandle);
+            sfree(windir);
+            if (ok)
+                return rethandle;
+        }
     }
 
     /*
@@ -799,6 +827,135 @@ char *get_jumplist_registry_entries (void)
  * picking one from the list restores both boxes.
  */
 
+/* ----------------------------------------------------------------------
+ * cn: 历史会话密码的落盘加解密。
+ *
+ * 主人要求把密码随会话一起记住，可注册表是明文可读的 —— 直接写进去
+ * 等于把口令挂在墙上，随便一个 regedit 或者导出的 .reg 文件就全泄了。
+ * 所以用 Windows 自带的 DPAPI（CryptProtectData）按「当前用户」加密：
+ * 密文只有同一台机器上的同一个用户能解开，注册表被导出、被别的账户
+ * 读到都只是一串字节。
+ *
+ * 落盘格式：dpapi1: + base64(DPAPI 密文)。前缀标识版本，日后换算法好
+ * 认。任何一步失败（拿不到 crypt32、解密被拒、数据损坏、换用户换机器）
+ * 一律当作「没有密码」，绝不退回明文存储。
+ */
+
+static const char *const cn_pw_prefix = "dpapi1:";
+#define CN_PW_PREFIX_LEN 7
+
+static HMODULE crypt32_module = NULL;
+DECL_WINDOWS_FUNCTION(static, BOOL, CryptProtectData,
+                      (DATA_BLOB *, LPCWSTR, DATA_BLOB *, PVOID,
+                       CRYPTPROTECT_PROMPTSTRUCT *, DWORD, DATA_BLOB *));
+DECL_WINDOWS_FUNCTION(static, BOOL, CryptUnprotectData,
+                      (DATA_BLOB *, LPWSTR *, DATA_BLOB *, PVOID,
+                       CRYPTPROTECT_PROMPTSTRUCT *, DWORD, DATA_BLOB *));
+
+static void cn_crypt32_init(void)
+{
+    if (crypt32_module)
+        return;
+    crypt32_module = load_system32_dll("crypt32.dll");
+    if (!crypt32_module)
+        return;
+    GET_WINDOWS_FUNCTION(crypt32_module, CryptProtectData);
+    GET_WINDOWS_FUNCTION(crypt32_module, CryptUnprotectData);
+}
+
+/*
+ * 明文 → 可写注册表的密文串。空密码返回空串；加密失败同样返回空串
+ * （宁可不记密码，也不明文落盘）。
+ */
+static char *cn_seal_password(const char *plain)
+{
+    DATA_BLOB in, out;
+    strbuf *b64;
+    char *ret;
+
+    if (!plain || !*plain)
+        return dupstr("");
+
+    cn_crypt32_init();
+    if (!p_CryptProtectData)
+        return dupstr("");
+
+    /*
+     * 连结尾的 NUL 一起加密：解出来天然是个以 NUL 结尾的 C 字符串，
+     * 调用方不必再猜长度。
+     */
+    in.pbData = (BYTE *)plain;
+    in.cbData = (DWORD)strlen(plain) + 1;
+    out.pbData = NULL;
+    out.cbData = 0;
+    if (!p_CryptProtectData(&in, L"PuTTY-cn 会话密码", NULL, NULL, NULL,
+                            CRYPTPROTECT_UI_FORBIDDEN, &out))
+        return dupstr("");
+
+    b64 = base64_encode_sb(make_ptrlen(out.pbData, out.cbData), 0);
+    ret = dupprintf("%s%s", cn_pw_prefix, b64->s);
+    strbuf_free(b64);
+
+    smemclr(out.pbData, out.cbData);
+    LocalFree(out.pbData);
+    return ret;
+}
+
+/*
+ * 注册表里的密文串 → 明文（UTF-8，caller frees）。认不出来、解不开、
+ * 数据坏了，一律返回空串。
+ */
+static char *cn_unseal_password(const char *stored)
+{
+    DATA_BLOB in, out;
+    unsigned char *bin;
+    size_t len, i, got = 0;
+    char *ret;
+
+    if (!stored || !*stored)
+        return dupstr("");
+    if (strncmp(stored, cn_pw_prefix, CN_PW_PREFIX_LEN) != 0)
+        return dupstr("");          /* 不认识的格式，当没密码 */
+
+    cn_crypt32_init();
+    if (!p_CryptUnprotectData)
+        return dupstr("");
+
+    stored += CN_PW_PREFIX_LEN;
+    len = strlen(stored);
+    if (len == 0 || len % 4 != 0)
+        return dupstr("");
+
+    bin = snewn(len / 4 * 3 + 1, unsigned char);
+    for (i = 0; i < len; i += 4) {
+        int n = base64_decode_atom(stored + i, bin + got);
+        if (n <= 0) {               /* 非法 base64 */
+            sfree(bin);
+            return dupstr("");
+        }
+        got += n;
+    }
+
+    in.pbData = bin;
+    in.cbData = (DWORD)got;
+    out.pbData = NULL;
+    out.cbData = 0;
+    if (!p_CryptUnprotectData(&in, NULL, NULL, NULL, NULL,
+                              CRYPTPROTECT_UI_FORBIDDEN, &out)) {
+        sfree(bin);
+        return dupstr("");
+    }
+    sfree(bin);
+
+    ret = snewn(out.cbData + 1, char);
+    memcpy(ret, out.pbData, out.cbData);
+    ret[out.cbData] = '\0';
+
+    smemclr(out.pbData, out.cbData);
+    LocalFree(out.pbData);
+    return ret;
+}
+
 static const char *const recent_hosts_key = PUTTY_REG_POS "\\RecentHosts";
 #define MAX_RECENT_HOSTS 20
 
@@ -814,83 +971,76 @@ struct recent_conn *get_recent_conns(int *count)
         return NULL;
 
     while (n < MAX_RECENT_HOSTS) {
-        char valname[16], portname[24], username[256], value[1024];
-        char foldername[24], folder[256];
-        char labelname[24], label[256];
-        DWORD size = sizeof(value), type;
-        DWORD portval = 0, portsize = sizeof(portval), porttype;
-        DWORD usersize, foldersize, labelsize;
+        char valname[16];
+        char *host, *username, *folder, *label, *password;
+        DWORD portval;
         int port = 0;
 
+        /*
+         * cn: 值数据一律走 get_reg_sz / get_reg_dword —— 它们是 Reg*W
+         * 加显式 UTF-8 转换，中文会话名不再经过进程代码页。
+         */
         snprintf(valname, sizeof(valname), "%d", n);
-        if (RegQueryValueEx(key, valname, NULL, &type,
-                            (BYTE *)value, &size) != ERROR_SUCCESS ||
-            type != REG_SZ)
+        host = get_reg_sz(key, valname);
+        if (!host)
             break;
-        value[sizeof(value)-1] = '\0';
 
         /*
          * Entries written before ports were tracked have no companion
          * value, so they simply come back with port 0 and the caller
          * leaves the port box alone.
          */
-        snprintf(portname, sizeof(portname), "%d.port", n);
-        if (RegQueryValueEx(key, portname, NULL, &porttype,
-                            (BYTE *)&portval, &portsize) == ERROR_SUCCESS &&
-            porttype == REG_DWORD && portsize == sizeof(portval))
+        snprintf(valname, sizeof(valname), "%d.port", n);
+        if (get_reg_dword(key, valname, &portval))
             port = (int)portval;
 
         /*
          * 用户名与端口同构：旧条目没有 N.user 值，读回来按空串处理，
          * 回填时用户名框保持不动。
          */
-        username[0] = '\0';
-        usersize = sizeof(username);
         snprintf(valname, sizeof(valname), "%d.user", n);
-        if (RegQueryValueEx(key, valname, NULL, &type,
-                            (BYTE *)username, &usersize) == ERROR_SUCCESS &&
-            type == REG_SZ) {
-            username[sizeof(username)-1] = '\0';
-        } else {
-            username[0] = '\0';
-        }
+        username = get_reg_sz(key, valname);
+        if (!username)
+            username = dupstr("");
 
         /*
          * cn: 所属目录。旧条目没有 N.folder，读回来按空串处理 ——
          * 未归类，直接挂在列表根部。
          */
-        folder[0] = '\0';
-        foldersize = sizeof(folder);
-        snprintf(foldername, sizeof(foldername), "%d.folder", n);
-        if (RegQueryValueEx(key, foldername, NULL, &type,
-                            (BYTE *)folder, &foldersize) == ERROR_SUCCESS &&
-            type == REG_SZ) {
-            folder[sizeof(folder)-1] = '\0';
-        } else {
-            folder[0] = '\0';
-        }
+        snprintf(valname, sizeof(valname), "%d.folder", n);
+        folder = get_reg_sz(key, valname);
+        if (!folder)
+            folder = dupstr("");
 
         /*
          * cn: 用户起的显示名。旧条目没有 N.label，读回来按空串处理 ——
          * 显示真实主机名。
          */
-        label[0] = '\0';
-        labelsize = sizeof(label);
-        snprintf(labelname, sizeof(labelname), "%d.label", n);
-        if (RegQueryValueEx(key, labelname, NULL, &type,
-                            (BYTE *)label, &labelsize) == ERROR_SUCCESS &&
-            type == REG_SZ) {
-            label[sizeof(label)-1] = '\0';
-        } else {
-            label[0] = '\0';
+        snprintf(valname, sizeof(valname), "%d.label", n);
+        label = get_reg_sz(key, valname);
+        if (!label)
+            label = dupstr("");
+
+        /*
+         * cn: 登录密码，落盘时是 DPAPI 密文，这里解回明文。旧条目没有
+         * N.password，或者密文解不开（换了用户/机器），都按空串处理 ——
+         * 配置框的密码栏留空，用户重新填一次即可。
+         */
+        snprintf(valname, sizeof(valname), "%d.password", n);
+        {
+            char *sealed = get_reg_sz(key, valname);
+            password = cn_unseal_password(sealed);
+            if (sealed)
+                sfree(sealed);
         }
 
         list = sresize(list, n+1, struct recent_conn);
-        list[n].host = dupstr(value);
+        list[n].host = host;
         list[n].port = port;
-        list[n].username = dupstr(username);
-        list[n].folder = dupstr(folder);
-        list[n].label = dupstr(label);
+        list[n].username = username;
+        list[n].folder = folder;
+        list[n].label = label;
+        list[n].password = password;
         n++;
     }
     RegCloseKey(key);
@@ -908,50 +1058,56 @@ static void put_recent_conns(struct recent_conn *list, int n)
                        KEY_ALL_ACCESS, NULL, &key, NULL) != ERROR_SUCCESS)
         return;
     for (i = 0; i < n; i++) {
-        char valname[16], portname[24], username_key[24], folder_key[24];
-        char label_key[24];
+        char valname[16];
+
+        /* cn: 写入同样走 put_reg_sz / put_reg_dword，按 UTF-8 显式编码。 */
         snprintf(valname, sizeof(valname), "%d", i);
-        RegSetValueEx(key, valname, 0, REG_SZ,
-                      (const BYTE *)list[i].host,
-                      strlen(list[i].host) + 1);
+        put_reg_sz(key, valname, list[i].host);
         if (list[i].port > 0) {
-            DWORD portval = (DWORD)list[i].port;
-            snprintf(portname, sizeof(portname), "%d.port", i);
-            RegSetValueEx(key, portname, 0, REG_DWORD,
-                          (const BYTE *)&portval, sizeof(portval));
+            snprintf(valname, sizeof(valname), "%d.port", i);
+            put_reg_dword(key, valname, (DWORD)list[i].port);
         }
         /* 用户名非空才落盘；空值不写，读回自然按旧条目处理。 */
         if (list[i].username && list[i].username[0]) {
-            snprintf(username_key, sizeof(username_key), "%d.user", i);
-            RegSetValueEx(key, username_key, 0, REG_SZ,
-                          (const BYTE *)list[i].username,
-                          strlen(list[i].username) + 1);
+            snprintf(valname, sizeof(valname), "%d.user", i);
+            put_reg_sz(key, valname, list[i].username);
         }
         /* cn: 同理，未归类的条目不写 N.folder。 */
         if (list[i].folder && list[i].folder[0]) {
-            snprintf(folder_key, sizeof(folder_key), "%d.folder", i);
-            RegSetValueEx(key, folder_key, 0, REG_SZ,
-                          (const BYTE *)list[i].folder,
-                          strlen(list[i].folder) + 1);
+            snprintf(valname, sizeof(valname), "%d.folder", i);
+            put_reg_sz(key, valname, list[i].folder);
         }
         /* cn: 没改过名的条目不写 N.label。 */
         if (list[i].label && list[i].label[0]) {
-            snprintf(label_key, sizeof(label_key), "%d.label", i);
-            RegSetValueEx(key, label_key, 0, REG_SZ,
-                          (const BYTE *)list[i].label,
-                          strlen(list[i].label) + 1);
+            snprintf(valname, sizeof(valname), "%d.label", i);
+            put_reg_sz(key, valname, list[i].label);
+        }
+        /*
+         * cn: 密码经 DPAPI 加密后落盘。空密码不写值 —— 旧条目天然就是
+         * 这个形态。cn_seal_password 拿不到 crypt32 时也返回空串，宁可
+         * 不记密码，也绝不写明文。
+         */
+        if (list[i].password && list[i].password[0]) {
+            char *sealed = cn_seal_password(list[i].password);
+            if (sealed[0]) {
+                snprintf(valname, sizeof(valname), "%d.password", i);
+                put_reg_sz(key, valname, sealed);
+            }
+            sfree(sealed);
         }
     }
     RegCloseKey(key);
 }
 
-void add_recent_conn(const char *host, int port, const char *username)
+void add_recent_conn(const char *host, int port, const char *username,
+                     const char *password)
 {
     int n, i, j;
     struct recent_conn *old, *newlist;
     const char *user = (username ? username : "");
     const char *inherited = "";
     const char *inherited_label = "";
+    const char *inherited_password = "";
 
     if (!host || !*host)
         return;
@@ -965,6 +1121,7 @@ void add_recent_conn(const char *host, int port, const char *username)
             !strcmp(old[i].username, user)) {
             inherited = old[i].folder;
             inherited_label = old[i].label;
+            inherited_password = old[i].password;
             break;
         }
     newlist = snewn(n+1, struct recent_conn);
@@ -974,6 +1131,12 @@ void add_recent_conn(const char *host, int port, const char *username)
     newlist[j].username = dupstr(user);
     newlist[j].folder = dupstr(inherited);
     newlist[j].label = dupstr(inherited_label);
+    /*
+     * cn: password 为 NULL 表示调用方不知道这次用的什么密码（比如从
+     * 命令行启动），沿用条目里原有的；非 NULL 一律以它为准 —— 空串
+     * 就是用户把密码框清空了，得真的清掉，不能把旧密码又捞回来。
+     */
+    newlist[j].password = dupstr(password ? password : inherited_password);
     j++;
     for (i = 0; i < n && j < MAX_RECENT_HOSTS; i++) {
         /* Same host on a different port is a separate entry: the two
@@ -986,6 +1149,7 @@ void add_recent_conn(const char *host, int port, const char *username)
         newlist[j].username = dupstr(old[i].username);
         newlist[j].folder = dupstr(old[i].folder);
         newlist[j].label = dupstr(old[i].label);
+        newlist[j].password = dupstr(old[i].password);
         j++;
     }
     put_recent_conns(newlist, j);
@@ -1010,6 +1174,7 @@ void del_recent_conn(const char *host, int port, const char *username)
         newlist[j].username = dupstr(old[i].username);
         newlist[j].folder = dupstr(old[i].folder);
         newlist[j].label = dupstr(old[i].label);
+        newlist[j].password = dupstr(old[i].password);
         j++;
     }
     put_recent_conns(newlist, j);
@@ -1025,6 +1190,14 @@ void free_recent_conns(struct recent_conn *list, int count)
         sfree(list[i].username);
         sfree(list[i].folder);
         sfree(list[i].label);
+        /*
+         * cn: 密码是明文，释放前先抹掉再交还堆，省得它留在刚释放的
+         * 内存里等着被别的东西读走。
+         */
+        if (list[i].password) {
+            smemclr(list[i].password, strlen(list[i].password));
+            sfree(list[i].password);
+        }
     }
     sfree(list);
 }
@@ -1086,19 +1259,20 @@ char **get_recent_folders(int *count)
         return NULL;
 
     while (n < MAX_RECENT_FOLDERS) {
-        char valname[16], value[MAX_FOLDER_NAME * 4];
-        DWORD size = sizeof(value), type;
+        char valname[16];
+        char *value;
 
+        /* cn: 目录名多半是中文，同样走 Reg*W + 显式 UTF-8 转换。 */
         snprintf(valname, sizeof(valname), "%d", n);
-        if (RegQueryValueEx(key, valname, NULL, &type,
-                            (BYTE *)value, &size) != ERROR_SUCCESS ||
-            type != REG_SZ)
+        value = get_reg_sz(key, valname);
+        if (!value)
             break;
-        value[sizeof(value) - 1] = '\0';
-        if (!value[0])
+        if (!value[0]) {
+            sfree(value);
             break;
+        }
         list = sresize(list, n + 1, char *);
-        list[n] = dupstr(value);
+        list[n] = value;
         n++;
     }
     RegCloseKey(key);
@@ -1128,8 +1302,7 @@ static void put_recent_folders(char **list, int n)
     for (i = 0; i < n; i++) {
         char valname[16];
         snprintf(valname, sizeof(valname), "%d", i);
-        RegSetValueEx(key, valname, 0, REG_SZ,
-                      (const BYTE *)list[i], strlen(list[i]) + 1);
+        put_reg_sz(key, valname, list[i]);
     }
     RegCloseKey(key);
 }

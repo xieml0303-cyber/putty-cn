@@ -201,7 +201,7 @@ static SftpWin *the_sftpwin = NULL;
 
 static void cn_set_text(HWND hwnd, const char *text)
 {
-    wchar_t *w = dup_mb_to_wc(DEFAULT_CODEPAGE, text ? text : "");
+    wchar_t *w = dup_mb_to_wc(CP_UTF8, text ? text : "");
     SetWindowTextW(hwnd, w);
     sfree(w);
 }
@@ -211,8 +211,8 @@ static int cn_selftest_modal_count = 0;
 
 static int cn_ask(HWND parent, const char *text, const char *title, UINT flags)
 {
-    wchar_t *wt = dup_mb_to_wc(DEFAULT_CODEPAGE, text ? text : "");
-    wchar_t *wtitle = dup_mb_to_wc(DEFAULT_CODEPAGE, title ? title : "文件传输");
+    wchar_t *wt = dup_mb_to_wc(CP_UTF8, text ? text : "");
+    wchar_t *wtitle = dup_mb_to_wc(CP_UTF8, title ? title : "文件传输");
 
     /* 只统计 sftpwin.c 自己的弹框；上层（配置框/终端）弹的不算。 */
     cn_selftest_modal_count++;
@@ -368,7 +368,7 @@ static bool cn_input_box(HWND parent, const char *title, const char *prompt,
     }
 
     {
-        wchar_t *wtitle = dup_mb_to_wc(DEFAULT_CODEPAGE, title);
+        wchar_t *wtitle = dup_mb_to_wc(CP_UTF8, title);
         hwnd = CreateWindowExW(WS_EX_DLGMODALFRAME, classname, wtitle,
                                WS_POPUP | WS_CAPTION | WS_SYSMENU,
                                x, y, w, h, parent, NULL, inst, NULL);
@@ -381,7 +381,7 @@ static bool cn_input_box(HWND parent, const char *title, const char *prompt,
     ib.dlg = hwnd;
 
     {
-        wchar_t *wprompt = dup_mb_to_wc(DEFAULT_CODEPAGE, prompt);
+        wchar_t *wprompt = dup_mb_to_wc(CP_UTF8, prompt);
         HWND label = CreateWindowExW(0, L"STATIC", wprompt,
                                       WS_CHILD | WS_VISIBLE,
                                       16, 16, w - 48, 20, hwnd, NULL,
@@ -1136,11 +1136,9 @@ static int cn_sort_cmp(const void *pa, const void *pb)
         else r = 0;
         break;
       default: {                       /* 名称 */
-        wchar_t *wa = dup_mb_to_wc(cn_sort_ctx.remote ? CP_UTF8
-                                                  : DEFAULT_CODEPAGE,
+        wchar_t *wa = dup_mb_to_wc(CP_UTF8,
                                    a->name);
-        wchar_t *wb = dup_mb_to_wc(cn_sort_ctx.remote ? CP_UTF8
-                                                  : DEFAULT_CODEPAGE,
+        wchar_t *wb = dup_mb_to_wc(CP_UTF8,
                                    b->name);
         r = StrCmpLogicalW(wa, wb);
         sfree(wa);
@@ -1155,11 +1153,9 @@ static int cn_sort_cmp(const void *pa, const void *pb)
      * 「自己抖动」，看着像 bug。
      */
     if (r == 0 && cn_sort_ctx.col != 0) {
-        wchar_t *wa = dup_mb_to_wc(cn_sort_ctx.remote ? CP_UTF8
-                                                  : DEFAULT_CODEPAGE,
+        wchar_t *wa = dup_mb_to_wc(CP_UTF8,
                                    a->name);
-        wchar_t *wb = dup_mb_to_wc(cn_sort_ctx.remote ? CP_UTF8
-                                                  : DEFAULT_CODEPAGE,
+        wchar_t *wb = dup_mb_to_wc(CP_UTF8,
                                    b->name);
         r = StrCmpLogicalW(wa, wb);
         sfree(wa);
@@ -1281,16 +1277,16 @@ static void cn_fill_list(SftpWin *sw, HWND list, SftpEntry *entries,
                 continue;
 
             /*
-             * 本地文件名来自 Win32 宽字符 API，转成多字节时用的是系统
-             * 代码页（CP_ACP），所以这里照原路解回来。
+             * 本地文件名来自 Win32 宽字符 API，转成多字节时统一用
+             * UTF-8（与 sftp_local_list、filename_* 的约定一致）。
              *
-             * 远端文件名不一样：SFTP 协议里的路径是没有声明编码的原始
-             * 字节串，主流服务端（OpenSSH 等）按 UTF-8 存。用 CP_ACP
-             * 解它，在中文系统上等于拿 GBK 去啃 UTF-8 字节 —— 这类非法
-             * 序列会被 MultiByteToWideChar 替换成 U+FFFD，中文名全成
-             * 方块或问号。必须按 UTF-8 解。
+             * 远端文件名同样是 UTF-8：SFTP 协议里的路径是没有声明编码
+             * 的原始字节串，主流服务端（OpenSSH 等）按 UTF-8 存。若按
+             * 系统代码页解，中文系统上等于拿 GBK 去啃 UTF-8 字节 —— 这类
+             * 非法序列会被 MultiByteToWideChar 替换成 U+FFFD，中文名全
+             * 成方块或问号。两侧统一按 UTF-8 解。
              */
-            wchar_t *wname = dup_mb_to_wc(remote ? CP_UTF8 : DEFAULT_CODEPAGE,
+            wchar_t *wname = dup_mb_to_wc(CP_UTF8,
                                           entries[i].name);
             wchar_t szbuf[32], tbuf[64];
             if (entries[i].is_dir)
@@ -1329,7 +1325,7 @@ static char *cn_selected_name(HWND list, bool *is_dir, bool remote)
     cn_list_get_text(list, idx, 0, buf, lenof(buf));
     if (is_dir)
         *is_dir = cn_list_item_is_dir(list, idx);
-    return dup_wc_to_mb(remote ? CP_UTF8 : DEFAULT_CODEPAGE, buf, "?");
+    return dup_wc_to_mb(CP_UTF8, buf, "?");
 }
 
 /* 选中项全部名字，用于多选传输。 */
@@ -1350,7 +1346,7 @@ static char **cn_selected_all(HWND list, size_t *count, bool **dirs,
             sgrowarray(names, size, n);
         if (n >= dsize)
             sgrowarray(d, dsize, n);
-        names[n] = dup_wc_to_mb(remote ? CP_UTF8 : DEFAULT_CODEPAGE, buf, "?");
+        names[n] = dup_wc_to_mb(CP_UTF8, buf, "?");
         d[n] = cn_list_item_is_dir(list, idx);
         n++;
     }
@@ -1498,9 +1494,32 @@ static bool cn_progress(void *ctx, uint64_t done, uint64_t total)
  * 取本地路径的属性（宽字符转换 + 调 API + 释放，三处共用）。
  * 失败返回 INVALID_FILE_ATTRIBUTES。
  */
+/*
+ * 本地文件打开 / 删除的统一入口。
+ *
+ * 进程内所有本地路径一律是 UTF-8（见 sftp.c 的 open_*_file），
+ * 所以这里必须先转宽字符再调 _wfopen / _wremove。直接用 A 版的话，
+ * 中文用户名、中文目录会被按进程代码页解释，换个系统就坏。
+ */
+static FILE *cn_fopen(const char *path, const wchar_t *mode)
+{
+    wchar_t *w = dup_mb_to_wc(CP_UTF8, path);
+    FILE *fp = _wfopen(w, mode);
+    sfree(w);
+    return fp;
+}
+
+static int cn_wremove(const char *path)
+{
+    wchar_t *w = dup_mb_to_wc(CP_UTF8, path);
+    int r = _wremove(w);
+    sfree(w);
+    return r;
+}
+
 static DWORD cn_local_attr(const char *path)
 {
-    wchar_t *w = dup_mb_to_wc(DEFAULT_CODEPAGE, path);
+    wchar_t *w = dup_mb_to_wc(CP_UTF8, path);
     DWORD attr = GetFileAttributesW(w);
     sfree(w);
     return attr;
@@ -1509,7 +1528,7 @@ static DWORD cn_local_attr(const char *path)
 /* 本地路径的文件大小。读不到返回 0。 */
 static uint64_t cn_local_size(const char *path)
 {
-    wchar_t *w = dup_mb_to_wc(DEFAULT_CODEPAGE, path);
+    wchar_t *w = dup_mb_to_wc(CP_UTF8, path);
     WIN32_FILE_ATTRIBUTE_DATA fad;
     uint64_t size = 0;
 
@@ -2090,7 +2109,7 @@ static ConflictItem *cn_collect_conflicts(SftpWin *sw, char **names,
                                           bool to_remote, size_t *outn)
 {
     const char *dst_dir = to_remote ? sw->remotedir : sw->localdir;
-    int enc = to_remote ? DEFAULT_CODEPAGE : CP_UTF8;
+    int enc = CP_UTF8;
     ConflictItem *items = NULL;
     size_t n = 0, size = 0;
 
@@ -2495,7 +2514,7 @@ static int cn_overwrite_ask(HWND parent, ConflictItem *items, size_t n)
     cl->n = n;
     cl->items = n ? snewn(n, CnChange) : NULL;
     for (size_t i = 0; i < n; i++) {
-        cl->items[i].name = dup_wc_to_mb(DEFAULT_CODEPAGE, items[i].name,
+        cl->items[i].name = dup_wc_to_mb(CP_UTF8, items[i].name,
                                         "?");
         cl->items[i].oldval = dupstr("");
         cl->items[i].newval = dupstr("");
@@ -2754,8 +2773,8 @@ static int cn_layout_change_row(HDC hdc, const CnChange *ch, int avail,
     memset(out, 0, sizeof(*out));
     out->first_text_x = 0;
 
-    wnew = dup_mb_to_wc(DEFAULT_CODEPAGE, ch->newval);
-    wold = dup_mb_to_wc(DEFAULT_CODEPAGE, ch->oldval);
+    wnew = dup_mb_to_wc(CP_UTF8, ch->newval);
+    wold = dup_mb_to_wc(CP_UTF8, ch->oldval);
     nlen = (int)wcslen(wnew);
     olen = (int)wcslen(wold);
 
@@ -2779,7 +2798,7 @@ static int cn_layout_change_row(HDC hdc, const CnChange *ch, int avail,
             put_fmt(sb, "%s：", ch->name);
         else
             put_fmt(sb, "%s", ch->name);
-        wseg = dup_mb_to_wc(DEFAULT_CODEPAGE, sb->s);
+        wseg = dup_mb_to_wc(CP_UTF8, sb->s);
         strbuf_free(sb);
     }
     seglen = (int)wcslen(wseg);
@@ -3022,12 +3041,12 @@ static int cn_draw_change_row(HDC hdc, const CnChange *ch, int x, int y,
             put_fmt(sb, "%s：", ch->name);
         else
             put_fmt(sb, "%s", ch->name);
-        segs[0] = dup_mb_to_wc(DEFAULT_CODEPAGE, sb->s);
+        segs[0] = dup_mb_to_wc(CP_UTF8, sb->s);
         strbuf_free(sb);
     }
     /* 段 1 = 旧值 + 箭头，但两者颜色不同，绘制时再拆成两小段。 */
-    segs[1] = dup_mb_to_wc(DEFAULT_CODEPAGE, ch->oldval);
-    segs[2] = dup_mb_to_wc(DEFAULT_CODEPAGE, ch->newval);
+    segs[1] = dup_mb_to_wc(CP_UTF8, ch->oldval);
+    segs[2] = dup_mb_to_wc(CP_UTF8, ch->newval);
 
     /*
      * 段 0：选项名（灰）。可能段内折行。
@@ -3161,7 +3180,6 @@ static void cn_confirm_save_dump_bmp(HWND hwnd, ConfirmSaveBox *cb,
     int w, h, rowsz;
     unsigned char *bits = NULL;
     FILE *fp;
-    wchar_t *wpath;
 
     if (!path || !*path)
         return;
@@ -3252,9 +3270,7 @@ static void cn_confirm_save_dump_bmp(HWND hwnd, ConfirmSaveBox *cb,
     rowsz = ((w * 3 + 3) / 4) * 4;
     bits = snewn(rowsz * h, unsigned char);
     if (GetDIBits(memdc, bmp, 0, h, bits, &bi, DIB_RGB_COLORS)) {
-        wpath = dup_mb_to_wc(CP_UTF8, path);
-        fp = _wfopen(wpath, L"wb");
-        sfree(wpath);
+        fp = cn_fopen(path, L"wb");
         if (fp) {
             BITMAPFILEHEADER fh;
             memset(&fh, 0, sizeof(fh));
@@ -3510,9 +3526,11 @@ static LRESULT CALLBACK cn_confirm_save_proc(HWND hwnd, UINT msg,
       }
       case WM_APP + 77: {
         /* cn: 截图模式的延迟抓图点（见 WM_PAINT 里的说明）。 */
-        const char *shot = getenv("CN_CONFIRM_SAVE_SHOT");
+        const wchar_t *wshot = _wgetenv(L"CN_CONFIRM_SAVE_SHOT");
+        char *shot = wshot ? dup_wc_to_mb(CP_UTF8, wshot, "") : NULL;
         if (shot) {
             cn_confirm_save_dump_bmp(hwnd, cb, shot);
+            sfree(shot);
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
         }
         return 0;
@@ -3726,7 +3744,7 @@ static char *cn_wrap_at_bracket(const char *listtxt, int maxw,
             l--;
         if (l > 0) {
             int fullw = 0;
-            wchar_t *wall = dup_mb_to_wc_c(DEFAULT_CODEPAGE, p, l, NULL);
+            wchar_t *wall = dup_mb_to_wc_c(CP_UTF8, p, l, NULL);
             if (wall) {
                 SIZE s;
                 GetTextExtentPoint32W(hdc, wall, (int)wcslen(wall), &s);
@@ -4141,7 +4159,7 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
         HFONT old = SelectObject(hdc, font);
         {
             const char *head = CN_HEAD_TEXT;
-            wchar_t *wh = dup_mb_to_wc(DEFAULT_CODEPAGE, head);
+            wchar_t *wh = dup_mb_to_wc(CP_UTF8, head);
             SIZE sh;
             GetTextExtentPoint32W(hdc, wh, (int)wcslen(wh), &sh);
             needw_head = sh.cx;
@@ -4158,7 +4176,7 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
                     blen--;
                 if (blen > 0) {
                     size_t wlen = 0;
-                    wchar_t *wl = dup_mb_to_wc_c(DEFAULT_CODEPAGE, p, blen,
+                    wchar_t *wl = dup_mb_to_wc_c(CP_UTF8, p, blen,
                                                  &wlen);
                     if (wl && wlen > 0) {
                         SIZE s2;
@@ -4234,7 +4252,7 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
             if (hdc) {
                 HFONT old = SelectObject(hdc, font);
                 for (int i = 0; i < bw_n; i++) {
-                    wchar_t *cw_i = dup_mb_to_wc(DEFAULT_CODEPAGE, caps[i]);
+                    wchar_t *cw_i = dup_mb_to_wc(CP_UTF8, caps[i]);
                     SIZE s2;
                     GetTextExtentPoint32W(hdc, cw_i, (int)wcslen(cw_i), &s2);
                     bw[i] = s2.cx + cn_dpi(24);
@@ -4305,7 +4323,7 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
                         bl--;
                     if (bl > 0) {
                         size_t wl2 = 0;
-                        wchar_t *w2 = dup_mb_to_wc_c(DEFAULT_CODEPAGE, q, bl,
+                        wchar_t *w2 = dup_mb_to_wc_c(CP_UTF8, q, bl,
                                                      &wl2);
                         if (w2 && wl2 > 0) {
                             SIZE s4;
@@ -4354,7 +4372,7 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
         hdc = GetDC(NULL);
         if (hdc) {
             HFONT old = SelectObject(hdc, font);
-            wchar_t *wmeas = dup_mb_to_wc(DEFAULT_CODEPAGE, listtxt);
+            wchar_t *wmeas = dup_mb_to_wc(CP_UTF8, listtxt);
             RECT rc;
             rc.left = 0;
             rc.top = 0;
@@ -4584,7 +4602,7 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
     /* cn: 固定居中于屏幕（主人指定），不再跟随鼠标。 */
     cn_place_center(w, h, &x, &y);
 
-    wtitle = dup_mb_to_wc(DEFAULT_CODEPAGE, txt_title);
+    wtitle = dup_mb_to_wc(CP_UTF8, txt_title);
     cb->dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, classname, wtitle,
                              WS_POPUP | WS_CAPTION | WS_SYSMENU,
                              x, y, w, h, parent, NULL, inst, cb);
@@ -4628,7 +4646,7 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
     /* 首行说明：客户区顶部、卡片之上，顶格。 */
     {
         const char *head = txt_head;
-        wchar_t *whead = dup_mb_to_wc(DEFAULT_CODEPAGE, head);
+        wchar_t *whead = dup_mb_to_wc(CP_UTF8, head);
         cb->head = CreateWindowExW(0, L"STATIC", whead,
                                   WS_CHILD | WS_VISIBLE | SS_LEFTNOWORDWRAP,
                                   m, m, cw - 2 * m, lh,
@@ -4644,7 +4662,7 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
      * 也方便将来做无障碍）。给它 SS_LEFT 保证折行测量口径一致。
      */
     {
-        wlist = dup_mb_to_wc(DEFAULT_CODEPAGE, listtxt);
+        wlist = dup_mb_to_wc(CP_UTF8, listtxt);
         cb->list = CreateWindowExW(0, L"STATIC", wlist,
                                   WS_CHILD | SS_LEFT,
                                   m, cb->card_top, cw - 2 * m, list_h,
@@ -4674,10 +4692,10 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
                     put_fmt(sb, "\r\n");
                 put_fmt(sb, "%s", structured->items[i].name);
             }
-            cb->tip.text = dup_mb_to_wc(DEFAULT_CODEPAGE, sb->s);
+            cb->tip.text = dup_mb_to_wc(CP_UTF8, sb->s);
             strbuf_free(sb);
         } else {
-            cb->tip.text = dup_mb_to_wc(DEFAULT_CODEPAGE,
+            cb->tip.text = dup_mb_to_wc(CP_UTF8,
                                        changes ? changes : "");
         }
         cb->tip.parent = cb->dlg;
@@ -4780,7 +4798,7 @@ static bool cn_confirm_save_build(HWND parent, const char *changes,
         caps[1] = txt_cancel;
         caps[2] = txt_third;
         for (int i = 0; i < bw_n; i++)
-            capw[i] = dup_mb_to_wc(DEFAULT_CODEPAGE, caps[i]);
+            capw[i] = dup_mb_to_wc(CP_UTF8, caps[i]);
 
         /* 各按钮宽之和（不含间距）。 */
         total = bw[0];
@@ -5671,8 +5689,8 @@ bool sftp_selftest_resume(SftpXfer *sx, const char *localpath,
 
         /* 从源文件读前 short_size 字节写成临时文件。 */
         {
-            FILE *in = fopen(localpath, "rb");
-            FILE *out = fopen(shortpath, "wb");
+            FILE *in = cn_fopen(localpath, L"rb");
+            FILE *out = cn_fopen(shortpath, L"wb");
             if (!in || !out) {
                 if (in) fclose(in);
                 if (out) fclose(out);
@@ -5744,7 +5762,7 @@ bool sftp_selftest_resume(SftpXfer *sx, const char *localpath,
         return false;
     }
 
-    remove(shortpath);
+    cn_wremove(shortpath);
     sfree(shortpath);
 
     /*
@@ -5774,7 +5792,7 @@ bool sftp_selftest_resume(SftpXfer *sx, const char *localpath,
             return false;
         }
         {
-            FILE *out = fopen(altpath, "wb");
+            FILE *out = cn_fopen(altpath, L"wb");
             if (out) {
                 uint64_t left = full;
                 char buf[8192];
@@ -5810,7 +5828,7 @@ bool sftp_selftest_resume(SftpXfer *sx, const char *localpath,
                     *errmsg = dupprintf("同大小覆盖上传失败：%s",
                                         emsg ? emsg : "(未知)");
                 sfree(emsg);
-                remove(altpath);
+                cn_wremove(altpath);
                 sfree(altpath);
                 return false;
             }
@@ -5830,8 +5848,8 @@ bool sftp_selftest_resume(SftpXfer *sx, const char *localpath,
                         *errmsg = dupprintf("回读远端文件失败：%s",
                                             emsg ? emsg : "(未知)");
                     sfree(emsg);
-                    remove(altpath);
-                    remove(backpath);
+                    cn_wremove(altpath);
+                    cn_wremove(backpath);
                     sfree(altpath);
                     sfree(backpath);
                     return false;
@@ -5843,18 +5861,18 @@ bool sftp_selftest_resume(SftpXfer *sx, const char *localpath,
                         *errmsg = dupstr(
                             "同大小覆盖失败：远端内容与源不同，说明"
                             "「大小相同」被误判成「已传完」而跳过了传输");
-                    remove(altpath);
-                    remove(backpath);
+                    cn_wremove(altpath);
+                    cn_wremove(backpath);
                     sfree(altpath);
                     sfree(backpath);
                     return false;
                 }
-                remove(backpath);
+                cn_wremove(backpath);
                 sfree(backpath);
             }
         }
 
-        remove(altpath);
+        cn_wremove(altpath);
         sfree(altpath);
     }
 
@@ -5864,8 +5882,8 @@ bool sftp_selftest_resume(SftpXfer *sx, const char *localpath,
 /* 逐字节比较两个本地文件；任一侧打不开都算不同。 */
 static bool cn_selftest_files_equal(const char *a, const char *b)
 {
-    FILE *fa = fopen(a, "rb");
-    FILE *fb = fopen(b, "rb");
+    FILE *fa = cn_fopen(a, L"rb");
+    FILE *fb = cn_fopen(b, L"rb");
     bool same = true;
 
     if (!fa || !fb) {
@@ -5894,7 +5912,7 @@ static bool cn_selftest_files_equal(const char *a, const char *b)
 void sftp_selftest_resume_run(Conf *conf, const char *localpath,
                               const char *remotepath)
 {
-    FILE *fp = fopen("sftp-resume.txt", "w");
+    FILE *fp = cn_fopen("sftp-resume.txt", L"w");
     SftpXfer *sx = NULL;
     char *errmsg = NULL;
 
@@ -5952,7 +5970,7 @@ void sftp_selftest_resume_run(Conf *conf, const char *localpath,
  */
 void sftp_selftest_recurse_run(Conf *conf, const char *src, const char *dst)
 {
-    FILE *fp = fopen("sftp-recurse.txt", "w");
+    FILE *fp = cn_fopen("sftp-recurse.txt", L"w");
     SftpXfer *sx = NULL;
     char *errmsg = NULL;
 
@@ -6027,7 +6045,7 @@ static void cn_do_mkdir(SftpWin *sw, bool remote)
             return;
 
         /* 远端新建目录名要按 UTF-8 送出，否则服务器上会多出一个乱码目录。 */
-        char *name = dup_wc_to_mb(remote ? CP_UTF8 : DEFAULT_CODEPAGE,
+        char *name = dup_wc_to_mb(CP_UTF8,
                                   buf, "?");
         char *dir = remote ? sw->remotedir : sw->localdir;
         char *path = cn_path_join(dir, name, remote);
@@ -6071,7 +6089,7 @@ static void cn_do_delete(SftpWin *sw, bool remote)
 
     {
         char *msg = dupprintf("确定删除选中的 %zu 项？此操作无法撤销。", count);
-        wchar_t *wt = dup_mb_to_wc(DEFAULT_CODEPAGE, msg);
+        wchar_t *wt = dup_mb_to_wc(CP_UTF8, msg);
         int r = MessageBoxW(sw->hwnd, wt, L"确认删除",
                             MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2);
         sfree(wt);
@@ -6131,7 +6149,7 @@ static void cn_do_rename(SftpWin *sw, bool remote)
 {
     bool is_dir = false;
     /* 远端名字走 UTF-8，本地名字走系统代码页，两边对称。 */
-    UINT cp = remote ? CP_UTF8 : DEFAULT_CODEPAGE;
+    UINT cp = CP_UTF8;
     char *oldname = cn_selected_name(remote ? sw->remote_list
                                             : sw->local_list, &is_dir, remote);
     char *errmsg = NULL;
@@ -6198,7 +6216,7 @@ static void cn_enter_dir(SftpWin *sw, bool remote, int idx)
 
     {
         /* 远端目录名回传 SFTP 必须是 UTF-8，否则中文目录点进去会 404。 */
-        char *name = dup_wc_to_mb(remote ? CP_UTF8 : DEFAULT_CODEPAGE,
+        char *name = dup_wc_to_mb(CP_UTF8,
                                   buf, "?");
         char *dir = remote ? sw->remotedir : sw->localdir;
         char *path;
@@ -6751,11 +6769,17 @@ static void cn_glog(const char *fmt, ...)
     va_list ap;
 
     if (!cn_glog_tried) {
-        const char *path = getenv("CN_GESTURE_LOG");
+        /*
+         * 环境变量走的是 CRT 的 ANSI 环境块，值按进程代码页编码，
+         * 中文路径到这儿就已经损坏了，所以取宽字符版本再转 UTF-8。
+         */
+        const wchar_t *wpath = _wgetenv(L"CN_GESTURE_LOG");
+        char *path = wpath ? dup_wc_to_mb(CP_UTF8, wpath, "") : NULL;
 
         cn_glog_tried = true;
         if (path && *path)
-            cn_glog_fp = fopen(path, "a");
+            cn_glog_fp = cn_fopen(path, L"a");
+        sfree(path);
     }
     if (!cn_glog_fp)
         return;
@@ -7374,7 +7398,7 @@ static HMENU cn_build_list_menu(SftpWin *sw, bool remote)
     /* 末尾一行灰字标明作用对象，省得用户点了才发现动错面板。 */
     hint = dupprintf("作用于%s面板", remote ? "远端" : "本地");
     {
-        wchar_t *whint = dup_mb_to_wc(DEFAULT_CODEPAGE, hint);
+        wchar_t *whint = dup_mb_to_wc(CP_UTF8, hint);
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, whint);
         sfree(whint);
     }
@@ -8484,8 +8508,8 @@ static LRESULT CALLBACK cn_wndproc(HWND hwnd, UINT msg, WPARAM wparam,
             break;
           case IDC_BTN_DESKTOP: {
             /*
-             * cn: 跳到当前用户的桌面目录。本地路径串是 CP_ACP 编码
-             * （sftp_local_list / sftp_local_fopen 都按 ACP 转宽字符），
+             * cn: 跳到当前用户的桌面目录。本地路径串统一为 UTF-8 编码
+             * （sftp_local_list / sftp_local_fopen 都按 UTF-8 转宽字符），
              * 这里转码必须同码页，中文用户名才不会乱码。
              */
             PWSTR wdesktop = NULL;
@@ -8493,7 +8517,7 @@ static LRESULT CALLBACK cn_wndproc(HWND hwnd, UINT msg, WPARAM wparam,
             if (FAILED(SHGetKnownFolderPath(&FOLDERID_Desktop, 0, NULL,
                                             &wdesktop)))
                 break;
-            desktop = dup_wc_to_mb(CP_ACP, wdesktop, "?");
+            desktop = dup_wc_to_mb(CP_UTF8, wdesktop, "?");
             CoTaskMemFree(wdesktop);
             if (sw->localdir && strcmp(sw->localdir, desktop) == 0) {
                 sfree(desktop);
@@ -8574,7 +8598,7 @@ static LRESULT CALLBACK cn_wndproc(HWND hwnd, UINT msg, WPARAM wparam,
             /* 本地源路径与界面同码页存，sftp_xfer_upload 内部用同
              * 一码页还原成宽字符打开；远端名是 UTF-8，纯文件名
              * 单独转一份。 */
-            srcs[kept] = dup_wc_to_mb(DEFAULT_CODEPAGE, wpath, "?");
+            srcs[kept] = dup_wc_to_mb(CP_UTF8, wpath, "?");
             base = wcsrchr(wpath, L'\\');
             if (!base)
                 base = wcsrchr(wpath, L'/');
@@ -9259,7 +9283,7 @@ void sftp_window_detached(Conf *conf)
          * 的 GUI 线程）。把错误文案落到日志，调用方随即 cleanup_exit。
          */
         char *outpath = sftp_selftest_outpath("sftp-open-fail.txt");
-        FILE *fp = fopen(outpath, "w");
+        FILE *fp = cn_fopen(outpath, L"w");
         sfree(outpath);
         if (fp) {
             fprintf(fp, "打开传输窗口失败：%s\n", err);
@@ -9382,7 +9406,7 @@ static BOOL CALLBACK cn_fail_enum_windows(HWND hwnd, LPARAM lp)
 void sftp_selftest_open_fail(Conf *conf)
 {
     char *outpath = sftp_selftest_outpath("sftp-open-fail-selftest.txt");
-    FILE *fp = fopen(outpath, "w");
+    FILE *fp = cn_fopen(outpath, L"w");
     sfree(outpath);
     int pass = 0, fail = 0;
     char *err;
@@ -9428,7 +9452,7 @@ void sftp_selftest_open_fail(Conf *conf)
 void sftp_selftest_window(Conf *conf)
 {
     char *outpath = sftp_selftest_outpath("sftp-window-selftest.txt");
-    FILE *fp = fopen(outpath, "w");
+    FILE *fp = cn_fopen(outpath, L"w");
     sfree(outpath);
     RECT client;
     int pass = 0, fail = 0;
@@ -10037,7 +10061,7 @@ void sftp_selftest_window(Conf *conf)
                     wchar_t wbuf[128];
                     wbuf[0] = L'\0';
                     GetMenuStringW(menu, 6, wbuf, lenof(wbuf), MF_BYPOSITION);
-                    d = dup_wc_to_mb(DEFAULT_CODEPAGE, wbuf, "?");
+                    d = dup_wc_to_mb(CP_UTF8, wbuf, "?");
                     sw_report(fp, "  [%s] 作用对象提示 = %s\n", tag, d);
                     {
                         char *want = dupprintf("作用于%s面板", tag);
@@ -10843,7 +10867,7 @@ void sftp_selftest_window(Conf *conf)
 
         /* 与 cn_confirm_batch 完全一致的一组参数：五项冲突。 */
         for (size_t i = 0; i < 5; i++) {
-            cl_items[i].name = dup_wc_to_mb(DEFAULT_CODEPAGE, five[i], "?");
+            cl_items[i].name = dup_wc_to_mb(CP_UTF8, five[i], "?");
             cl_items[i].oldval = dupstr("");
             cl_items[i].newval = dupstr("");
             cl_items[i].kind = CN_CHG_OTHER;
@@ -11018,7 +11042,7 @@ void sftp_selftest_window(Conf *conf)
             sfree(cl_items[i].newval);
         }
         for (size_t i = 0; i < 2; i++) {
-            cl_items[i].name = dup_wc_to_mb(DEFAULT_CODEPAGE, two[i], "?");
+            cl_items[i].name = dup_wc_to_mb(CP_UTF8, two[i], "?");
             cl_items[i].oldval = dupstr("");
             cl_items[i].newval = dupstr("");
             cl_items[i].kind = CN_CHG_OTHER;
@@ -11233,7 +11257,7 @@ void sftp_selftest_window(Conf *conf)
 void sftp_selftest_confirm_save(void)
 {
     char *outpath = sftp_selftest_outpath("confirm-save-selftest.txt");
-    FILE *fp = fopen(outpath, "w");
+    FILE *fp = cn_fopen(outpath, L"w");
     sfree(outpath);
     int pass = 0, fail = 0;
     /* 五行改动：确保被折叠（上限三行），浮层才会挂上。 */
@@ -11679,7 +11703,7 @@ void sftp_selftest_confirm_save(void)
 void sftp_selftest_confirm_quit(void)
 {
     char *outpath = sftp_selftest_outpath("confirm-quit-selftest.txt");
-    FILE *fp = fopen(outpath, "w");
+    FILE *fp = cn_fopen(outpath, L"w");
     sfree(outpath);
     int pass = 0, fail = 0;
 
@@ -11870,7 +11894,7 @@ void sftp_selftest_confirm_quit(void)
 void sftp_selftest_confirm_launch(void)
 {
     char *outpath = sftp_selftest_outpath("confirm-launch-selftest.txt");
-    FILE *fp = fopen(outpath, "w");
+    FILE *fp = cn_fopen(outpath, L"w");
     sfree(outpath);
     int pass = 0, fail = 0;
     const char *changes =
@@ -11941,7 +11965,7 @@ void sftp_selftest_confirm_launch(void)
             GetWindowTextW(cb.head, buf, 128);
             {
                 /* cn: 文案统一取宏，改文案不必再改断言。 */
-                wchar_t *whead = dup_mb_to_wc(DEFAULT_CODEPAGE, CN_HEAD_TEXT);
+                wchar_t *whead = dup_mb_to_wc(CP_UTF8, CN_HEAD_TEXT);
                 SW_CHECK(wcscmp(buf, whead) == 0, "首行文案与 CN_HEAD_TEXT 一致");
                 sfree(whead);
             }

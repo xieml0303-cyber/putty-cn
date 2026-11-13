@@ -387,21 +387,31 @@ static IShellLink *make_shell_link(const char *appname,
     PROPVARIANT pv;
 
     /* Retrieve path to executable. */
-    if (!putty_path[0])
-        GetModuleFileName(NULL, putty_path, sizeof(putty_path) - 1);
+    if (!putty_path[0]) {
+        wchar_t wpath[2048];
+        char *tmp;
+        GetModuleFileNameW(NULL, wpath, lenof(wpath) - 1);
+        tmp = dup_wc_to_mb(CP_UTF8, wpath, "?");
+        strncpy(putty_path, tmp, sizeof(putty_path) - 1);
+        putty_path[sizeof(putty_path) - 1] = '\0';
+        sfree(tmp);
+    }
     if (appname) {
         char *p, *q = putty_path;
-        FILE *fp;
 
         if ((p = strrchr(q, '\\')) != NULL) q = p+1;
         if ((p = strrchr(q, ':')) != NULL) q = p+1;
         app_path = dupprintf("%.*s%s", (int)(q - putty_path), putty_path,
                              appname);
-        if ((fp = fopen(app_path, "r")) == NULL) {
-            sfree(app_path);
-            return NULL;
+        {
+            wchar_t *wapp = dup_mb_to_wc(CP_UTF8, app_path);
+            bool exists = GetFileAttributesW(wapp) != INVALID_FILE_ATTRIBUTES;
+            sfree(wapp);
+            if (!exists) {
+                sfree(app_path);
+                return NULL;
+            }
         }
-        fclose(fp);
     } else {
         app_path = dupstr(putty_path);
     }

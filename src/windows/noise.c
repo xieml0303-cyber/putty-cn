@@ -4,6 +4,7 @@
  */
 
 #include <stdio.h>
+#include <wchar.h>
 
 #include "putty.h"
 #include "ssh.h"
@@ -49,18 +50,18 @@ bool win_read_random(void *buf, unsigned wanted)
 void noise_get_heavy(void (*func) (void *, int))
 {
     HANDLE srch;
-    WIN32_FIND_DATA finddata;
+    WIN32_FIND_DATAW finddata;
     DWORD pid;
-    char winpath[MAX_PATH + 3];
+    wchar_t winpath[MAX_PATH + 3];
     BYTE buf[32];
 
-    GetWindowsDirectory(winpath, sizeof(winpath));
-    strcat(winpath, "\\*");
-    srch = FindFirstFile(winpath, &finddata);
+    GetWindowsDirectoryW(winpath, lenof(winpath));
+    wcscat(winpath, L"\\*");
+    srch = FindFirstFileW(winpath, &finddata);
     if (srch != INVALID_HANDLE_VALUE) {
         do {
             func(&finddata, sizeof(finddata));
-        } while (FindNextFile(srch, &finddata));
+        } while (FindNextFileW(srch, &finddata));
         FindClose(srch);
     }
 

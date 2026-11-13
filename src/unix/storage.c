@@ -1006,7 +1006,8 @@ struct recent_conn *get_recent_conns(int *count)
     return NULL;
 }
 
-void add_recent_conn(const char *host, int port, const char *username)
+void add_recent_conn(const char *host, int port, const char *username,
+                     const char *password)
 {
 }
 

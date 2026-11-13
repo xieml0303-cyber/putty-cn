@@ -83,6 +83,22 @@ bool cmdline_have_password(void)
     return cmdline_password != NULL;
 }
 
+/*
+ * cn: 把密码明文借出去，给没有 prompt 系统的协议用。
+ *
+ * SSH 的密码提示走 prompts_t，由 cmdline_get_passwd_input 统一应答；
+ * Telnet 是裸字节流，服务器把「login:」「Password:」当普通文本吐出
+ * 来，根本没有 prompts 这一层，所以后端只能自己嗅探、自己发。它需
+ * 要一个读得到密码的入口，就是这里。
+ *
+ * 返回内部缓冲区指针，调用方只读、不得 free，也不得跨调用保存：下一
+ * 次 cmdline_set_password 会把它抹掉并释放。没有密码时返回 NULL。
+ */
+const char *cmdline_get_password(void)
+{
+    return cmdline_password;
+}
+
 void cmdline_cleanup(void)
 {
     int pri;
@@ -638,11 +654,15 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
         SAVEABLE(1);
-        /* We delay evaluating this until after the protocol is decided,
-         * so that we can warn if it's of no use with the selected protocol */
-        if (conf_get_int(conf, CONF_protocol) != PROT_SSH)
+        /*
+         * cn: 上游只认 SSH —— 那时密码只有 SSH 认证用得上。Telnet 现在
+         * 也有自动登录（后端嗅探 login:/Password: 提示，取的就是这个
+         * 槽位），再按老规矩拦着就把 Telnet 的命令行入口堵死了。
+         */
+        if (conf_get_int(conf, CONF_protocol) != PROT_SSH &&
+            conf_get_int(conf, CONF_protocol) != PROT_TELNET)
             cmdline_error("-pw 选项只能用于"
-                          "SSH 协议");
+                          "SSH 或 Telnet 协议");
         else {
             if (cmdline_password) {
                 smemclr(cmdline_password, strlen(cmdline_password));
@@ -659,11 +679,11 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
         SAVEABLE(1);
-        /* We delay evaluating this until after the protocol is decided,
-         * so that we can warn if it's of no use with the selected protocol */
-        if (conf_get_int(conf, CONF_protocol) != PROT_SSH)
+        /* cn: 同上 —— Telnet 自动登录也吃这里的密码。 */
+        if (conf_get_int(conf, CONF_protocol) != PROT_SSH &&
+            conf_get_int(conf, CONF_protocol) != PROT_TELNET)
             cmdline_error("-pwfile 选项只能用于"
-                          "SSH 协议");
+                          "SSH 或 Telnet 协议");
         else {
             Filename *fn = cmdline_arg_to_filename(nextarg);
             FILE *fp = f_open(fn, "r", false);

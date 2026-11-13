@@ -2791,6 +2791,13 @@ int dlg_get_ctrl_left(dlgparam *dp, dlgcontrol *ctrl)
     return -1;
 }
 
+void dlg_editbox_set_plain(dlgparam *dp, dlgcontrol *ctrl, bool plain)
+{
+    (void)dp;
+    (void)ctrl;
+    (void)plain;
+}
+
 bool dlg_navigate_to(dlgparam *dp, const char *pathname)
 {
     (void)dp;

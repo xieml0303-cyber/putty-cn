@@ -12,10 +12,10 @@
 char *get_username(void)
 {
     DWORD namelen;
-    char *user;
+    char *user = NULL;
     bool got_username = false;
-    DECL_WINDOWS_FUNCTION(static, BOOLEAN, GetUserNameExA,
-                          (EXTENDED_NAME_FORMAT, LPSTR, PULONG));
+    DECL_WINDOWS_FUNCTION(static, BOOLEAN, GetUserNameExW,
+                          (EXTENDED_NAME_FORMAT, LPWSTR, PULONG));
 
     {
         static bool tried_usernameex = false;
@@ -28,12 +28,12 @@ char *get_username(void)
                load it properly before */
             HMODULE sspicli = load_system32_dll("sspicli.dll");
             (void)sspicli; /* squash compiler warning about unused variable */
-            GET_WINDOWS_FUNCTION(secur32, GetUserNameExA);
+            GET_WINDOWS_FUNCTION(secur32, GetUserNameExW);
             tried_usernameex = true;
         }
     }
 
-    if (p_GetUserNameExA) {
+    if (p_GetUserNameExW) {
         /*
          * If available, use the principal -- this avoids the problem
          * that the local username is case-insensitive but Kerberos
@@ -41,23 +41,27 @@ char *get_username(void)
          */
 
         /* Get the length */
+        wchar_t *wuser;
         namelen = 0;
-        (void) p_GetUserNameExA(NameUserPrincipal, NULL, &namelen);
+        (void) p_GetUserNameExW(NameUserPrincipal, NULL, &namelen);
 
-        user = snewn(namelen, char);
-        got_username = p_GetUserNameExA(NameUserPrincipal, user, &namelen);
+        wuser = snewn(namelen, wchar_t);
+        got_username = p_GetUserNameExW(NameUserPrincipal, wuser, &namelen);
         if (got_username) {
-            char *p = strchr(user, '@');
-            if (p) *p = 0;
-        } else {
-            sfree(user);
+            wchar_t *p = wuser;
+            while (*p && *p != L'@')
+                p++;
+            *p = L'\0';
+            user = dup_wc_to_mb(CP_UTF8, wuser, "?");
         }
+        sfree(wuser);
     }
 
     if (!got_username) {
         /* Fall back to local user name */
+        wchar_t *wuser;
         namelen = 0;
-        if (!GetUserName(NULL, &namelen)) {
+        if (!GetUserNameW(NULL, &namelen)) {
             /*
              * Apparently this doesn't work at least on Windows XP SP2.
              * Thus assume a maximum of 256. It will fail again if it
@@ -66,11 +70,11 @@ char *get_username(void)
             namelen = 256;
         }
 
-        user = snewn(namelen, char);
-        got_username = GetUserName(user, &namelen);
-        if (!got_username) {
-            sfree(user);
-        }
+        wuser = snewn(namelen, wchar_t);
+        got_username = GetUserNameW(wuser, &namelen);
+        if (got_username)
+            user = dup_wc_to_mb(CP_UTF8, wuser, "?");
+        sfree(wuser);
     }
 
     return got_username ? user : NULL;
