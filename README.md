@@ -207,6 +207,9 @@ powershell -File test-putty.ps1   # 终端 B：运行四项测试
 - 会话页与配置页：`workspace/docs/2026-10-18-会话页历史记录改版.md`、`workspace/docs/2026-10-18-配置窗口标题样式.md`
 - 命令行工具汉化：`workspace/reports/2026-10-18-命令行工具汉化完成报告.md`
 - 风险扫描与整改：`workspace/reports/风险扫描-putty-cn-20261018.md`、`workspace/reports/2026-10-18-M3-M4-M6整改与完整审计.md`
+- 宽字符化改造：`workspace/reports/2026-11-13-ACP936宽字符化改造与回归.md`
+- Telnet 自动登录与密码持久化：`workspace/reports/2026-11-13-Telnet自动登录与密码持久化.md`
+- 0.85-cn8 发布：`workspace/reports/2026-11-13-发布v0.85-cn8到GitHub.md`
 
 ## 许可证
 
